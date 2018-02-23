@@ -2,19 +2,21 @@ import discord
 from discord.ext import commands
 
 import json
+import argparse
 
-import petdj
+from botservice import playmusic, echo
 
-secret_keys = json.load(open('secretkeys.json'))
+parser = argparse.ArgumentParser()
+parser.add_argument('-p', '--prod',
+                    help="Run bot using production secretkey instead of default dev keys.",
+                    action='store_true')
+args = parser.parse_args()
 
-bot = commands.Bot(command_prefix=commands.when_mentioned_or('$'), description='PetBot')
-bot.add_cog(petdj.Music(bot))
+secret_keys = json.load(open('secretkeys.json')) if args.prod else json.load(open('secretkeys_dev.json'))
 
-
-@bot.command()
-async def echo(*, msg: str):
-    await bot.say(msg)
-
+bot = commands.Bot(command_prefix=commands.when_mentioned_or(secret_keys['command']), description='PetBot')
+bot.add_cog(playmusic.Music(bot))
+bot.add_cog(echo.Echo(bot))
 
 @bot.event
 async def on_ready():
