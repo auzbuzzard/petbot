@@ -30,8 +30,6 @@ class SearchQuery:
         comments = "comments"
         random = "random"
 
-
-
     def __init__(self,
                  tags: list,
                  args: dict = {},
@@ -42,18 +40,12 @@ class SearchQuery:
         self.is_desc_order = desc
         self.is_explicit = args['explicit'] if 'explicit' in args else False
 
-        self.filters = {
-            'everything': '56027',
-            'steady': '150237',
-            'default': '100073'
-        }
-
     def params(self):
         params = {
             'q': ",".join(self.tags),
             'sf': self.order.value,
             'sd': 'desc' if self.is_desc_order else 'asc',
-            'filter_id': self.filters['steady'] if self.is_explicit else self.filters['default']
+            'filter_id': '56027' if self.is_explicit else '100073'
         }
 
         return params
@@ -68,11 +60,9 @@ def search(args: dict, tags: list):
     json_dict = json.loads(r.data.decode('utf-8'))
 
     search_result = Result(json_dict)
-    try:
-        image = Result(search_result.search[0])
-        return image, int(search_result.total)
-    except:
-        return None, 0
+    image = Result(search_result.search[0]) if len(search_result.search) > 0 else None
+
+    return image
 
 
 def parse_args(message: str):
@@ -84,6 +74,8 @@ def parse_args(message: str):
         args['explicit'] = True
     if any(i in ['sort_new'] for i in args_list):
         args['order'] = SearchQuery.Order.creation_date
+    if any(i in ['sort_relevance', 'sort_rel'] for i in args_list):
+        args['order'] = SearchQuery.Order.relevance
 
     message = re.sub(pattern, '', message)
 
