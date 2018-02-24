@@ -4,7 +4,7 @@ from discord.ext import commands
 import json
 import argparse
 
-from botservice import playmusic, echo, derpi_image_search
+from botservice import playmusic, echo, imagesearch
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-p', '--prod',
@@ -17,7 +17,7 @@ secret_keys = json.load(open('secretkeys.json')) if args.prod else json.load(ope
 bot = commands.Bot(command_prefix=commands.when_mentioned_or(secret_keys['command']), description='PetBot')
 bot.add_cog(playmusic.Music(bot))
 bot.add_cog(echo.Echo(bot))
-bot.add_cog(derpi_image_search.DerpiImageSearch(bot))
+bot.add_cog(imagesearch.ImageSearch(bot))
 
 @bot.event
 async def on_ready():
