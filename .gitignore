@@ -1,2 +1,3 @@
 secretkeys.json
 secretkeys_dev.json
+*.pyc
