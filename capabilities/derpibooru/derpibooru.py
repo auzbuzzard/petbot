@@ -30,8 +30,6 @@ class SearchQuery:
         comments = "comments"
         random = "random"
 
-
-
     def __init__(self,
                  tags: list,
                  args: dict = {},
@@ -84,6 +82,14 @@ def parse_args(message: str):
         args['explicit'] = True
     if any(i in ['sort_new'] for i in args_list):
         args['order'] = SearchQuery.Order.creation_date
+    if any(i in ['sort_relevance', 'sort_rel'] for i in args_list):
+        args['order'] = SearchQuery.Order.relevance
+    if any(i in ['sort_score'] for i in args_list):
+        args['order'] = SearchQuery.Order.score
+    if any(i in ['sort_wscore'] for i in args_list):
+        args['order'] = SearchQuery.Order.wilson_score
+    if any(i in ['sort_comments'] for i in args_list):
+        args['order'] = SearchQuery.Order.comments
 
     message = re.sub(pattern, '', message)
 

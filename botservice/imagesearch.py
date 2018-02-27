@@ -23,13 +23,13 @@ class ImageSearch:
 
         if image is not None:
             await self.bot.say(
-                "Found image for: {} (from {} results) ".format(tags, count) +
+                "Found image for: {} (from {} results) \n".format(tags, count) +
                 "https:{}".format(image.representations['large'])
             )
         else:
             await self.bot.say("Can't find images for: {}. :<".format(tags))
 
-    @commands.command(name='e621', pass_context=True, no_pm=False)
+    @commands.command(disabled=True, name='e621', pass_context=True, no_pm=False)
     async def search_e621(self, ctx, *, inputs: str):
 
         args, tags = derpibooru.parse_args(inputs)

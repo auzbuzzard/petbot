@@ -104,7 +104,7 @@ class Music:
         except discord.InvalidArgument:
             await self.bot.say('This is not a voice channel…')
         else:
-            await self.bot.say('Ready to play audio in ', channel.name)
+            await self.bot.say('Ready to play audio in {}'.format(channel.mention))
 
     @commands.command(pass_context=True, no_pm=True)
     async def summon(self, ctx):
@@ -153,7 +153,8 @@ class Music:
         else:
             player.volume = 0.6
             entry = VoiceEntry(ctx.message, player)
-            await self.bot.say('Enqueued ' + str(entry))
+            if state.current is not None:
+                await self.bot.say('Enqueued ' + str(entry))
             await state.songs.put(entry)
 
     @commands.command(pass_context=True, no_pm=True)
