@@ -4,7 +4,7 @@ from discord.ext import commands
 import json
 import argparse
 
-from botservice import playmusic, echo, imagesearch
+from botservice import playmusic, echo, imagesearch, math
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-p', '--prod',
@@ -18,6 +18,7 @@ bot = commands.Bot(command_prefix=commands.when_mentioned_or(secret_keys['comman
 bot.add_cog(playmusic.Music(bot))
 bot.add_cog(echo.Echo(bot))
 bot.add_cog(imagesearch.ImageSearch(bot))
+bot.add_cog(math.Math(bot))
 
 @bot.event
 async def on_ready():
