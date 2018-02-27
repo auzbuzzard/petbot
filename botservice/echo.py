@@ -49,7 +49,7 @@ class Echo:
     # TODO: This is so unsafe, add restrictions to who can ghost_talk to where
     @commands.command(pass_context=True, no_pm=False)
     async def ghost_talk(self, ctx, *, input: str):
-        f = re.match(r'\"(?P<server>[^\"]*)\" \"((?P<channel>[^\"]*)\")', input)
+        f = re.match(r'\"(?P<server>[^\"]*)\" \"(?P<channel>[^\"]*)\"', input)
 
         try:
             server = discord.utils.get(self.bot.servers, name=f.group('server'))
