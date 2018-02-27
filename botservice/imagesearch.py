@@ -32,9 +32,9 @@ class ImageSearch:
     @commands.command(disabled=True, name='e621', pass_context=True, no_pm=False)
     async def search_e621(self, ctx, *, inputs: str):
 
-        args, tags = derpibooru.parse_args(inputs)
+        args, tags = e621.parse_args(inputs)
 
-        image, count = derpibooru.search(args, tags)
+        image, count = e621.search(args, tags)
 
         if image is not None:
             await self.bot.say("Found image for: {} (from {} results)".format(tags, count))

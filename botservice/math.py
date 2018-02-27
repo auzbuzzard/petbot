@@ -24,3 +24,7 @@ class Math:
             await self.bot.say(
                 "```py\n>>>\t{}\n<<<\t{}\n```".format(msg, e)
             )
+
+    @commands.command(pass_context=True, no_pm=False)
+    async def roll_dice(self, ctx, *, msg: str):
+        pass
