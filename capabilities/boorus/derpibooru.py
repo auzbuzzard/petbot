@@ -1,24 +1,13 @@
-import certifi, urllib3
-import json, re
+import json, re, urllib3
 from enum import Enum
 
-from capabilities.derpibooru import result
+from capabilities.boorus import datastruct
 
-http = urllib3.PoolManager(
-    cert_reqs='CERT_REQUIRED',
-    ca_certs=certifi.where()
-)
-
-root_url = "https://derpibooru.org/"
+class Result(datastruct.Result):
+    pass
 
 
-class Result:
-    def __init__(self, data: dict):
-        for k, v in data.items():
-            setattr(self, k, v)
-
-
-class SearchQuery:
+class SearchQuery(datastruct.SearchQuery):
 
     class Order(Enum):
         creation_date = "created_at"
@@ -30,15 +19,13 @@ class SearchQuery:
         comments = "comments"
         random = "random"
 
-    def __init__(self,
-                 tags: list,
-                 args: dict = {},
-                 order: Order = Order.random, desc: bool = True):
-        self.tags = tags
-        self.args = args
-        self.order = args['order'] if 'order' in args else order
-        self.is_desc_order = desc
-        self.is_explicit = args['explicit'] if 'explicit' in args else False
+    def __init__(self, tags: list, args: dict = {}):
+        datastruct.SearchQuery.__init__(self, tags, args)
+
+        self.order = args['order'] if 'order' in args else SearchQuery.Order.random
+        self.is_desc_order = args['sort'] if 'sort' in args else True
+
+        self.root_url = "https://derpibooru.org"
 
         self.filters = {
             'everything': '56027',
@@ -56,21 +43,31 @@ class SearchQuery:
 
         return params
 
+    def request(self):
+        print(self.params())
+        return self.http.request('GET',
+                                 self.root_url + '/search.json',
+                                 fields=self.params())
 
-def search(args: dict, tags: list):
-    query = SearchQuery(tags, args)
-    r = http.request('GET',
-                     root_url + 'search.json',
-                     fields=query.params())
 
-    json_dict = json.loads(r.data.decode('utf-8'))
-
+def image(json_dict):
     search_result = Result(json_dict)
     try:
-        image = Result(search_result.search[0])
-        return image, int(search_result.total)
+        image_result = Result(search_result.search[0])
+        return image_result, int(search_result.total)
     except:
         return None, 0
+
+
+def utterance(msg, image_result):
+    result, count = image_result
+    if result is not None and count > 0:
+        return (
+            "Found image for: {} (from {} results) \n".format(msg, count) +
+            "https:{}".format(result.representations['large'])
+        )
+    else:
+        return "Can't find images for: {}. :<".format(msg)
 
 
 def parse_args(message: str):
@@ -96,10 +93,18 @@ def parse_args(message: str):
     return args, [s.strip() for s in message.split(',')]
 
 
-if __name__ == "__main__":
-    search("safe, rainbow dash")
+if __name__ == '__main__':
+    args, tags = parse_args("--e human")
 
+    query = SearchQuery(tags, args)
 
+    r = query.request()
+
+    json_dict = json.loads(r.data.decode('utf-8'))
+
+    image_result = image(json_dict)
+
+    print(utterance(tags, image_result))
 
 
 
