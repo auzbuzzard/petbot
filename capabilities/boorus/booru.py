@@ -9,7 +9,7 @@ class Sites(Enum):
     e621 = 2
 
 
-def search(site: Sites, messages: str):
+def search(site: Sites, ctx, messages: str):
     if site == Sites.derpibooru:
         provider = derpibooru
     elif site == Sites.e621:
@@ -25,4 +25,8 @@ def search(site: Sites, messages: str):
 
     image_result = provider.image(json_dict)
 
-    return provider.utterance(tags, image_result)
+    if site == Sites.derpibooru:
+        return provider.utterance(query=query, image_result=image_result, ctx=ctx, embed=True, compact=args[
+            'output_compact'] if 'output_compact' in args else True)
+    elif site == Sites.e621:
+        return provider.utterance(tags, image_result)

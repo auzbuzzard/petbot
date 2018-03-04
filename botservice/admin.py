@@ -18,6 +18,7 @@ class Admin:
     # TODO: Fix counting and also permission check
     @commands.command(pass_context=True, no_pm=False)
     async def delete_bot_message_by_count(self, ctx, *, message: str):
+        await self.bot.send_typing(ctx.message.channel)
         try:
             f = re.match(r'\"(?P<server>[^\"]*)\" \"(?P<channel>[^\"]*)\" (?P<limit>[\d]+)', message)
 

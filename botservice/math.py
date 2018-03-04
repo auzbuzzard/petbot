@@ -15,6 +15,7 @@ class Math:
 
     @commands.command(pass_context=True, no_pm=False)
     async def math(self, ctx, *, msg: str):
+        await self.bot.send_typing(ctx.message.channel)
         try:
             result = numexpr.evaluate(msg).item()
             await self.bot.say(
