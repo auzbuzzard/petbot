@@ -153,7 +153,7 @@ class Music:
         else:
             player.volume = 0.6
             entry = VoiceEntry(ctx.message, player)
-            if state.current is not None:
+            if state.is_playing():
                 await self.bot.say('Enqueued ' + str(entry))
             await state.songs.put(entry)
 

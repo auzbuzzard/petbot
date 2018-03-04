@@ -39,6 +39,7 @@ class Echo:
 
     @commands.command(pass_context=True, no_pm=False)
     async def echo(self, ctx, *, msg: str):
+        await self.bot.send_typing(ctx.message.channel)
         await self.bot.say(msg)
 
     @echo.error
@@ -49,6 +50,7 @@ class Echo:
     # TODO: This is so unsafe, add restrictions to who can ghost_talk to where
     @commands.command(pass_context=True, no_pm=False)
     async def ghost_talk(self, ctx, *, input: str):
+        await self.bot.send_typing(ctx.message.channel)
         f = re.match(r'\"(?P<server>[^\"]*)\" \"(?P<channel>[^\"]*)\"', input)
 
         try:
