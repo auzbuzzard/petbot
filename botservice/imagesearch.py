@@ -21,5 +21,7 @@ class ImageSearch:
     @commands.command(name='e621', pass_context=True, no_pm=False)
     async def search_e621(self, ctx, *, inputs: str):
         await self.bot.send_typing(ctx.message.channel)
-        await self.bot.say(booru.search(booru.Sites.e621, inputs))
+
+        greeter, embed = booru.search(site=booru.Sites.e621, ctx=ctx, messages=inputs)
+        await self.bot.say(content=greeter, embed=embed)
 

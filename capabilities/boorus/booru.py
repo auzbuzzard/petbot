@@ -29,4 +29,4 @@ def search(site: Sites, ctx, messages: str):
         return provider.utterance(query=query, image_result=image_result, ctx=ctx, embed=True, compact=args[
             'output_compact'] if 'output_compact' in args else True)
     elif site == Sites.e621:
-        return provider.utterance(tags, image_result)
+        return provider.utterance(query=query, image_result=image_result, ctx=ctx)

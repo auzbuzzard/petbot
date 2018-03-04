@@ -1,6 +1,8 @@
 import re
 import json
-from typing import Optional, Union, Tuple
+import math
+from enum import Enum
+from typing import Optional, Tuple
 
 import discord
 
@@ -8,35 +10,48 @@ from capabilities.boorus import datastruct
 
 
 class ImageResult(datastruct.Result):
-    pass
+    class Rating(Enum):
+        safe = 's'
+        questionable = 'q'
+        explicit = 'e'
+
+    def __init__(self, data: dict):
+        datastruct.Result.__init__(self, data)
+        self.rating_enum = self.__rating()
+        self.is_explicit = self.rating_enum is not ImageResult.Rating.safe
+
+    def __rating(self) -> Optional[Rating]:
+        try:
+            return ImageResult.Rating(self.rating)
+        except ValueError:
+            return None
 
 
 class SearchQuery(datastruct.SearchQuery):
-
-    def __init__(self,
-                 tags: list,
-                 args: dict = {}):
+    def __init__(self, tags: list, args: dict):
         datastruct.SearchQuery.__init__(self, tags, args)
 
     @staticmethod
     def root_url(is_explicit: bool) -> str:
         return "https://e621.net/" if is_explicit else "https://e926.net/"
 
+    @staticmethod
+    def site_name(is_explicit: bool) -> str:
+        return 'e926' if is_explicit else 'e621'
+
     def params(self) -> dict:
         self.tags.append("order:random")
-        params = {
+        return {
             'tags': ' '.join(self.tags),
             'limit': 1
         }
 
-        return params
-
     def url(self) -> str:
-        return self.root_url + 'post/index.json?tags=' + ','.join(self.tags)
+        return SearchQuery.root_url(self.args['explicit']) + 'post/index.json?tags=' + ','.join(self.tags)
 
     def request(self):
         return self.http.request('GET',
-                                 self.root_url + 'post/index.json',
+                                 SearchQuery.root_url(self.args['explicit']) + 'post/index.json',
                                  fields=self.params())
 
 
@@ -44,96 +59,61 @@ def image(json_dict) -> Optional[ImageResult]:
     return ImageResult(json_dict[0]) if len(json_dict) > 0 else None
 
 
-def utterance(query: SearchQuery, image_result: (Optional[ImageResult], int), ctx, embed=False) \
-        -> Union[Tuple[str, discord.Embed], str]:
+def utterance(query: SearchQuery, image_result: Optional[ImageResult], ctx) \
+        -> Tuple[str, Optional[discord.Embed]]:
     if image_result is not None:
         return (
-
-        ) if embed else (
-                "Found image for: {}\n".format(query.tags) +
-                "{}".format(image_result.sample_url)
+            datastruct.result_greeter(
+                has_image=True,
+                is_explicit=image_result.rating is ImageResult.Rating.explicit
+            ).format(author=ctx.message.author),
+            __generate_embed(query=query, image_result=image_result)
         )
     else:
-        return "Can't find images for: {}. :<".format(query.tags)
+        return datastruct.result_greeter(has_image=False, is_explicit=False).format(tags=query.tags), None
 
 
 def __generate_embed(query: SearchQuery, image_result: ImageResult) -> discord.Embed:
-    markdown_query_tags = __generate_tag_markdown(query.tags)
-    # print(query.url())
+    markdown_query_tags = __split_tags(query.tags, limit=256)
     embed = discord.Embed(
-        title='Searching for:',
-        description=', '.join(markdown_query_tags[0]),
+        title=
+        'results: {tags}'
+        .format(tags=', '.join(markdown_query_tags[0]) if len(markdown_query_tags) == 1 else
+                ', '.join(markdown_query_tags[0][:-1] + '…')),
+        description=
+        'score: {score:d} | faves: {faves:d} || source: [{site_name}]({root_url}post/show/{id})'
+        .format(id=image_result.id,
+                score=image_result.score,
+                faves=image_result.fav_count,
+                root_url=SearchQuery.root_url(image_result.is_explicit),
+                site_name=SearchQuery.site_name(image_result.is_explicit)),
         url=query.url(),
-        color=(65280 if image_result.rating is ImageResult.Rating.safe else  # green
-               255 if image_result.rating is ImageResult.Rating.suggestive else  # blue
-               16776960 if image_result.rating is ImageResult.Rating.questionable else  # yellow
-               16711680 if image_result.rating is ImageResult.Rating.explicit else 0)  # red, black
-
+        color=(65280 if image_result.rating_enum is ImageResult.Rating.safe else  # green
+               16776960 if image_result.rating_enum is ImageResult.Rating.questionable else  # yellow
+               16711680 if image_result.rating_enum is ImageResult.Rating.explicit else 0)  # red, black
     )
 
-    embed.set_image(url='https:' + image_result.representations['large'])
-    # if image_result.rating is not None:
-    #     print('thumb', image_result.rating_image)
-    #     embed.set_thumbnail(url=image_result.rating_image)
-    embed.set_author(name="Derpibooru", url="https://derpibooru.org/",
-                     icon_url="https://derpicdn.net/img/2017/10/22/1567638/thumb_small.jpeg")
-    embed.set_footer(text="Image hosted by: derpibooru.org",
-                     icon_url="https://derpicdn.net/img/2017/10/22/1567638/thumb_small.jpeg")
-
-    if len(markdown_query_tags) > 1:
-        for i in range(1, len(markdown_query_tags)):
-            embed.add_field(name="cont'd", value=', '.join(markdown_query_tags[i]), inline=False)
-
-    embed.add_field(name="Score:",
-                    value="```py\n{upvotes:d} - {downvotes:d} = {score:d}\n```".format(upvotes=image_result.upvotes,
-                                                                                       downvotes=image_result.downvotes,
-                                                                                       score=image_result.score),
-                    inline=True)
-    embed.add_field(name="Faves:", value="```py\n{faves:d}\n```".format(faves=image_result.faves), inline=True)
-    embed.add_field(name="Uploaded by:", value="{uploader}".format(uploader=image_result.uploader), inline=False)
-    # embed.add_field(name="Description:",
-    #                 value=image_result.description[:1024]
-    #                 if len(image_result.description) > 1024 else image_result.description,
-    #                 inline=True)
-
-    markdown_image_tags = __generate_tag_markdown([v.strip() for v in image_result.tags.split(',')])
-    # print(markdown_image_tags)
-    for i in range(0, min(len(markdown_image_tags), 4)):
-        # print(', '.join(markdown_image_tags[i]))
-        embed.add_field(name=("Tags:" if i == 0 else "Tags (cont'd):"),
-                        value=', '.join(markdown_image_tags[i]), inline=False)
-
-    embed.add_field(name="Source:",
-                    value="[derpibooru](https://derpibooru.org/{id})"
-                    .format(id=image_result.id),
-                    inline=False)
-
-    # embed.add_field(name="Source:",
-    #                 value="[derpibooru](https://derpibooru.org/{id}) | [original]({source_url})"
-    #                 .format(id=image_result.id, source_url=image_result.source_url),
-    #                 inline=False)
+    embed.set_image(url=image_result.sample_url)
+    embed.set_author(name=SearchQuery.site_name(image_result.is_explicit),
+                     url=SearchQuery.root_url(image_result.is_explicit),
+                     icon_url="https://e621.net/favicon-32x32.png")
 
     return embed
 
 
-def __generate_tag_markdown(tags: list) -> list:
-    # print('tags:', tags)
-    m_tags = ["[{v}](https://derpibooru.org/search?q={vs})".format(v=v, vs=str.replace(v, ' ', '+')) for v in tags]
-    # print('m_tags:', m_tags)
-    m_tags_str = ', '.join(m_tags)
-    # print(len(m_tags_str), m_tags_str)
-    split = math.ceil(len(m_tags_str) / 1024)
-    # print('split:', split, len(m_tags_str))
-    s_length = int(math.floor(len(m_tags) / split))
-    # print(split, s_length)
-    return [m_tags[i:i + s_length] for i in range(0, len(m_tags), s_length)]
-
+def __split_tags(tags: list, limit=1024) -> list:
+    tags_str = ', '.join(tags)
+    split = math.ceil(len(tags_str) / limit)
+    s_length = int(math.floor(len(tags) / split))
+    return [tags[i:i + s_length] for i in range(0, len(tags), s_length)]
 
 
 def parse_args(message: str):
     pattern = r'--([\w:]+)'
     args_list = re.findall(pattern, message)
-    args = {}
+    args = {
+        'explicit': False
+    }
 
     if any(i in ['e'] for i in args_list):
         args['explicit'] = True
