@@ -1,6 +1,7 @@
 import re
 import json
 import math
+import urllib.parse
 from enum import Enum
 from typing import Optional, Tuple
 
@@ -37,7 +38,7 @@ class SearchQuery(datastruct.SearchQuery):
 
     @staticmethod
     def site_name(is_explicit: bool) -> str:
-        return 'e926' if is_explicit else 'e621'
+        return 'e621' if is_explicit else 'e926'
 
     def params(self) -> dict:
         self.tags.append("order:random")
@@ -47,7 +48,9 @@ class SearchQuery(datastruct.SearchQuery):
         }
 
     def url(self) -> str:
-        return SearchQuery.root_url(self.args['explicit']) + 'post/index.json?tags=' + ','.join(self.tags)
+        return SearchQuery.root_url(self.args['explicit']) + \
+               'post/index.json?tags=' + \
+               urllib.parse.quote(' '.join(self.tags))
 
     def request(self):
         return self.http.request('GET',
@@ -65,7 +68,7 @@ def utterance(query: SearchQuery, image_result: Optional[ImageResult], ctx) \
         return (
             datastruct.result_greeter(
                 has_image=True,
-                is_explicit=image_result.rating is ImageResult.Rating.explicit
+                is_explicit=image_result.is_explicit
             ).format(author=ctx.message.author),
             __generate_embed(query=query, image_result=image_result)
         )
@@ -81,10 +84,11 @@ def __generate_embed(query: SearchQuery, image_result: ImageResult) -> discord.E
         .format(tags=', '.join(markdown_query_tags[0]) if len(markdown_query_tags) == 1 else
                 ', '.join(markdown_query_tags[0][:-1] + '…')),
         description=
-        'score: {score:d} | faves: {faves:d} || source: [{site_name}]({root_url}post/show/{id})'
+        "score: {score:d} | faves: {faves:d} || source: [{site_name}]({root_url}post/show/{id}) || filetype: {filetype}"
         .format(id=image_result.id,
                 score=image_result.score,
                 faves=image_result.fav_count,
+                filetype=image_result.file_ext,
                 root_url=SearchQuery.root_url(image_result.is_explicit),
                 site_name=SearchQuery.site_name(image_result.is_explicit)),
         url=query.url(),

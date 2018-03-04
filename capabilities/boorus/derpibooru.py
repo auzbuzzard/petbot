@@ -147,9 +147,7 @@ def __generate_embed(query: SearchQuery, count: int, image_result: ImageResult, 
                 ', '.join(markdown_query_tags[0][:-1] + '…')),
         description=
         ', '.join(markdown_query_tags[0]) if not compact else
-        """score: {score:d} | faves: {faves:d} |
-        | source: [derpibooru](https://derpibooru.org/{id}) |
-        | filetype: {filetype}"""
+        "score: {score:d} | faves: {faves:d} || source: [derpibooru](https://derpibooru.org/{id}) || filetype: {filetype}"
             .format(id=image_result.id,
                     score=image_result.score,
                     faves=image_result.faves,
