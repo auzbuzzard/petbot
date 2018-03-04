@@ -147,10 +147,13 @@ def __generate_embed(query: SearchQuery, count: int, image_result: ImageResult, 
                 ', '.join(markdown_query_tags[0][:-1] + '…')),
         description=
         ', '.join(markdown_query_tags[0]) if not compact else
-        'score: {score:d} | faves: {faves:d} || source: [derpibooru](https://derpibooru.org/{id})'
+        """score: {score:d} | faves: {faves:d} |
+        | source: [derpibooru](https://derpibooru.org/{id}) |
+        | filetype: {filetype}"""
             .format(id=image_result.id,
                     score=image_result.score,
-                    faves=image_result.faves),
+                    faves=image_result.faves,
+                    filetype=image_result.original_format),
         url=query.url(),
         color=(65280 if image_result.rating is ImageResult.Rating.safe else  # green
                255 if image_result.rating is ImageResult.Rating.suggestive else  # blue
@@ -169,11 +172,11 @@ def __generate_embed(query: SearchQuery, count: int, image_result: ImageResult, 
         embed.set_footer(text="Image hosted by: derpibooru.org",
                          icon_url="https://derpicdn.net/img/2017/10/22/1567638/thumb_small.jpeg")
 
-    if len(markdown_query_tags) > 1:
-        for i in range(1, len(markdown_query_tags)):
-            embed.add_field(name="cont'd", value=', '.join(markdown_query_tags[i]), inline=False)
-
     if not compact:
+        if len(markdown_query_tags) > 1:
+            for i in range(1, len(markdown_query_tags)):
+                embed.add_field(name="cont'd", value=', '.join(markdown_query_tags[i]), inline=False)
+
         embed.add_field(name="Score:",
                         value="```py\n{upvotes:d} - {downvotes:d} = {score:d}\n```"
                         .format(upvotes=image_result.upvotes,
