@@ -1,6 +1,7 @@
 import certifi, urllib3
 import json, random
 
+import discord
 
 class Result:
     def __init__(self, data: dict):
@@ -39,7 +40,8 @@ class SearchQuery:
                                  fields=self.params())
 
 
-def result_greeter(has_image: bool, is_explicit: bool) -> str:
+def result_greeter(has_image: bool, is_explicit: bool,
+                   author: discord.Member) -> str:
     try:
         with open('capabilities/boorus/utterances.json') as f:
             utterances = json.load(f)
@@ -48,7 +50,7 @@ def result_greeter(has_image: bool, is_explicit: bool) -> str:
             sentences = utterances['universal']
             if has_image:
                 sentences += utterances['explicit'] if is_explicit else utterances['safe']
-            return random.choice(sentences)
+            return random.choice(sentences).format(author=author)
 
     except EnvironmentError as e:
         print(e)

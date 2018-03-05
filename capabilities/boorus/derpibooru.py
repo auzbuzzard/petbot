@@ -3,6 +3,7 @@ from enum import Enum
 from typing import Optional, Union, Tuple
 
 import discord
+from discord.ext import commands
 
 from capabilities.boorus import datastruct
 
@@ -101,16 +102,21 @@ def image(json_dict) -> (Optional[ImageResult], int):
         return None, 0
 
 
-def utterance(query: SearchQuery, image_result: (Optional[ImageResult], int), ctx, embed=False, compact=True) \
-        -> Union[Tuple[str, Optional[discord.Embed]], str]:
+def utterance(query: SearchQuery,
+              image_result: (Optional[ImageResult], int),
+              ctx: commands.Context,
+              embed=False, compact=True) -> Union[Tuple[str, Optional[discord.Embed]], str]:
     result, count = image_result
     if result is not None and count > 0:
         return (
             datastruct.result_greeter(
                 has_image=True,
-                is_explicit=result.rating is ImageResult.Rating.explicit
-            ).format(author=ctx.message.author) +
-            ('' if result.mime_type != 'video/webm' else '\nhttps:' + result.representations['large']),
+                is_explicit=result.rating is ImageResult.Rating.explicit,
+                author=ctx.message.author
+            )
+            # +
+            # ('' if result.mime_type != 'video/webm' else '\nhttps:' + result.representations['large'])
+            ,
             __generate_embed(query, count, result, compact=compact)
         ) if embed else (
             """
