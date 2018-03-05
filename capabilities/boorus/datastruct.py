@@ -48,8 +48,7 @@ def result_greeter(has_image: bool, is_explicit: bool,
             utterances = utterances['image_result_greeter']
             utterances = utterances['success'] if has_image else utterances['no_image']
             sentences = utterances['universal']
-            if has_image:
-                sentences += utterances['explicit'] if is_explicit else utterances['safe']
+            sentences += utterances['explicit'] if is_explicit else utterances['safe']
             return random.choice(sentences).format(author=author)
 
     except EnvironmentError as e:
