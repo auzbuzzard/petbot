@@ -81,8 +81,10 @@ class SearchQuery(datastruct.SearchQuery):
 
         return params
 
-    def url(self) -> str:
-        return self.root_url() + 'search.json?q=' + ','.join([str.replace(i, ' ', '+') for i in self.tags])
+    def url(self, json: bool=False) -> str:
+        return self.root_url() + \
+               'search{json}?q='.format(json='.json' if json else '') + \
+               ','.join([str.replace(i, ' ', '+') for i in self.tags])
 
     def request(self):
         return self.http.request('GET',
@@ -152,7 +154,7 @@ def __generate_embed(query: SearchQuery, count: int, image_result: ImageResult, 
                     score=image_result.score,
                     faves=image_result.faves,
                     filetype=image_result.original_format),
-        url=query.url(),
+        url=query.url(json=False),
         color=(65280 if image_result.rating is ImageResult.Rating.safe else  # green
                255 if image_result.rating is ImageResult.Rating.suggestive else  # blue
                16776960 if image_result.rating is ImageResult.Rating.questionable else  # yellow
