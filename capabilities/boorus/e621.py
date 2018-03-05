@@ -7,7 +7,7 @@ from typing import Optional, Tuple
 
 import discord
 
-from capabilities.boorus import datastruct
+from capabilities.boorus import datastruct, errors
 
 
 class ImageResult(datastruct.Result):
@@ -47,9 +47,9 @@ class SearchQuery(datastruct.SearchQuery):
             'limit': 1
         }
 
-    def url(self) -> str:
+    def url(self, json: bool=False) -> str:
         return SearchQuery.root_url(self.args['explicit']) + \
-               'post/index.json?tags=' + \
+               'post/index{json}?tags='.format(json='.json' if json else '') + \
                urllib.parse.quote(' '.join(self.tags))
 
     def request(self):
@@ -59,6 +59,14 @@ class SearchQuery(datastruct.SearchQuery):
 
 
 def image(json_dict) -> Optional[ImageResult]:
+    if 'success' in json_dict and json_dict['success'] is False:
+        raise errors.SiteFailureStatusError(
+            site_message=json_dict['reason'] if 'reason' in json_dict else '',
+            print_message="uwu I couldn't do that. {}".format(
+                "e621 says: {}".format(json_dict['reason']) if 'reason' in json_dict else
+                "e621 is saying something in computers that I do not understand ;~;"),
+            need_code_block=False
+        )
     return ImageResult(json_dict[0]) if len(json_dict) > 0 else None
 
 
