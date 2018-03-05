@@ -140,7 +140,13 @@ def utterance(query: SearchQuery,
             )
         )
     else:
-        return datastruct.result_greeter(has_image=False, is_explicit=False).format(tags=query.tags), None
+        return datastruct.result_greeter(
+            has_image=False,
+            is_explicit=query.args['explicit'],
+            author=ctx.message.author
+        ).format(
+            tags=query.tags
+        ), None
 
 
 def __generate_embed(query: SearchQuery, count: int, image_result: ImageResult, compact=True) -> discord.Embed:
