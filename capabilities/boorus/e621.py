@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Optional, Tuple
 
 import discord
+from discord.ext import commands
 
 from capabilities.boorus import datastruct, errors
 
@@ -70,14 +71,16 @@ def image(json_dict) -> Optional[ImageResult]:
     return ImageResult(json_dict[0]) if len(json_dict) > 0 else None
 
 
-def utterance(query: SearchQuery, image_result: Optional[ImageResult], ctx) \
-        -> Tuple[str, Optional[discord.Embed]]:
+def utterance(query: SearchQuery,
+              image_result: Optional[ImageResult],
+              ctx: commands.Context) -> Tuple[str, Optional[discord.Embed]]:
     if image_result is not None:
         return (
             datastruct.result_greeter(
                 has_image=True,
-                is_explicit=image_result.is_explicit
-            ).format(author=ctx.message.author),
+                is_explicit=image_result.is_explicit,
+                author=ctx.message.author
+            ),
             __generate_embed(query=query, image_result=image_result)
         )
     else:
