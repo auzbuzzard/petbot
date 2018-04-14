@@ -1,3 +1,5 @@
 secretkeys.json
 secretkeys_dev.json
 *.pyc
+.venv/
+.idea/

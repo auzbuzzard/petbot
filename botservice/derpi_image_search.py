@@ -1,5 +1,3 @@
-import asyncio
-import discord
 from discord.ext import commands
 
 from capabilities.derpibooru import derpibooru
