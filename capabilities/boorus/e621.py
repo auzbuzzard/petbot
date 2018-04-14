@@ -3,7 +3,7 @@ import json
 import math
 import urllib.parse
 from enum import Enum
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import discord
 from discord.ext import commands
@@ -59,10 +59,10 @@ class SearchQuery(datastruct.SearchQuery):
                                  fields=self.params())
 
 
-def image(json_dict) -> Optional[ImageResult]:
-    if 'success' in json_dict and json_dict['success'] is False:
+def image(json_dict: dict) -> Optional[ImageResult]:
+    if not json_dict.get('success', False):
         raise errors.SiteFailureStatusError(
-            site_message=json_dict['reason'] if 'reason' in json_dict else '',
+            site_message=json_dict.get('reason', ''),
             print_message="uwu I couldn't do that. {}".format(
                 "e621 says: {}".format(json_dict['reason']) if 'reason' in json_dict else
                 "e621 is saying something in computers that I do not understand ;~;"),
@@ -73,7 +73,7 @@ def image(json_dict) -> Optional[ImageResult]:
 
 def utterance(query: SearchQuery,
               image_result: Optional[ImageResult],
-              ctx: commands.Context) -> Tuple[str, Optional[discord.Embed]]:
+              ctx: commands.Context) -> Tuple[str, Optional[Union[discord.Embed, str]]]:
     if image_result is not None:
         return (
             datastruct.result_greeter(
@@ -81,7 +81,7 @@ def utterance(query: SearchQuery,
                 is_explicit=image_result.is_explicit,
                 author=ctx.message.author
             ),
-            __generate_embed(query=query, image_result=image_result)
+            _generate_embed(query=query, image_result=image_result)
         )
     else:
         return datastruct.result_greeter(
@@ -93,15 +93,30 @@ def utterance(query: SearchQuery,
         ), None
 
 
-def __generate_embed(query: SearchQuery, image_result: ImageResult) -> discord.Embed:
-    markdown_query_tags = __split_tags(query.tags, limit=256)
+def _generate_embed(query: SearchQuery, image_result: ImageResult) -> Union[discord.Embed, str]:
+    markdown_query_tags = _split_tags(query.tags, limit=256)
+
+    if image_result.file_ext == 'webm':
+        return (
+                'results: {tags}\n'
+                .format(tags=', '.join(markdown_query_tags[0]) if len(markdown_query_tags) == 1 else
+                        ', '.join(markdown_query_tags[0][:-1] + '…')) +
+                "score: {score:d} | faves: {faves:d} | source: {root_url}post/show/{id}) | filetype: {filetype}\n"
+                .format(id=image_result.id,
+                        score=image_result.score,
+                        faves=image_result.fav_count,
+                        root_url=SearchQuery.root_url(image_result.is_explicit),
+                        filetype=image_result.file_ext) +
+                image_result.file_url
+        )
+
     embed = discord.Embed(
         title=
         'results: {tags}'
         .format(tags=', '.join(markdown_query_tags[0]) if len(markdown_query_tags) == 1 else
                 ', '.join(markdown_query_tags[0][:-1] + '…')),
         description=
-        "score: {score:d} | faves: {faves:d} || source: [{site_name}]({root_url}post/show/{id}) || filetype: {filetype}"
+        "score: {score:d} | faves: {faves:d} | source: [{site_name}]({root_url}post/show/{id}) | filetype: {filetype}"
         .format(id=image_result.id,
                 score=image_result.score,
                 faves=image_result.fav_count,
@@ -122,7 +137,7 @@ def __generate_embed(query: SearchQuery, image_result: ImageResult) -> discord.E
     return embed
 
 
-def __split_tags(tags: list, limit=1024) -> list:
+def _split_tags(tags: list, limit=1024) -> list:
     tags_str = ', '.join(tags)
     split = math.ceil(len(tags_str) / limit)
     s_length = int(math.floor(len(tags) / split))
