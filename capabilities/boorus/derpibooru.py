@@ -63,8 +63,8 @@ class SearchQuery(datastruct.SearchQuery):
     def __init__(self, tags: list, args: dict = {}):
         datastruct.SearchQuery.__init__(self, tags, args)
 
-        self.order = args['order'] if 'order' in args else SearchQuery.Order.random
-        self.is_desc_order = args['sort'] if 'sort' in args else True
+        self.order = args.get('order', SearchQuery.Order.random)
+        self.is_desc_order = args.get('sort', True)
 
         self.filters = {
             'everything': '56027',
@@ -77,12 +77,15 @@ class SearchQuery(datastruct.SearchQuery):
             'q': ",".join(self.tags),
             'sf': self.order.value,
             'sd': 'desc' if self.is_desc_order else 'asc',
-            'filter_id': self.filters['steady'] if self.is_explicit else self.filters['default']
+            'filter_id':
+                self.filters['everything'] if self.args.get('filter') == 'everything' else
+                self.filters['steady'] if self.is_explicit else
+                self.filters['default']
         }
 
         return params
 
-    def url(self, json: bool=False) -> str:
+    def url(self, json: bool = False) -> str:
         return self.root_url() + \
                'search{json}?q='.format(json='.json' if json else '') + \
                ','.join([str.replace(i, ' ', '+') for i in self.tags])
@@ -104,8 +107,7 @@ def image(json_dict) -> (Optional[ImageResult], int):
 
 def utterance(query: SearchQuery,
               image_result: (Optional[ImageResult], int),
-              ctx: commands.Context,
-              embed=False, compact=True) -> Union[Tuple[str, Optional[discord.Embed]], str]:
+              ctx: commands.Context) -> Tuple[str, Optional[Union[discord.Embed, str]]]:
     result, count = image_result
     if result is not None and count > 0:
         return (
@@ -113,31 +115,9 @@ def utterance(query: SearchQuery,
                 has_image=True,
                 is_explicit=result.rating is ImageResult.Rating.explicit,
                 author=ctx.message.author
-            )
-            # +
-            # ('' if result.mime_type != 'video/webm' else '\nhttps:' + result.representations['large'])
-            ,
-            __generate_embed(query, count, result, compact=compact)
-        ) if embed else (
-            """
-            {greeter}\n
-            ```py\n
-            #_results:\t{count:d}\tsearch_term:\t{search_term}\n
-            score:\t{upvotes:d} / {downvotes:d} = {score:d}\tfaves:{faves:d}\n
-            link:\t<{booru_url}>\n
-            ```
-            {image_url}
-            """.format(
-                greeter=datastruct.result_greeter(
-                    has_image=True,
-                    is_explicit=result.rating is ImageResult.Rating.explicit
-                ).format(author=ctx.message.author),
-                count=count, search_term=query.tags,
-                booru_url=SearchQuery.root_url() + '{}'.format(result['id']),
-                upvotes=result['upvotes'], downvotes=result['downvotes'], score=result['score'],
-                faves=result['faves'],
-                image_url=result.representations['large']
-            )
+            ),
+            _generate_embed(query, count, result)
+
         )
     else:
         return datastruct.result_greeter(
@@ -149,19 +129,32 @@ def utterance(query: SearchQuery,
         ), None
 
 
-def __generate_embed(query: SearchQuery, count: int, image_result: ImageResult, compact=True) -> discord.Embed:
-    markdown_query_tags = __generate_tag_markdown(query.tags, limit=256, markdown=not compact)
+def _generate_embed(query: SearchQuery, count: int,
+                    image_result: ImageResult) -> Union[discord.Embed, str]:
+    markdown_query_tags = _split_tags(query.tags, limit=256)
+
+    if image_result.original_format == 'webm':
+        return (
+            '{count} result{s}: {tags}\n'
+                .format(count=count, s='s' if count != 1 else '',
+                        tags=', '.join(markdown_query_tags[0]) if len(markdown_query_tags) == 1 else
+                        ', '.join(markdown_query_tags[0][:-1] + '…')) +
+            "score: {score:d} | faves: {faves:d} | source: https://derpibooru.org/{id} | filetype: {filetype}\n"
+                .format(id=image_result.id,
+                        score=image_result.score,
+                        faves=image_result.faves,
+                        filetype=image_result.original_format) +
+            'https:' + image_result.representations['large']
+        )
+
     embed = discord.Embed(
         title=
-        'Searching for: ({count} result{s})'
-        .format(count=count, s='s' if count != 1 else '') if not compact else
         '{count} result{s}: {tags}'
-        .format(count=count, s='s' if count != 1 else '',
-                tags=', '.join(markdown_query_tags[0]) if len(markdown_query_tags) == 1 else
-                ', '.join(markdown_query_tags[0][:-1] + '…')),
+            .format(count=count, s='s' if count != 1 else '',
+                    tags=', '.join(markdown_query_tags[0]) if len(markdown_query_tags) == 1 else
+                    ', '.join(markdown_query_tags[0][:-1] + '…')),
         description=
-        ', '.join(markdown_query_tags[0]) if not compact else
-        "score: {score:d} | faves: {faves:d} || source: [derpibooru](https://derpibooru.org/{id}) || filetype: {filetype}"
+        "score: {score:d} | faves: {faves:d} | source: [derpibooru](https://derpibooru.org/{id}) | filetype: {filetype}"
             .format(id=image_result.id,
                     score=image_result.score,
                     faves=image_result.faves,
@@ -175,78 +168,17 @@ def __generate_embed(query: SearchQuery, count: int, image_result: ImageResult, 
     )
 
     embed.set_image(url='https:' + image_result.representations['large'])
-    # if image_result.rating is not None:
-    #     print('thumb', image_result.rating_image)
-    #     embed.set_thumbnail(url=image_result.rating_image)
     embed.set_author(name="Derpibooru", url="https://derpibooru.org/",
                      icon_url="https://derpicdn.net/img/2017/10/22/1567638/thumb_small.jpeg")
-    if not compact:
-        embed.set_footer(text="Image hosted by: derpibooru.org",
-                         icon_url="https://derpicdn.net/img/2017/10/22/1567638/thumb_small.jpeg")
-
-    if not compact:
-        if len(markdown_query_tags) > 1:
-            for i in range(1, len(markdown_query_tags)):
-                embed.add_field(name="cont'd", value=', '.join(markdown_query_tags[i]), inline=False)
-
-        embed.add_field(name="Score:",
-                        value="```py\n{upvotes:d} - {downvotes:d} = {score:d}\n```"
-                        .format(upvotes=image_result.upvotes,
-                                downvotes=image_result.downvotes,
-                                score=image_result.score),
-                        inline=True)
-        embed.add_field(name="Faves:",
-                        value="```py\n{faves:d}\n```"
-                        .format(faves=image_result.faves),
-                        inline=True)
-        embed.add_field(name="Uploaded by:", value="{uploader}".format(uploader=image_result.uploader), inline=False)
-        # embed.add_field(name="Description:",
-        #                 value=image_result.description[:1024]
-        #                 if len(image_result.description) > 1024 else image_result.description,
-        #                 inline=True)
-
-        markdown_image_tags = __generate_tag_markdown([v.strip() for v in image_result.tags.split(',')])
-        # print(markdown_image_tags)
-        for i in range(0, min(len(markdown_image_tags), 4)):
-            # print(', '.join(markdown_image_tags[i]))
-            embed.add_field(name=("Tags:" if i == 0 else "Tags (cont'd):"),
-                            value=', '.join(markdown_image_tags[i]), inline=False)
-
-        embed.add_field(name="Source:",
-                        value="[derpibooru](https://derpibooru.org/{id})"
-                        .format(id=image_result.id),
-                        inline=False)
-    # else:
-    #     embed.add_field(name="Score | Faves || Sources",
-    #                     value="`{score:d} | {faves:d}` || [derpibooru](https://derpibooru.org/{id})"
-    #                     .format(id=image_result.id,
-    #                             score=image_result.score,
-    #                             faves=image_result.faves),
-    #                     inline=True)
-
-    # embed.add_field(name="Source:",
-    #                 value="[derpibooru](https://derpibooru.org/{id}) | [original]({source_url})"
-    #                 .format(id=image_result.id, source_url=image_result.source_url),
-    #                 inline=False)
 
     return embed
 
 
-def __generate_tag_markdown(tags: list, limit=1024, markdown=True) -> list:
-    # print('tags:', tags)
-    m_tags = [
-        "[{v}](https://derpibooru.org/search?q={vs})".format(v=v, vs=str.replace(v, ' ', '+')) if markdown else
-        v
-        for v in tags
-    ]
-    # print('m_tags:', m_tags)
-    m_tags_str = ', '.join(m_tags)
-    # print(len(m_tags_str), m_tags_str)
-    split = math.ceil(len(m_tags_str) / limit)
-    # print('split:', split, len(m_tags_str))
-    s_length = int(math.floor(len(m_tags) / split))
-    # print(split, s_length)
-    return [m_tags[i:i + s_length] for i in range(0, len(m_tags), s_length)]
+def _split_tags(tags: list, limit=1024) -> list:
+    tags_str = ', '.join(tags)
+    split = math.ceil(len(tags_str) / limit)
+    s_length = int(math.floor(len(tags) / split))
+    return [tags[i:i + s_length] for i in range(0, len(tags), s_length)]
 
 
 def parse_args(message: str) -> (dict, list):
@@ -272,6 +204,8 @@ def parse_args(message: str) -> (dict, list):
         args['order'] = SearchQuery.Order.comments
     if any(i in ['full', 'full_output'] for i in args_list):
         args['output_compact'] = False
+    if any(i in ['filter_everything', 'f_everything'] for i in args_list):
+        args['filter'] = 'everything'
 
     message = re.sub(pattern, '', message)
 

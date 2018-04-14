@@ -1,3 +1,4 @@
+import discord
 from discord.ext import commands
 
 from capabilities.boorus import booru, errors
@@ -17,7 +18,10 @@ class ImageSearch:
 
         try:
             greeter, embed = booru.search(site=booru.Sites.derpibooru, ctx=ctx, messages=inputs)
-            await self.bot.say(content=greeter, embed=embed)
+            if type(embed) is discord.Embed:
+                await self.bot.say(content=greeter, embed=embed)
+            elif type(embed) is str:
+                await self.bot.say(greeter + '\n' + embed)
         except errors.SiteFailureStatusError as e:
             if e.need_code_block:
                 await self.bot.say("```py\n{}\n```".format(e.print_message))
@@ -30,7 +34,10 @@ class ImageSearch:
 
         try:
             greeter, embed = booru.search(site=booru.Sites.e621, ctx=ctx, messages=inputs)
-            await self.bot.say(content=greeter, embed=embed)
+            if type(embed) is discord.Embed:
+                await self.bot.say(content=greeter, embed=embed)
+            elif type(embed) is str:
+                await self.bot.say(greeter + '\n' + embed)
         except errors.SiteFailureStatusError as e:
             if e.need_code_block:
                 await self.bot.say("```py\n{}\n```".format(e.print_message))

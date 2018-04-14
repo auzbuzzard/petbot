@@ -30,8 +30,7 @@ def search(site: Sites, ctx, messages: str) -> Tuple[str, Optional[discord.Embed
         image_result = provider.image(json_dict)
 
         if site == Sites.derpibooru:
-            return provider.utterance(query=query, image_result=image_result, ctx=ctx, embed=True, compact=args[
-                'output_compact'] if 'output_compact' in args else True)
+            return provider.utterance(query=query, image_result=image_result, ctx=ctx)
         elif site == Sites.e621:
             return provider.utterance(query=query, image_result=image_result, ctx=ctx)
 
