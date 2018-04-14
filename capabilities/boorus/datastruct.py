@@ -1,7 +1,10 @@
-import certifi, urllib3
-import json, random
+import json
+import random
 
+import certifi
 import discord
+import urllib3
+
 
 class Result:
     def __init__(self, data: dict):

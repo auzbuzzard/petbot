@@ -1,8 +1,5 @@
-import asyncio
-import discord
-from discord.ext import commands
-
 import numexpr
+from discord.ext import commands
 
 
 class Math:

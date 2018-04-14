@@ -1,8 +1,8 @@
+import argparse
+import json
+
 import discord
 from discord.ext import commands
-
-import json
-import argparse
 
 from botservice import admin, playmusic, echo, imagesearch, math
 
@@ -20,6 +20,7 @@ bot.add_cog(playmusic.Music(bot))
 bot.add_cog(echo.Echo(bot))
 bot.add_cog(imagesearch.ImageSearch(bot))
 bot.add_cog(math.Math(bot))
+
 
 @bot.event
 async def on_ready():

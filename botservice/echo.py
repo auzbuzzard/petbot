@@ -1,7 +1,8 @@
 import asyncio
+import re
+
 import discord
 from discord.ext import commands
-import re
 
 
 class GhostTalkEntry:
