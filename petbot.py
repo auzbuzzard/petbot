@@ -4,7 +4,8 @@ import json
 import discord
 from discord.ext import commands
 
-from botservice import admin, playmusic, echo, imagesearch, math
+# from botservice import admin, playmusic, echo, imagesearch, math
+from botservice import echo
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-p', '--prod',
@@ -14,7 +15,15 @@ args = parser.parse_args()
 
 secret_keys = json.load(open('secretkeys.json')) if args.prod else json.load(open('secretkeys_dev.json'))
 
-bot = commands.Bot(command_prefix=commands.when_mentioned_or(secret_keys['command']), description='PetBot')
+
+def set_prefix(bot, message):
+    if isinstance(message.channel, discord.DMChannel):
+        return ""
+    else:
+        return commands.when_mentioned(bot, message)
+
+# bot = commands.Bot(command_prefix=commands.when_mentioned_or(secret_keys['command']), description='PetBot')
+bot = commands.Bot(command_prefix=set_prefix, description='PetBot')
 # bot.add_cog(admin.Admin(bot))
 # bot.add_cog(playmusic.Music(bot))
 bot.add_cog(echo.Echo(bot))
