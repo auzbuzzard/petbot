@@ -15,11 +15,11 @@ args = parser.parse_args()
 secret_keys = json.load(open('secretkeys.json')) if args.prod else json.load(open('secretkeys_dev.json'))
 
 bot = commands.Bot(command_prefix=commands.when_mentioned_or(secret_keys['command']), description='PetBot')
-bot.add_cog(admin.Admin(bot))
-bot.add_cog(playmusic.Music(bot))
+# bot.add_cog(admin.Admin(bot))
+# bot.add_cog(playmusic.Music(bot))
 bot.add_cog(echo.Echo(bot))
-bot.add_cog(imagesearch.ImageSearch(bot))
-bot.add_cog(math.Math(bot))
+# bot.add_cog(imagesearch.ImageSearch(bot))
+# bot.add_cog(math.Math(bot))
 
 
 @bot.event
