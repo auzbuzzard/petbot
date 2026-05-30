@@ -1,6 +1,27 @@
+# Secrets — never commit real values (see .env.example for the reference layout)
+.env
 secretkeys.json
 secretkeys_dev.json
-*.pyc
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments
 .venv/
 venv/
+env/
+
+# Editors
 .idea/
+.vscode/
+*.iml

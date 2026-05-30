@@ -1,0 +1,29 @@
+# Run the same lint/type gates locally that CI enforces, to shift failures left.
+# Install once with: pre-commit install
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - discord.py>=2.7,<2.8
+          - aiohttp>=3.9
+          - types-aiofiles
+        args: []
+        pass_filenames: false
+
+  - repo: local
+    hooks:
+      - id: import-linter
+        name: import-linter (core/adapter boundary)
+        entry: lint-imports
+        language: system
+        pass_filenames: false
+        types: [python]
