@@ -1,0 +1,43 @@
+{
+  "image_result_greeter": {
+    "success": {
+      "universal": ["I found this image."],
+      "safe": [
+        "Yes {author}!",
+        "Here's the image.",
+        "Meep, here's your image.",
+        "Here's your image, {author}.",
+        "Mmm, nice choice.",
+        "Hehe ^v^ Here's your image.",
+        "Sure thing {author}~",
+        "Sure thing~",
+        "One image coming up!",
+        "^v^ Here you go~",
+        "I have found this for you."
+      ],
+      "explicit": [
+        "*blushes*",
+        "Eeep, >//< what's on there— o-oh my~",
+        "O-oh dear, h-here you go.",
+        "H-here's your image, {author}…",
+        "H-here's your image…",
+        "o-oh my… how lewd…",
+        "Y-yes {author}…",
+        ".///. oh my…",
+        "Eeep, it's nsfw…",
+        ">///< Here you go"
+      ]
+    },
+    "no_image": {
+      "universal": ["Sorry… but I couldn't find anything with those search terms"],
+      "safe": [
+        ":< those tags returned empty",
+        "uwu I can't find anything with those tags"
+      ],
+      "explicit": [
+        "S-sorry {author}, I couldn't find anything. P-please don't punish me…",
+        ">.< s-sorry {author}, I tried really hard, but I couldn't find anything…"
+      ]
+    }
+  }
+}
