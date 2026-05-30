@@ -1,0 +1,15 @@
+{
+  "total": 1,
+  "images": [
+    {
+      "id": 555,
+      "score": 12,
+      "faves": 4,
+      "format": "png",
+      "tags": ["safe", "pony"],
+      "representations": {
+        "large": "//derpicdn.net/img/view/2021/2/2/555/large.png"
+      }
+    }
+  ]
+}

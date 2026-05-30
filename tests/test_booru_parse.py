@@ -108,3 +108,35 @@ def test_e621_rating_parsing() -> None:
     assert result is not None
     assert result.rating is e621.Rating.safe
     assert result.is_explicit is False
+
+
+# --- real-world response variance ---------------------------------------------
+
+
+async def test_derpi_protocol_relative_image_url_is_absolutized() -> None:
+    # Derpibooru `representations` URLs are protocol-relative; Discord needs a scheme.
+    session = FakeSession(load_fixture("derpibooru_protocol_relative"))
+    result = await derpibooru.search("pony", session=session, allows_explicit=False, author="Spike")
+    assert result.embed is not None
+    assert result.embed.image_url == "https://derpicdn.net/img/view/2021/2/2/555/large.png"
+
+
+def test_e621_null_file_url_does_not_crash() -> None:
+    # e621 returns null file/sample URLs for hidden (DNP) posts; parse gracefully.
+    payload: dict[str, Any] = load_fixture("e621_null_file")
+    result = e621.image(payload)
+    assert result is not None
+    assert result.file_url == ""
+    assert result.sample_url == ""
+    assert result.is_explicit is True
+
+
+def test_e621_build_result_with_null_urls_omits_image() -> None:
+    payload: dict[str, Any] = load_fixture("e621_null_file")
+    image = e621.image(payload)
+    assert image is not None
+    query = e621.SearchQuery(["x"], {"explicit": True}, session=FakeSession({}), user_agent="ua")
+    built = e621.build_result(query, image, author="Rex")
+    assert built.embed is not None
+    # Empty image_url is harmless — the renderer skips it.
+    assert built.embed.image_url == ""
