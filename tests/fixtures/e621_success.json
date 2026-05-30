@@ -1,0 +1,18 @@
+{
+  "posts": [
+    {
+      "id": 998877,
+      "rating": "s",
+      "fav_count": 256,
+      "score": { "up": 300, "down": -10, "total": 290 },
+      "file": {
+        "ext": "jpg",
+        "url": "https://static1.e926.net/data/aa/bb/aabbccddeeff.jpg"
+      },
+      "sample": {
+        "has": true,
+        "url": "https://static1.e926.net/data/sample/aa/bb/aabbccddeeff.jpg"
+      }
+    }
+  ]
+}
