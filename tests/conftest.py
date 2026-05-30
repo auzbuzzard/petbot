@@ -7,6 +7,7 @@ that replays a saved JSON fixture, keeping the NSFW-content APIs out of CI.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import TracebackType
 from typing import Any
@@ -18,6 +19,32 @@ from petbot.core.skills.context import Capabilities, Platform, SkillContext, Use
 from petbot.core.skills.ports import VoicePort
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--run-live",
+        action="store_true",
+        default=False,
+        help="Run live tests that hit the real booru APIs (needs network allowlist).",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "live: hits real external APIs; off by default. Enable with --run-live or PETBOT_LIVE=1.",
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    # Live tests stay opt-in so CI remains fully offline and secret-free.
+    if config.getoption("--run-live") or os.environ.get("PETBOT_LIVE"):
+        return
+    skip_live = pytest.mark.skip(reason="live test: pass --run-live or set PETBOT_LIVE=1")
+    for item in items:
+        if "live" in item.keywords:
+            item.add_marker(skip_live)
 
 
 def make_context(
