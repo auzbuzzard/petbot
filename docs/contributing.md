@@ -47,5 +47,16 @@ from `petbot.core`.
 - External APIs are mocked with saved JSON fixtures in `tests/fixtures/` plus
   the `FakeSession` in `tests/conftest.py`. Add new fixtures (including
   error/empty cases) rather than calling the real site.
+- **Live integration tests** live in `tests/live/` and are **off by default**
+  (CI stays offline/secret-free). They hit the real Derpibooru/e621 APIs, so
+  they need outbound access to `derpibooru.org` and `e926.net`/`e621.net`. Run
+  them deliberately once those hosts are reachable:
+
+  ```bash
+  PETBOT_LIVE=1 pytest tests/live -v   # or: pytest tests/live -v --run-live
+  ```
+
+  On Claude Code on the web, allow those hosts via the environment's **Network
+  access → Custom** setting before running.
 - The Discord gateway bootstrap is smoke-tested manually against a dev guild,
   not in CI.
