@@ -29,6 +29,15 @@ _COLOR_QUESTIONABLE = 0xFFFF00
 _COLOR_EXPLICIT = 0xFF0000
 
 
+def _absolute_url(url: str) -> str:
+    """Make a possibly protocol-relative Derpibooru URL absolute.
+
+    ``view_url`` is absolute, but ``representations`` URLs are historically
+    protocol-relative (``//derpicdn.net/...``); Discord needs a scheme.
+    """
+    return f"https:{url}" if url.startswith("//") else url
+
+
 class Rating(Enum):
     safe = "safe"
     suggestive = "suggestive"
@@ -85,9 +94,8 @@ class ImageResult(datastruct.Result):
 
     @property
     def image_url(self) -> str:
-        if getattr(self, "view_url", None):
-            return self.view_url
-        return self.representations.get("large", "")
+        raw = getattr(self, "view_url", None) or self.representations.get("large", "")
+        return _absolute_url(str(raw))
 
 
 class SearchQuery(datastruct.SearchQuery):
