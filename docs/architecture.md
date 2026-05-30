@@ -65,10 +65,11 @@ A skill declares `requires={"voice"}`; the
 whose `Capabilities` advertise that port. On a voice-less platform the skill is
 simply never exposed.
 
-> **Known limitation (deliberate):** `VoicePort` has no "track finished"
-> callback, so the music queue advances on an explicit `/music skip` or `/music
-> stop`, not automatically when a track ends. Adding a finished-callback to the
-> port is an additive follow-up that doesn't change the boundary.
+`VoicePort.play` accepts an optional `on_finished` callback; the Discord adapter
+invokes it (via the player's `after` hook, hopped back onto the event loop) when
+a track ends on its own, so the music queue **auto-advances**. The skill guards
+against stale callbacks with a per-conversation play token, so an explicit
+`/music skip` or `/music stop` never double-advances.
 
 ## Rendering is per-platform
 

@@ -6,9 +6,11 @@ transport is delegated to the :class:`~petbot.core.skills.ports.VoicePort` the
 adapter injects via ``ctx.voice``. The skill therefore declares
 ``requires={"voice"}`` and is only offered on frontends that supply that port.
 
-Known limitation: :class:`VoicePort` has no "track finished" callback, so the
-queue advances on an explicit ``skip``/``stop`` rather than automatically. This
-is documented in ``docs/architecture.md`` as a deliberate, additive follow-up.
+The queue **auto-advances**: each track is started with an ``on_finished``
+callback that plays the next queued track when the current one ends on its own.
+A per-conversation ``play_token`` guards against stale callbacks — an explicit
+``skip``/``stop`` bumps the token, so the finished-callback fired by tearing
+down the old track is recognised as superseded and ignored (no double-advance).
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from typing import Any, ClassVar
 
 from petbot.core.skills.base import Skill
 from petbot.core.skills.context import SkillContext, SkillResult
+from petbot.core.skills.ports import TrackFinishedCallback, VoicePort
 
 #: Skip votes required (besides the requester, who may always self-skip).
 SKIP_THRESHOLD = 3
@@ -42,6 +45,9 @@ class ConversationMusic:
     current: Track | None = None
     skip_votes: set[str] = field(default_factory=set)
     volume: float = 0.6
+    # Bumped whenever playback changes by an explicit action; lets a finished
+    # callback detect that it has been superseded.
+    play_token: int = 0
 
 
 class MusicSkill(Skill):
@@ -95,12 +101,41 @@ class MusicSkill(Skill):
         if action == "skip":
             return await self._skip(ctx, state)
         if action == "stop":
-            return await self._stop(ctx, state)
+            return await self._stop(ctx.voice, state)
         if action == "queue":
             return self._show_queue(state)
         if action == "volume":
             return self._set_volume(args, state)
         return SkillResult.failure(f"Unknown music action: {action!r}.")
+
+    async def _start(self, state: ConversationMusic, voice: VoicePort, track: Track) -> None:
+        """Make ``track`` the current track and begin playing it."""
+        state.current = track
+        state.skip_votes.clear()
+        state.play_token += 1
+        token = state.play_token
+        await voice.play(
+            track.source_url,
+            volume=state.volume,
+            on_finished=self._on_finished(state, voice, token),
+        )
+
+    def _on_finished(
+        self, state: ConversationMusic, voice: VoicePort, token: int
+    ) -> TrackFinishedCallback:
+        """Build the callback that advances the queue when a track ends naturally."""
+
+        async def _advance_on_end() -> None:
+            if token != state.play_token:
+                # Superseded by an explicit skip/stop or a newer track.
+                return
+            if state.queue:
+                await self._start(state, voice, state.queue.popleft())
+            else:
+                state.current = None
+                state.play_token += 1
+
+        return _advance_on_end
 
     async def _play(
         self, args: Mapping[str, Any], ctx: SkillContext, state: ConversationMusic
@@ -118,9 +153,7 @@ class MusicSkill(Skill):
             state.queue.append(track)
             return SkillResult.message(f"Enqueued **{query}** (position {len(state.queue)}).")
 
-        state.current = track
-        state.skip_votes.clear()
-        await ctx.voice.play(track.source_url, volume=state.volume)
+        await self._start(state, ctx.voice, track)
         return SkillResult.message(f"▶️ Now playing **{query}**.")
 
     async def _skip(self, ctx: SkillContext, state: ConversationMusic) -> SkillResult:
@@ -137,25 +170,27 @@ class MusicSkill(Skill):
                 votes = len(state.skip_votes)
                 return SkillResult.message(f"Skip vote added [{votes}/{SKIP_THRESHOLD}].")
 
-        return await self._advance(ctx, state)
+        return await self._advance(state, ctx.voice)
 
-    async def _advance(self, ctx: SkillContext, state: ConversationMusic) -> SkillResult:
-        assert ctx.voice is not None
-        state.skip_votes.clear()
+    async def _advance(self, state: ConversationMusic, voice: VoicePort) -> SkillResult:
         if state.queue:
-            state.current = state.queue.popleft()
-            await ctx.voice.play(state.current.source_url, volume=state.volume)
-            return SkillResult.message(f"⏭️ Skipped. Now playing **{state.current.source_url}**.")
+            next_track = state.queue.popleft()
+            # _start bumps play_token, so the finished-callback fired by tearing
+            # down the current track is recognised as stale and ignored.
+            await self._start(state, voice, next_track)
+            return SkillResult.message(f"⏭️ Skipped. Now playing **{next_track.source_url}**.")
         state.current = None
-        await ctx.voice.stop()
+        state.skip_votes.clear()
+        state.play_token += 1  # invalidate the pending finished-callback
+        await voice.stop()
         return SkillResult.message("⏭️ Skipped. Nothing left in the queue.")
 
-    async def _stop(self, ctx: SkillContext, state: ConversationMusic) -> SkillResult:
-        assert ctx.voice is not None
+    async def _stop(self, voice: VoicePort, state: ConversationMusic) -> SkillResult:
         state.queue.clear()
         state.current = None
         state.skip_votes.clear()
-        await ctx.voice.stop()
+        state.play_token += 1  # invalidate the pending finished-callback
+        await voice.stop()
         return SkillResult.message("⏹️ Stopped and cleared the queue.")
 
     def _show_queue(self, state: ConversationMusic) -> SkillResult:
