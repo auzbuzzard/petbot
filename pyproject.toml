@@ -12,6 +12,7 @@ license = { text = "MIT" }
 dependencies = [
     "discord.py>=2.7,<2.8",
     "aiohttp>=3.9",
+    "pydantic>=2",
     "yt-dlp>=2024.0.0",
     "numexpr>=2.8",
     "numpy>=1.26",
@@ -49,6 +50,7 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
+plugins = ["pydantic.mypy"]
 files = ["petbot", "tests"]
 # discord.py and third-party libs ship their own types or are ignored below.
 

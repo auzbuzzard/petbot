@@ -16,7 +16,7 @@ import discord
 from discord.ext import commands
 
 from petbot.config import Settings
-from petbot.core.capabilities.boorus.datastruct import HttpSession
+from petbot.core.capabilities.boorus.http import HttpSession
 from petbot.core.skills.booru_skill import DerpiSkill, E621Skill
 from petbot.core.skills.context import Capabilities
 from petbot.core.skills.math_skill import MathSkill

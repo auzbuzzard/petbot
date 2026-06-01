@@ -1,7 +1,7 @@
 # PetBot
 
 A modern, slash-command-first Discord bot. PetBot searches imageboards
-(Derpibooru, e621/e926), evaluates math expressions, and plays audio in voice
+(Derpibooru, e621), evaluates math expressions, and plays audio in voice
 channels — all behind a **platform-neutral core** so the same skills can power
 other frontends (Telegram, web, an LLM chat layer) later.
 
@@ -15,12 +15,13 @@ This is the 2.0 revival of a 2018 bot. The original (built on the long-removed
 | --- | --- |
 | `/ping` | Liveness check. |
 | `/math expression:<expr>` | Evaluate an arithmetic expression (`numexpr`). |
-| `/derpi tags:<tags>` | Search Derpibooru. |
-| `/e621 tags:<tags>` | Search e621/e926. |
+| `/derpi tags:<tags> [sort:<order>]` | Search Derpibooru. |
+| `/e621 tags:<tags> [sort:<order>]` | Search e621. |
 | `/music play\|skip\|stop\|queue\|volume` | Voice playback with a queue and skip-votes. |
 | `/purge count:<n>` | Bulk-delete messages (requires Manage Messages). |
 
-Explicit booru results are only returned in age-restricted (NSFW) channels.
+Booru results are restricted to the safe rating outside age-restricted (NSFW)
+channels; inside a NSFW channel every rating is returned.
 
 ## Quickstart
 

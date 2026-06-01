@@ -1,207 +1,137 @@
-"""e621 / e926 provider (furry imageboard), modernized.
+"""e621 provider (furry imageboard), modern ``/posts.json`` schema.
 
-Endpoint moved from ``/post/index.json`` to ``/posts.json`` (response:
-``{"posts": [...]}``) with a nested post schema. A descriptive User-Agent is now
-mandatory — browser-spoofing UAs are blocked — and optional ``username``/
-``api_key`` HTTP basic auth raises rate limits. Explicit content uses e621; the
-safe mirror e926 is used otherwise. Returns a neutral ``SkillResult``.
+A descriptive User-Agent is mandatory (browser-spoofing UAs are blocked), and
+optional ``username``/``api_key`` HTTP basic auth raises rate limits. The safety
+floor is the ``rating:s`` search tag: a SFW channel adds it, a NSFW channel adds
+no rating tag at all. An error body is ``{"success": false, "message": "..."}``
+(e.g. the 422 returned when an anonymous search exceeds 40 tags).
 """
 
 from __future__ import annotations
 
-import re
-from collections.abc import Mapping, Sequence
-from enum import Enum
-from typing import Any
+from enum import StrEnum
 
 import aiohttp
+from pydantic import BaseModel, Field
 
-from petbot.core.capabilities.boorus import datastruct, errors
-from petbot.core.skills.context import EmbedSpec, SkillResult
-
-_ARG_PATTERN = re.compile(r"--([\w:]+)")
-
-_EXPLICIT_ROOT = "https://e621.net/"
-_SAFE_ROOT = "https://e926.net/"
-
-_COLOR_SAFE = 0x00FF00
-_COLOR_QUESTIONABLE = 0xFFFF00
-_COLOR_EXPLICIT = 0xFF0000
+from petbot.core.capabilities.boorus.base import BooruResponse, ErrorResponse
+from petbot.core.capabilities.boorus.http import HttpResponseContext, HttpSession
+from petbot.core.capabilities.boorus.types import Post, SearchRequest
 
 
-class Rating(Enum):
+class Sort(StrEnum):
+    random = "random"
+    score = "score"
+    favcount = "favcount"
+    newest = "id"
+    comments = "comment_count"
+
+
+class Rating(StrEnum):
     safe = "s"
     questionable = "q"
     explicit = "e"
 
 
-def root_url(*, explicit: bool) -> str:
-    return _EXPLICIT_ROOT if explicit else _SAFE_ROOT
+_COLOR = {
+    Rating.safe: 0x00FF00,
+    Rating.questionable: 0xFFFF00,
+    Rating.explicit: 0xFF0000,
+}
+_NAME = "e621"
+_ROOT = "https://e621.net/"
+_ICON = "https://e621.net/favicon-32x32.png"
 
 
-def site_name(*, explicit: bool) -> str:
-    return "e621" if explicit else "e926"
+class _File(BaseModel):
+    url: str | None = None
+    ext: str = ""
 
 
-class ImageResult(datastruct.Result):
-    """A single e621 post, reading the modern nested schema."""
+class _Sample(BaseModel):
+    url: str | None = None
 
-    def __init__(self, data: Mapping[str, Any]):
-        super().__init__(data)
-        file_block: Mapping[str, Any] = data.get("file", {})
-        sample_block: Mapping[str, Any] = data.get("sample", {})
-        score_block: Mapping[str, Any] = data.get("score", {})
 
-        self.post_id: int = int(data.get("id", 0))
-        self.file_ext: str = str(file_block.get("ext", ""))
-        self.file_url: str = str(file_block.get("url") or "")
-        self.sample_url: str = str(sample_block.get("url") or self.file_url)
-        self.score_total: int = int(score_block.get("total", 0))
-        self.fav_count: int = int(data.get("fav_count", 0))
-        self.rating = self._rating(str(data.get("rating", "")))
+class _Score(BaseModel):
+    total: int = 0
 
-    @staticmethod
-    def _rating(raw: str) -> Rating | None:
-        try:
-            return Rating(raw)
-        except ValueError:
+
+class _Post(BaseModel):
+    id: int
+    file: _File = Field(default_factory=_File)
+    sample: _Sample = Field(default_factory=_Sample)
+    score: _Score = Field(default_factory=_Score)
+    fav_count: int = 0
+    rating: Rating = Rating.safe  # "s"/"q"/"e" coerced into the enum by pydantic
+
+
+class Response(BooruResponse):
+    posts: list[_Post] = Field(default_factory=list)
+
+    def to_post(self) -> Post | None:
+        if not self.posts:
             return None
+        post = self.posts[0]
+        url = post.sample.url or post.file.url
+        if not url:  # blocked posts have null urls
+            return None
+        return Post(
+            post_id=post.id,
+            image_url=url,
+            color=_COLOR[post.rating],
+            is_safe=post.rating is Rating.safe,
+            score=post.score.total,
+            favorites=post.fav_count,
+            file_ext=post.file.ext,
+            page_url=f"{_ROOT}posts/{post.id}",
+            site_name=_NAME,
+            site_root=_ROOT,
+            site_icon_url=_ICON,
+        )
 
-    @property
-    def is_explicit(self) -> bool:
-        return self.rating is not Rating.safe
+
+class Error(ErrorResponse):
+    success: bool = True
+    message: str | None = None
+
+    def reason(self) -> str | None:
+        return self.message if self.success is False else None
 
 
-class SearchQuery(datastruct.SearchQuery):
+class E621Provider:
+    name: str = _NAME
+    response_model: type[BooruResponse] = Response
+    error_model: type[ErrorResponse] = Error
+
     def __init__(
         self,
-        tags: Sequence[str],
-        args: Mapping[str, Any],
         *,
-        session: datastruct.HttpSession,
         user_agent: str,
         username: str | None = None,
         api_key: str | None = None,
     ):
-        super().__init__(tags, args, session=session)
         self._user_agent = user_agent
         self._username = username
         self._api_key = api_key
 
-    def endpoint(self) -> str:
-        return root_url(explicit=self.is_explicit) + "posts.json"
-
-    def headers(self) -> dict[str, str]:
-        # e621 mandates a descriptive, non-browser User-Agent.
-        return {"User-Agent": self._user_agent}
-
-    def auth(self) -> aiohttp.BasicAuth | None:
-        if self._username and self._api_key:
-            return aiohttp.BasicAuth(self._username, self._api_key)
-        return None
-
-    def params(self) -> dict[str, Any]:
-        query_tags = [*self.tags, "order:random"]
-        return {"tags": " ".join(query_tags), "limit": 1}
-
-    def web_url(self) -> str:
-        joined = "+".join(tag.replace(" ", "_") for tag in self.tags)
-        return f"{root_url(explicit=self.is_explicit)}posts?tags={joined}"
-
-
-def parse_args(message: str) -> tuple[dict[str, Any], list[str]]:
-    """Split a raw query into ``(args, tags)``. ``--e`` requests explicit."""
-    flags = set(_ARG_PATTERN.findall(message))
-    args: dict[str, Any] = {"explicit": "e" in flags}
-    cleaned = _ARG_PATTERN.sub("", message)
-    tags = [tag.strip() for tag in cleaned.split(",") if tag.strip()]
-    return args, tags
-
-
-def image(json_dict: Mapping[str, Any]) -> ImageResult | None:
-    """Extract the first post, raising on an explicit site failure payload."""
-    if json_dict.get("success") is False:
-        reason = json_dict.get("reason") or json_dict.get("message")
-        raise errors.SiteFailureStatusError(
-            site_message=str(reason or ""),
-            print_message=(
-                f"uwu I couldn't do that. e621 says: {reason}"
-                if reason
-                else "uwu I couldn't do that — e621 said something I didn't understand ;~;"
-            ),
+    def request(
+        self,
+        session: HttpSession,
+        search: SearchRequest,
+        *,
+        sort: Sort = Sort.random,
+    ) -> HttpResponseContext:
+        tags = [*search.tags, f"order:{sort.value}"]
+        if search.safe_only:
+            tags.append(f"rating:{Rating.safe.value}")  # NSFW: no rating tag → all ratings
+        auth = (
+            aiohttp.BasicAuth(self._username, self._api_key)
+            if self._username and self._api_key
+            else None
         )
-    posts = json_dict.get("posts") or []
-    if not posts:
-        return None
-    return ImageResult(posts[0])
-
-
-def build_result(
-    query: SearchQuery,
-    result: ImageResult | None,
-    *,
-    author: str,
-) -> SkillResult:
-    """Turn a parsed post into a neutral :class:`SkillResult`."""
-    if result is None:
-        text = datastruct.result_greeter(
-            has_image=False, is_explicit=query.is_explicit, author=author
+        return session.get(
+            _ROOT + "posts.json",
+            params={"tags": " ".join(tags), "limit": 1},
+            headers={"User-Agent": self._user_agent},  # mandatory
+            auth=auth,
         )
-        return SkillResult.message(text.format(tags=", ".join(query.tags)))
-
-    greeter = datastruct.result_greeter(
-        has_image=True, is_explicit=result.is_explicit, author=author
-    )
-    explicit = result.is_explicit
-    name = site_name(explicit=explicit)
-    root = root_url(explicit=explicit)
-    color = (
-        _COLOR_SAFE
-        if result.rating is Rating.safe
-        else _COLOR_QUESTIONABLE
-        if result.rating is Rating.questionable
-        else _COLOR_EXPLICIT
-    )
-    description = (
-        f"score: {result.score_total} | faves: {result.fav_count} | "
-        f"source: [{name}]({root}posts/{result.post_id}) | filetype: {result.file_ext}"
-    )
-    embed = EmbedSpec(
-        title=f"results: {', '.join(query.tags)}",
-        description=description,
-        url=query.web_url(),
-        color=color,
-        image_url=result.sample_url,
-        author_name=name,
-        author_url=root,
-        author_icon_url="https://e621.net/favicon-32x32.png",
-    )
-    return SkillResult.message(greeter, embed=embed)
-
-
-async def search(
-    message: str,
-    *,
-    session: datastruct.HttpSession,
-    allows_explicit: bool,
-    author: str,
-    user_agent: str,
-    username: str | None = None,
-    api_key: str | None = None,
-) -> SkillResult:
-    """Parse, query, and render an e621/e926 search into a ``SkillResult``."""
-    args, tags = parse_args(message)
-    if args.get("explicit") and not allows_explicit:
-        return SkillResult.failure(
-            "Explicit results are only available in age-restricted (NSFW) channels."
-        )
-    query = SearchQuery(
-        tags,
-        args,
-        session=session,
-        user_agent=user_agent,
-        username=username,
-        api_key=api_key,
-    )
-    payload = await query.request()
-    return build_result(query, image(payload), author=author)
