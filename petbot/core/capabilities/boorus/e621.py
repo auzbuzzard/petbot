@@ -40,7 +40,7 @@ _COLOR = {
 }
 _NAME = "e621"
 _ROOT = "https://e621.net/"
-_ICON = "https://e621.net/favicon-32x32.png"
+_ICON = "https://e621.net/apple-touch-icon.png"
 
 
 class _File(BaseModel):
