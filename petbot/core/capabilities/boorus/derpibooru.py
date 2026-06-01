@@ -47,11 +47,10 @@ _ICON = "https://derpicdn.net/img/2017/10/22/1567638/thumb_small.jpeg"
 
 
 def _rating(tags: list[str]) -> Rating:
+    # Derpibooru rating tags are mutually exclusive; `reversed` makes the most
+    # explicit one win on the off chance several are present, defaulting to safe.
     names = {tag.lower() for tag in tags}
-    return next(
-        (r for r in (Rating.explicit, Rating.questionable, Rating.suggestive) if r.value in names),
-        Rating.safe,
-    )
+    return next((r for r in reversed(Rating) if r.value in names), Rating.safe)
 
 
 class _Repr(BaseModel):
