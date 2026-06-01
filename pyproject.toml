@@ -7,7 +7,7 @@ name = "petbot"
 version = "2.0.0"
 description = "A modern, slash-command-first Discord bot with a platform-neutral core."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 dependencies = [
     "discord.py>=2.7,<2.8",
@@ -42,13 +42,13 @@ include = ["petbot*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 files = ["petbot", "tests"]
