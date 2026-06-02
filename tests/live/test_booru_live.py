@@ -12,12 +12,10 @@ Optional e621 auth: E621_USERNAME / E621_API_KEY.
 from __future__ import annotations
 
 import os
-from typing import cast
 
-import aiohttp
+import httpx
 import pytest
 
-from petbot.core.capabilities.boorus.http import HttpSession
 from petbot.core.skills.booru_skill import DerpiSkill, E621Skill
 from petbot.core.skills.context import Capabilities, Platform, SkillContext, User
 
@@ -39,11 +37,8 @@ def _ctx(*, allows_explicit: bool = False) -> SkillContext:
 
 
 async def test_derpi_live_returns_usable_image() -> None:
-    async with aiohttp.ClientSession() as session:
-        skill = DerpiSkill(
-            session=cast(HttpSession, session),
-            api_key=os.environ.get("DERPIBOORU_API_KEY") or None,
-        )
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        skill = DerpiSkill(client=client, api_key=os.environ.get("DERPIBOORU_API_KEY") or None)
         result = await skill.run({"tags": "pony"}, _ctx())
     assert not result.is_error, result.error
     assert result.embed is not None
@@ -51,9 +46,9 @@ async def test_derpi_live_returns_usable_image() -> None:
 
 
 async def test_e621_live_safe_search_returns_usable_image() -> None:
-    async with aiohttp.ClientSession() as session:
+    async with httpx.AsyncClient(timeout=20.0) as client:
         skill = E621Skill(
-            session=cast(HttpSession, session),
+            client=client,
             user_agent=_USER_AGENT,
             username=os.environ.get("E621_USERNAME") or None,
             api_key=os.environ.get("E621_API_KEY") or None,

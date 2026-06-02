@@ -1,44 +1,44 @@
 """The provider contract the generic engine talks to.
 
-Each site ships two pydantic models — a success body that knows how to become a
-:class:`~petbot.core.capabilities.boorus.types.Post`, and an error body that
-knows its own failure message — plus a provider object that names them. The
-engine never touches site-specific shapes; it only calls ``to_post`` and
-``reason`` through these bases.
+A provider owns everything site-specific: its full native ``Sort``/``Rating``/
+``FileType`` vocabularies, how a raw tag string is split (each site has its own
+convention), how a :class:`SearchRequest` is serialized into an HTTP request, and
+how a response body becomes a :class:`Post` or an error message. The engine only
+ever calls ``build_request``/``parse``/``error`` and never inspects vocabulary.
 """
 
 from __future__ import annotations
 
 from typing import Protocol
 
-from pydantic import BaseModel
+import httpx
 
-from petbot.core.capabilities.boorus.types import Post
-
-
-class BooruResponse(BaseModel):
-    """A decoded *success* body. Subclasses map their JSON onto a ``Post``."""
-
-    def to_post(self) -> Post | None:
-        """Return the first result as a neutral ``Post``, or ``None`` if empty."""
-        raise NotImplementedError
-
-
-class ErrorResponse(BaseModel):
-    """A decoded *error* body.
-
-    ``reason`` returns the site's message when this body actually represents a
-    failure, else ``None`` — so it is safe to validate against any body (pydantic
-    ignores the extra success fields and ``reason`` simply returns ``None``).
-    """
-
-    def reason(self) -> str | None:
-        raise NotImplementedError
+from petbot.core.capabilities.boorus import tags
+from petbot.core.capabilities.boorus.types import Post, SearchRequest
 
 
 class BooruProvider(Protocol):
-    """The engine's entire view of a provider: a name and its two models."""
+    """Everything the engine needs from a site, and nothing site-specific leaks."""
 
     name: str
-    response_model: type[BooruResponse]
-    error_model: type[ErrorResponse]
+    site_name: str
+    #: The provider's full native vocabularies (subclasses of the abstract bases).
+    Sort: type[tags.Sort]
+    Rating: type[tags.Rating]
+    FileType: type[tags.FileType]
+
+    def parse_tags(self, raw: str) -> tuple[str, ...]:
+        """Split a raw user tag string per this site's convention."""
+        ...
+
+    def build_request(self, client: httpx.AsyncClient, search: SearchRequest) -> httpx.Request:
+        """Serialize a search into a ready-to-send request (incl. headers/auth)."""
+        ...
+
+    def parse(self, body: object) -> Post | None:
+        """Turn a decoded success body into the first result, or ``None``."""
+        ...
+
+    def error(self, body: object) -> str | None:
+        """Return the site's failure message if ``body`` is an error, else ``None``."""
+        ...

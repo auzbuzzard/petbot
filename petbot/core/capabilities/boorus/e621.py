@@ -1,46 +1,72 @@
 """e621 provider (furry imageboard), modern ``/posts.json`` schema.
 
-A descriptive User-Agent is mandatory (browser-spoofing UAs are blocked), and
-optional ``username``/``api_key`` HTTP basic auth raises rate limits. The safety
-floor is the ``rating:s`` search tag: a SFW channel adds it, a NSFW channel adds
-no rating tag at all. An error body is ``{"success": false, "message": "..."}``
-(e.g. the 422 returned when an anonymous search exceeds 40 tags).
+Tags are space-separated and use underscores within a tag (the user follows the
+site's own convention; we don't coerce). A descriptive User-Agent is mandatory,
+and optional ``username``/``api_key`` basic auth (sent as an ``Authorization``
+header so the engine stays generic) raises rate limits. The safety floor is the
+``rating:s`` system tag. Errors come back as ``{"success": false, "message": …}``
+(e.g. the 422 when an anonymous search exceeds 40 tags).
 """
 
 from __future__ import annotations
 
-from enum import StrEnum
+import base64
 
-import aiohttp
+import httpx
 from pydantic import BaseModel, Field
 
-from petbot.core.capabilities.boorus.base import BooruResponse, ErrorResponse
-from petbot.core.capabilities.boorus.http import HttpResponseContext, HttpSession
+from petbot.core.capabilities.boorus import tags
 from petbot.core.capabilities.boorus.types import Post, SearchRequest
 
+_NAME = "e621"
+_ROOT = "https://e621.net/"
+_ENDPOINT = "https://e621.net/posts.json"
+_ICON = "https://e621.net/apple-touch-icon.png"
+_MAX_LIMIT = 320  # e621 rejects larger page sizes
 
-class Sort(StrEnum):
+
+class Sort(tags.Sort):
     random = "random"
     score = "score"
-    favcount = "favcount"
-    newest = "id"
+    score_asc = "score_asc"
+    favorites = "favcount"
+    favorites_asc = "favcount_asc"
     comments = "comment_count"
+    comments_asc = "comment_count_asc"
+    comment_bumped = "comment_bumped"
+    newest = "created"
+    oldest = "created_asc"
+    updated = "updated"
+    updated_asc = "updated_asc"
+    id_oldest = "id"
+    id_newest = "id_desc"
+    mpixels = "mpixels"
+    mpixels_asc = "mpixels_asc"
+    filesize = "filesize"
+    filesize_asc = "filesize_asc"
+    duration = "duration"
+    duration_asc = "duration_asc"
+    landscape = "landscape"
+    portrait = "portrait"
+    tagcount = "tagcount"
+    hot = "hot"
 
 
-class Rating(StrEnum):
+class Rating(tags.Rating):
     safe = "s"
     questionable = "q"
     explicit = "e"
 
 
-_COLOR = {
-    Rating.safe: 0x00FF00,
-    Rating.questionable: 0xFFFF00,
-    Rating.explicit: 0xFF0000,
-}
-_NAME = "e621"
-_ROOT = "https://e621.net/"
-_ICON = "https://e621.net/apple-touch-icon.png"
+class FileType(tags.FileType):
+    jpg = "jpg"
+    png = "png"
+    gif = "gif"
+    webm = "webm"
+    swf = "swf"
+
+
+_COLOR = {Rating.safe: 0x00FF00, Rating.questionable: 0xFFFF00, Rating.explicit: 0xFF0000}
 
 
 class _File(BaseModel):
@@ -65,13 +91,55 @@ class _Post(BaseModel):
     rating: Rating = Rating.safe  # "s"/"q"/"e" coerced into the enum by pydantic
 
 
-class Response(BooruResponse):
+class _Response(BaseModel):
     posts: list[_Post] = Field(default_factory=list)
 
-    def to_post(self) -> Post | None:
-        if not self.posts:
+
+class _Error(BaseModel):
+    success: bool = True
+    message: str | None = None
+
+
+class E621Provider:
+    name: str = _NAME
+    site_name: str = _NAME
+    Sort: type[tags.Sort] = Sort
+    Rating: type[tags.Rating] = Rating
+    FileType: type[tags.FileType] = FileType
+
+    def __init__(
+        self,
+        *,
+        user_agent: str,
+        username: str | None = None,
+        api_key: str | None = None,
+    ):
+        self._user_agent = user_agent
+        self._username = username
+        self._api_key = api_key
+
+    def parse_tags(self, raw: str) -> tuple[str, ...]:
+        # e621 separates tags by spaces; underscores live *within* a tag.
+        return tuple(raw.split())
+
+    def build_request(self, client: httpx.AsyncClient, search: SearchRequest) -> httpx.Request:
+        words = [*search.tags, *self._system_tags(search)]
+        return client.build_request(
+            "GET",
+            _ENDPOINT,
+            params={
+                "tags": " ".join(words),
+                "limit": min(max(search.limit, 1), _MAX_LIMIT),
+                "page": search.page,
+            },
+            headers={"User-Agent": self._user_agent, **self._auth_header()},
+        )
+
+    def parse(self, body: object) -> Post | None:
+        posts = _Response.model_validate(body).posts
+        if not posts:
             return None
-        post = self.posts[0]
+        post = posts[0]
         url = post.sample.url or post.file.url
         if not url:  # blocked posts have null urls
             return None
@@ -89,49 +157,26 @@ class Response(BooruResponse):
             site_icon_url=_ICON,
         )
 
+    def error(self, body: object) -> str | None:
+        e = _Error.model_validate(body)
+        return e.message if e.success is False else None
 
-class Error(ErrorResponse):
-    success: bool = True
-    message: str | None = None
+    def _system_tags(self, s: SearchRequest) -> list[str]:
+        out: list[str] = []
+        if s.safe_only:
+            out.append(f"rating:{Rating.safe.value}")
+        elif s.rating is not None:
+            out.append(f"rating:{s.rating.value}")
+        if s.sort is not None:
+            out.append(f"order:{s.sort.value}")
+        if s.file_type is not None:
+            out.append(f"type:{s.file_type.value}")
+        out += tags.operator_range("score", s.score)
+        out += tags.operator_range("favcount", s.favorites)
+        return out
 
-    def reason(self) -> str | None:
-        return self.message if self.success is False else None
-
-
-class E621Provider:
-    name: str = _NAME
-    response_model: type[BooruResponse] = Response
-    error_model: type[ErrorResponse] = Error
-
-    def __init__(
-        self,
-        *,
-        user_agent: str,
-        username: str | None = None,
-        api_key: str | None = None,
-    ):
-        self._user_agent = user_agent
-        self._username = username
-        self._api_key = api_key
-
-    def request(
-        self,
-        session: HttpSession,
-        search: SearchRequest,
-        *,
-        sort: Sort = Sort.random,
-    ) -> HttpResponseContext:
-        tags = [*search.tags, f"order:{sort.value}"]
-        if search.safe_only:
-            tags.append(f"rating:{Rating.safe.value}")  # NSFW: no rating tag → all ratings
-        auth = (
-            aiohttp.BasicAuth(self._username, self._api_key)
-            if self._username and self._api_key
-            else None
-        )
-        return session.get(
-            _ROOT + "posts.json",
-            params={"tags": " ".join(tags), "limit": 1},
-            headers={"User-Agent": self._user_agent},  # mandatory
-            auth=auth,
-        )
+    def _auth_header(self) -> dict[str, str]:
+        if self._username and self._api_key:
+            token = base64.b64encode(f"{self._username}:{self._api_key}".encode()).decode()
+            return {"Authorization": f"Basic {token}"}
+        return {}

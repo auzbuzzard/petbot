@@ -15,8 +15,8 @@ This is the 2.0 revival of a 2018 bot. The original (built on the long-removed
 | --- | --- |
 | `/ping` | Liveness check. |
 | `/math expression:<expr>` | Evaluate an arithmetic expression (`numexpr`). |
-| `/derpi tags:<tags> [sort:<order>]` | Search Derpibooru. |
-| `/e621 tags:<tags> [sort:<order>]` | Search e621. |
+| `/derpi tags:<tags> [sort] [file_type] [min_score]` | Search Derpibooru (comma-separated tags). |
+| `/e621 tags:<tags> [sort] [file_type] [min_score]` | Search e621 (space-separated tags, `_` within a tag). |
 | `/music play\|skip\|stop\|queue\|volume` | Voice playback with a queue and skip-votes. |
 | `/purge count:<n>` | Bulk-delete messages (requires Manage Messages). |
 

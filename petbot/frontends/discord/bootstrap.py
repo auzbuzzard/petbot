@@ -1,7 +1,7 @@
 """Discord gateway bootstrap: intents, dependency wiring, and slash-command sync.
 
 This module owns the live connection and is therefore smoke-tested manually
-against a dev guild rather than in CI. It builds the shared aiohttp session and
+against a dev guild rather than in CI. It builds the shared httpx client and
 the skill registry, attaches the cogs, and syncs the command tree (instantly to
 the dev guild in ``dev``, globally in ``prod``).
 """
@@ -9,14 +9,12 @@ the dev guild in ``dev``, globally in ``prod``).
 from __future__ import annotations
 
 import logging
-from typing import cast
 
-import aiohttp
 import discord
+import httpx
 from discord.ext import commands
 
 from petbot.config import Settings
-from petbot.core.capabilities.boorus.http import HttpSession
 from petbot.core.skills.booru_skill import DerpiSkill, E621Skill
 from petbot.core.skills.context import Capabilities
 from petbot.core.skills.math_skill import MathSkill
@@ -50,19 +48,16 @@ class PetBot(commands.Bot):
             description="PetBot",
         )
         self.settings = settings
-        self.session: aiohttp.ClientSession | None = None
+        self.http_client: httpx.AsyncClient | None = None
         self.registry: SkillRegistry | None = None
 
     async def setup_hook(self) -> None:
-        self.session = aiohttp.ClientSession()
-        # aiohttp.ClientSession provides everything HttpSession needs; the cast
-        # bridges its typed **kwargs signature to our structural protocol.
-        http: HttpSession = cast(HttpSession, self.session)
+        self.http_client = httpx.AsyncClient(timeout=20.0)
 
         math_skill = MathSkill()
-        derpi_skill = DerpiSkill(session=http, api_key=self.settings.derpibooru_api_key)
+        derpi_skill = DerpiSkill(client=self.http_client, api_key=self.settings.derpibooru_api_key)
         e621_skill = E621Skill(
-            session=http,
+            client=self.http_client,
             user_agent=self.settings.user_agent,
             username=self.settings.e621_username,
             api_key=self.settings.e621_api_key,
@@ -95,8 +90,8 @@ class PetBot(commands.Bot):
             log.info("Logged in as %s (discord.py %s).", self.user, discord.__version__)
 
     async def close(self) -> None:
-        if self.session is not None:
-            await self.session.close()
+        if self.http_client is not None:
+            await self.http_client.aclose()
         await super().close()
 
 
