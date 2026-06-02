@@ -1,10 +1,15 @@
-"""Booru (imageboard) search providers, modernized and platform-neutral.
+"""Booru (imageboard) search providers, platform-neutral.
 
-Each provider module (:mod:`derpibooru`, :mod:`e621`) exposes the same shape:
-argument parsing, an async :class:`SearchQuery`, response parsing, and a builder
-that returns a neutral :class:`~petbot.core.skills.context.SkillResult`. HTTP is
-performed through an injected :class:`aiohttp.ClientSession` (no module-global
-connection pool).
+Layout:
+
+- :mod:`tags` — the abstract search vocabulary (``SystemTag`` → ``Sort``/
+  ``Rating``/``FileType``) and the ``NumericFilter`` concept, shared by all sites.
+- :mod:`types` — neutral ``SearchRequest`` in, ``Post`` out (frozen dataclasses).
+- :mod:`base` — the ``BooruProvider`` protocol the engine talks to.
+- :mod:`engine` — the shared ``run_search`` every provider flows through (httpx).
+- :mod:`render` — ``Post`` → neutral ``SkillResult`` (plus the greeter).
+- :mod:`derpibooru`, :mod:`e621` — each owns its full native ``Sort``/``Rating``/
+  ``FileType`` vocabulary, pydantic response models, and request serialization.
 """
 
 from __future__ import annotations

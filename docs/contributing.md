@@ -30,8 +30,8 @@ pytest                                  # offline tests
 3. Register it in `petbot/frontends/discord/bootstrap.py` and add a thin cog in
    `petbot/frontends/discord/cogs/` that builds a context, calls the skill, and
    renders via `render.respond`.
-4. Add tests in `tests/` using `make_context(...)` and (for network) the
-   `FakeSession`/fixtures. Never hit a live API.
+4. Add tests in `tests/` using `make_context(...)` and (for network) mock the
+   HTTP transport with `respx` plus saved fixtures. Never hit a live API.
 
 ## Adding a frontend (adapter)
 
@@ -44,8 +44,9 @@ from `petbot.core`.
 ## Tests & fixtures
 
 - Core logic is tested directly (no gateway). See `tests/test_*_skill.py`.
-- External APIs are mocked with saved JSON fixtures in `tests/fixtures/` plus
-  the `FakeSession` in `tests/conftest.py`. Add new fixtures (including
-  error/empty cases) rather than calling the real site.
+- External APIs are mocked at the transport layer with `respx`, replaying saved
+  JSON fixtures from `tests/fixtures/`. Add new fixtures (including error/empty
+  cases) rather than calling the real site. Opt-in live checks live in
+  `tests/live/` and run only with `PETBOT_LIVE=1`.
 - The Discord gateway bootstrap is smoke-tested manually against a dev guild,
   not in CI.

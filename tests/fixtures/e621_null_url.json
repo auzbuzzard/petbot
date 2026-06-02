@@ -1,0 +1,12 @@
+{
+  "posts": [
+    {
+      "id": 112233,
+      "rating": "s",
+      "fav_count": 5,
+      "score": { "up": 10, "down": 0, "total": 10 },
+      "file": { "ext": "jpg", "url": null },
+      "sample": { "has": false, "url": null }
+    }
+  ]
+}
