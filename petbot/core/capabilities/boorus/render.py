@@ -9,6 +9,7 @@ shipped alongside this package).
 from __future__ import annotations
 
 import json
+import logging
 import random
 from collections.abc import Mapping, Sequence
 from functools import lru_cache
@@ -17,6 +18,8 @@ from typing import Any
 
 from petbot.core.capabilities.boorus.types import Post, SearchRequest
 from petbot.core.skills.context import EmbedSpec, SkillResult
+
+logger = logging.getLogger(__name__)
 
 _UTTERANCES_RESOURCE = "utterances.json"
 
@@ -84,4 +87,5 @@ def result_greeter(*, has_image: bool, is_explicit: bool, author: str) -> str:
         sentences += bucket["explicit"] if is_explicit else bucket["safe"]
         return random.choice(sentences).format(author=author)
     except (OSError, KeyError, ValueError):
+        logger.warning("Falling back to default greeter (utterances unavailable)", exc_info=True)
         return "I have found this image." if has_image else "I couldn't find anything."

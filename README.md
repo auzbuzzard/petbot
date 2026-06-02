@@ -25,7 +25,7 @@ channels; inside a NSFW channel every rating is returned.
 
 ## Quickstart
 
-Requirements: **Python 3.11+** and, for voice, the **FFmpeg** system binary.
+Requirements: **Python 3.12+** and, for voice, the **FFmpeg** system binary.
 
 ```bash
 pip install -e ".[dev]"      # install PetBot + dev tooling
@@ -36,7 +36,10 @@ cp .env.example .env         # then fill in your secrets/references
 
 All configuration is read from the environment (see `.env.example` for the full
 list). The required variable is `DISCORD_TOKEN`; `DEV_GUILD_ID` enables instant
-slash-command sync while developing.
+slash-command sync while developing. Logging is tunable with `LOG_LEVEL`
+(default `INFO`) and `LOG_FORMAT` (`plain` for human-readable dev output, `json`
+for non-blocking structured JSON-lines in prod) — see
+[`docs/adr/0004-logging.md`](docs/adr/0004-logging.md).
 
 **Recommended — 1Password (no plaintext secrets on disk):** keep the `op://`
 references in `.env` and launch with:

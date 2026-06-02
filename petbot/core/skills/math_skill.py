@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
@@ -10,6 +11,8 @@ import numexpr
 
 from petbot.core.skills.base import Skill
 from petbot.core.skills.context import SkillContext, SkillResult
+
+logger = logging.getLogger(__name__)
 
 
 def _evaluate(expression: str) -> Any:
@@ -46,5 +49,7 @@ class MathSkill(Skill):
         except Exception as exc:
             # Preserve the legacy behavior: the error is the *output*, shown in
             # the same code block, not an exceptional failure.
+            logger.debug("math: %r could not be evaluated: %s", expression, exc)
             return SkillResult.message(f"```py\n>>>\t{expression}\n<<<\t{exc}\n```")
+        logger.debug("math: %r -> %s", expression, result)
         return SkillResult.message(f"```py\n>>>\t{expression}\n<<<\t{result}\n```")

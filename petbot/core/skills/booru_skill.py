@@ -9,6 +9,7 @@ from ``ctx.capabilities.allows_explicit``, which the Discord adapter fills from
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
@@ -22,6 +23,8 @@ from petbot.core.capabilities.boorus.tags import FileType, NumericFilter, Sort
 from petbot.core.capabilities.boorus.types import SearchRequest
 from petbot.core.skills.base import Skill
 from petbot.core.skills.context import SkillContext, SkillResult
+
+logger = logging.getLogger(__name__)
 
 _NETWORK_FAILURE = "uwu the booru didn't answer — please try again in a bit."
 
@@ -87,8 +90,12 @@ async def _run(
     try:
         return await run_search(provider, client, search, author=ctx.user.display_name)
     except SiteFailureStatusError as exc:
+        # Already surfaced to the user as a friendly message; the engine logged
+        # the cause at WARNING, so this is just a breadcrumb.
+        logger.debug("%s search returned a site error: %s", provider.name, exc.site_message)
         return SkillResult.failure(exc.print_message)
     except (httpx.HTTPError, ValueError):
+        logger.warning("%s search failed to reach/parse the site", provider.name, exc_info=True)
         return SkillResult.failure(_NETWORK_FAILURE)
 
 

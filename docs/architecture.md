@@ -80,6 +80,28 @@ messages, lives entirely in
 [`render.py`](../petbot/frontends/discord/render.py). A Telegram adapter would
 render the same `SkillResult` into its own 4096-char messages.
 
+## Logging
+
+Logging follows the modern (3.12) shape: every module grabs
+`logger = logging.getLogger(__name__)` and just emits — **no** module configures
+handlers or levels at import time. The single configuration point is
+[`configure_logging`](../petbot/logging_setup.py), called from `bootstrap.run`
+before the bot starts. Config lives in JSON (loaded via `importlib.resources` +
+`logging.config.dictConfig`), with two packaged profiles:
+
+| Profile | When | Shape |
+| --- | --- | --- |
+| `plain` | dev (default) | one human-readable line → stderr |
+| `json` | prod (default) | structured JSON-lines, **non-blocking** via `QueueHandler`/`QueueListener`; INFO→stdout, WARNING+→stderr |
+
+`LOG_LEVEL` and `LOG_FORMAT` (read only by [`config.py`](../petbot/config.py))
+set the level and pick the profile. The queue profile keeps log I/O off the
+asyncio event loop (the "never block the loop" rule). Level discipline: DEBUG for
+request/parse internals, INFO for lifecycle, WARNING/ERROR for failures — and
+**never** log secrets (booru searches are logged from the neutral `SearchRequest`,
+never the wire URL). The rationale lives in
+[`adr/0004-logging.md`](adr/0004-logging.md).
+
 ## Why this shape
 
 See the ADRs in [`adr/`](adr/) for the load-bearing decisions: choosing

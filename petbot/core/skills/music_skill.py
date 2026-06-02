@@ -15,6 +15,7 @@ down the old track is recognised as superseded and ignored (no double-advance).
 
 from __future__ import annotations
 
+import logging
 from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -23,6 +24,8 @@ from typing import Any, ClassVar
 from petbot.core.skills.base import Skill
 from petbot.core.skills.context import SkillContext, SkillResult
 from petbot.core.skills.ports import TrackFinishedCallback, VoicePort
+
+logger = logging.getLogger(__name__)
 
 #: Skip votes required (besides the requester, who may always self-skip).
 SKIP_THRESHOLD = 3
@@ -114,6 +117,11 @@ class MusicSkill(Skill):
         state.skip_votes.clear()
         state.play_token += 1
         token = state.play_token
+        logger.info(
+            "music: now playing %r (requested by %s)",
+            track.source_url,
+            track.requested_by_name,
+        )
         await voice.play(
             track.source_url,
             volume=state.volume,
@@ -151,6 +159,7 @@ class MusicSkill(Skill):
         )
         if state.current is not None and ctx.voice.is_playing():
             state.queue.append(track)
+            logger.debug("music: enqueued %r at position %d", query, len(state.queue))
             return SkillResult.message(f"Enqueued **{query}** (position {len(state.queue)}).")
 
         await self._start(state, ctx.voice, track)
@@ -191,6 +200,7 @@ class MusicSkill(Skill):
         state.skip_votes.clear()
         state.play_token += 1  # invalidate the pending finished-callback
         await voice.stop()
+        logger.info("music: stopped playback and cleared the queue")
         return SkillResult.message("⏹️ Stopped and cleared the queue.")
 
     def _show_queue(self, state: ConversationMusic) -> SkillResult:

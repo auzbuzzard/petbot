@@ -25,8 +25,9 @@ from petbot.frontends.discord.cogs.booru_cog import BooruCog
 from petbot.frontends.discord.cogs.math_cog import MathCog
 from petbot.frontends.discord.cogs.music_cog import MusicCog
 from petbot.frontends.discord.cogs.ping_cog import PingCog
+from petbot.logging_setup import configure_logging
 
-log = logging.getLogger("petbot")
+log = logging.getLogger(__name__)
 
 # Capabilities the Discord frontend can offer (used to filter the registry, e.g.
 # for the Phase B LLM tool list). Discord can supply a VoicePort, so voice is on.
@@ -96,7 +97,13 @@ class PetBot(commands.Bot):
 
 
 def run(settings: Settings) -> None:
-    """Start the bot (blocking) with the given settings."""
-    logging.basicConfig(level=logging.INFO)
+    """Start the bot (blocking) with the given settings.
+
+    This is the single place logging is configured. ``log_handler=None`` stops
+    discord.py from installing its own handler, so its ``discord.*`` loggers
+    propagate into the handlers we set up here.
+    """
+    configure_logging(level=settings.log_level, fmt=settings.resolved_log_format)
+    log.info("Starting PetBot (env=%s, log_format=%s).", settings.env, settings.resolved_log_format)
     bot = PetBot(settings)
     bot.run(settings.discord_token, log_handler=None)

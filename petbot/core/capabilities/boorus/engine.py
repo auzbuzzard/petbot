@@ -9,6 +9,8 @@ body still raises rather than silently looking like "no results".
 
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from petbot.core.capabilities.boorus.base import BooruProvider
@@ -16,6 +18,8 @@ from petbot.core.capabilities.boorus.errors import SiteFailureStatusError
 from petbot.core.capabilities.boorus.render import render
 from petbot.core.capabilities.boorus.types import SearchRequest
 from petbot.core.skills.context import SkillResult
+
+logger = logging.getLogger(__name__)
 
 
 async def run_search(
@@ -26,24 +30,41 @@ async def run_search(
     author: str,
 ) -> SkillResult:
     """Send the search, surface any site/HTTP error, then render the first result."""
+    # Logged from the neutral SearchRequest, never the wire request — the latter
+    # can carry an api_key/User-Agent, and secrets must never reach the logs.
+    logger.debug(
+        "%s search: tags=%s safe_only=%s sort=%s",
+        provider.name,
+        search.tags,
+        search.safe_only,
+        search.sort,
+    )
     request = provider.build_request(client, search)
     response = await client.send(request)
+    logger.debug("%s responded HTTP %d", provider.name, response.status_code)
     body = _json_body(response)
 
     # 1. The site's own error message wins (best UX) — when the body decoded.
     if body is not None and (reason := provider.error(body)) is not None:
+        logger.warning("%s rejected the search: %s", provider.name, reason)
         raise SiteFailureStatusError(
             site_message=reason,
             print_message=f"uwu I couldn't do that. {provider.name} says: {reason}",
         )
     # 2. Any other non-2xx is still an error, even with no recognizable error body.
     if response.status_code >= 400:
+        logger.warning(
+            "%s returned HTTP %d with no recognizable error body",
+            provider.name,
+            response.status_code,
+        )
         raise SiteFailureStatusError(
             site_message=f"HTTP {response.status_code}",
             print_message=f"uwu {provider.name} returned an error (HTTP {response.status_code}).",
         )
     # 3. A 2xx we couldn't decode is an anomaly — surface it, don't fake "no results".
     if body is None:
+        logger.warning("%s returned a non-JSON %d response", provider.name, response.status_code)
         raise SiteFailureStatusError(
             site_message="non-JSON response",
             print_message=f"uwu {provider.name} sent a response I couldn't read.",

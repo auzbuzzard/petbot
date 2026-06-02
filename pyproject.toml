@@ -40,6 +40,7 @@ petbot = "petbot.__main__:main"
 include = ["petbot*"]
 
 [tool.setuptools.package-data]
+"petbot" = ["logging_configs/*.json"]
 "petbot.core.capabilities.boorus" = ["*.json"]
 
 [tool.ruff]

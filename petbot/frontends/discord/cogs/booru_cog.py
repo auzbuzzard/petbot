@@ -9,6 +9,7 @@ full native ordering via autocomplete (too many to fit Discord's 25-choice cap);
 
 from __future__ import annotations
 
+import logging
 from enum import StrEnum
 
 import discord
@@ -19,6 +20,8 @@ from petbot.core.capabilities.boorus import derpibooru, e621
 from petbot.core.skills.booru_skill import DerpiSkill, E621Skill
 from petbot.frontends.discord import render
 from petbot.frontends.discord.context import build_context
+
+logger = logging.getLogger(__name__)
 
 
 def _match_sort(sort_enum: type[StrEnum], current: str) -> list[app_commands.Choice[str]]:
@@ -57,6 +60,7 @@ class BooruCog(commands.Cog):
         min_score: int | None = None,
     ) -> None:
         await interaction.response.defer(thinking=True)
+        logger.debug("/derpi invoked by %s: tags=%r", interaction.user, tags)
         args = _args(tags, sort, file_type, min_score)
         args["descending"] = descending
         result = await self._derpi.run(args, build_context(interaction))
@@ -86,6 +90,7 @@ class BooruCog(commands.Cog):
         min_score: int | None = None,
     ) -> None:
         await interaction.response.defer(thinking=True)
+        logger.debug("/e621 invoked by %s: tags=%r", interaction.user, tags)
         result = await self._e621.run(
             _args(tags, sort, file_type, min_score), build_context(interaction)
         )
