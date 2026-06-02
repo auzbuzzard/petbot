@@ -28,25 +28,33 @@ async def run_search(
     """Send the search, surface any site/HTTP error, then render the first result."""
     request = provider.build_request(client, search)
     response = await client.send(request)
-    body = _decode(response)
+    body = _json_body(response)
 
+    # 1. The site's own error message wins (best UX) — when the body decoded.
     if body is not None and (reason := provider.error(body)) is not None:
         raise SiteFailureStatusError(
             site_message=reason,
             print_message=f"uwu I couldn't do that. {provider.name} says: {reason}",
         )
+    # 2. Any other non-2xx is still an error, even with no recognizable error body.
     if response.status_code >= 400:
         raise SiteFailureStatusError(
             site_message=f"HTTP {response.status_code}",
             print_message=f"uwu {provider.name} returned an error (HTTP {response.status_code}).",
         )
+    # 3. A 2xx we couldn't decode is an anomaly — surface it, don't fake "no results".
+    if body is None:
+        raise SiteFailureStatusError(
+            site_message="non-JSON response",
+            print_message=f"uwu {provider.name} sent a response I couldn't read.",
+        )
 
-    post = provider.parse(body) if body is not None else None
-    return render(post, request=search, author=author)
+    return render(provider.parse(body), request=search, author=author)
 
 
-def _decode(response: httpx.Response) -> object | None:
-    """JSON body, or ``None`` if the response is not JSON (e.g. a CDN error page)."""
+def _json_body(response: httpx.Response) -> object | None:
+    """Decoded JSON body, or ``None`` if it isn't JSON. A ``None`` body is never
+    swallowed — the caller always turns it into a raised error (never "no results")."""
     try:
         body: object = response.json()
     except ValueError:

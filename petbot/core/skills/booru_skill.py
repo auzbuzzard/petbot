@@ -26,27 +26,35 @@ from petbot.core.skills.context import SkillContext, SkillResult
 _NETWORK_FAILURE = "uwu the booru didn't answer — please try again in a bit."
 
 
-def _schema(*, sort: type[Sort], file_type: type[FileType], tags_desc: str) -> Mapping[str, Any]:
+def _schema(
+    *, sort: type[Sort], file_type: type[FileType], tags_desc: str, direction: bool
+) -> Mapping[str, Any]:
+    properties: dict[str, Any] = {
+        "tags": {"type": "string", "description": tags_desc},
+        "sort": {
+            "type": "string",
+            "enum": [m.value for m in sort],
+            "description": "How to order matches before picking one.",
+        },
+        "file_type": {
+            "type": "string",
+            "enum": [m.value for m in file_type],
+            "description": "Restrict results to a file type.",
+        },
+        "min_score": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Only results with at least this score.",
+        },
+    }
+    if direction:  # only sites with a separate direction axis (Derpibooru `sd`)
+        properties["descending"] = {
+            "type": "boolean",
+            "description": "Sort descending (default) or ascending.",
+        }
     return {
         "type": "object",
-        "properties": {
-            "tags": {"type": "string", "description": tags_desc},
-            "sort": {
-                "type": "string",
-                "enum": [m.value for m in sort],
-                "description": "How to order matches before picking one.",
-            },
-            "file_type": {
-                "type": "string",
-                "enum": [m.value for m in file_type],
-                "description": "Restrict results to a file type.",
-            },
-            "min_score": {
-                "type": "integer",
-                "minimum": 0,
-                "description": "Only results with at least this score.",
-            },
-        },
+        "properties": properties,
         "required": ["tags"],
         "additionalProperties": False,
     }
@@ -63,6 +71,7 @@ def _build_search(
         tags=provider.parse_tags(str(args["tags"])),
         safe_only=not ctx.capabilities.allows_explicit,
         sort=sort,
+        descending=bool(args.get("descending", True)),
         file_type=file_type,
         score=score,
     )
@@ -92,6 +101,7 @@ class DerpiSkill(Skill):
         sort=derpibooru.Sort,
         file_type=derpibooru.FileType,
         tags_desc="Comma-separated tags (spaces allowed within a tag).",
+        direction=True,
     )
 
     def __init__(self, *, client: httpx.AsyncClient, api_key: str | None = None):
@@ -111,6 +121,7 @@ class E621Skill(Skill):
         sort=e621.Sort,
         file_type=e621.FileType,
         tags_desc="Space-separated tags (use underscores within a tag, e.g. twilight_sparkle).",
+        direction=False,
     )
 
     def __init__(

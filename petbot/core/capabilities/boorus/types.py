@@ -23,11 +23,14 @@ class SearchRequest:
     ``False`` and applies no rating filter (``rating``, if given, still narrows).
     The ``sort``/``rating``/``file_type`` fields hold a *provider* enum member
     (its ``.value`` is the wire token); ``score``/``favorites`` are numeric ranges.
+    ``descending`` applies only where a site exposes direction as a separate axis
+    (Derpibooru ``sd``); e621 encodes direction in the ``sort`` member itself.
     """
 
     tags: tuple[str, ...]
     safe_only: bool = True
     sort: Sort | None = None
+    descending: bool = True  # applies where a site has a separate direction axis
     rating: Rating | None = None
     file_type: FileType | None = None
     score: Range | None = None

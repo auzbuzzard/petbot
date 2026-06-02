@@ -41,6 +41,7 @@ class BooruCog(commands.Cog):
     @app_commands.describe(
         tags="Comma-separated tags (spaces allowed within a tag).",
         sort="How to order matches.",
+        descending="Sort descending (default) or ascending.",
         file_type="Restrict to a file type.",
         min_score="Only results with at least this score.",
     )
@@ -51,13 +52,14 @@ class BooruCog(commands.Cog):
         interaction: discord.Interaction,
         tags: str,
         sort: str | None = None,
+        descending: bool = True,
         file_type: str | None = None,
         min_score: int | None = None,
     ) -> None:
         await interaction.response.defer(thinking=True)
-        result = await self._derpi.run(
-            _args(tags, sort, file_type, min_score), build_context(interaction)
-        )
+        args = _args(tags, sort, file_type, min_score)
+        args["descending"] = descending
+        result = await self._derpi.run(args, build_context(interaction))
         await render.respond(interaction, result)
 
     @derpi.autocomplete("sort")

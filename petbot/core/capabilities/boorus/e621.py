@@ -168,6 +168,8 @@ class E621Provider:
         elif s.rating is not None:
             out.append(f"rating:{s.rating.value}")
         if s.sort is not None:
+            # e621 encodes direction in the order value (e.g. score vs score_asc),
+            # so SearchRequest.descending is not applied here.
             out.append(f"order:{s.sort.value}")
         if s.file_type is not None:
             out.append(f"type:{s.file_type.value}")

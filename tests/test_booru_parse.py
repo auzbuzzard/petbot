@@ -42,6 +42,13 @@ def test_range_serialization_dialects() -> None:
     assert tags.operator_range("score", tags.Range()) == []
 
 
+def test_range_exclusive_bounds() -> None:
+    r = tags.Range(greater_than=10, less_than=20)
+    assert tags.operator_range("score", r) == ["score:>10", "score:<20"]
+    assert tags.dotted_range("score", r) == ["score.gt:10", "score.lt:20"]
+    assert bool(tags.Range(less_than=5)) is True
+
+
 def test_parse_tags_follows_site_convention() -> None:
     assert e621.E621Provider(user_agent="x").parse_tags("twilight_sparkle canine") == (
         "twilight_sparkle",
@@ -105,6 +112,15 @@ async def test_derpi_build_request_uses_q_and_dotted_ranges() -> None:
     assert req.url.params["per_page"] == "1"
     assert req.url.params["filter_id"] == "56027"
     assert req.url.params["key"] == "k"
+
+
+async def test_derpi_sort_direction_is_caller_controlled() -> None:
+    provider = derpibooru.DerpibooruProvider()
+    async with httpx.AsyncClient() as client:
+        desc = provider.build_request(client, SearchRequest(tags=("a",), descending=True))
+        asc = provider.build_request(client, SearchRequest(tags=("a",), descending=False))
+    assert desc.url.params["sd"] == "desc"
+    assert asc.url.params["sd"] == "asc"
 
 
 async def test_derpi_nsfw_no_tags_uses_wildcard() -> None:
@@ -193,6 +209,18 @@ async def test_run_search_status_fallback_on_non_json_error() -> None:
         with pytest.raises(SiteFailureStatusError) as exc:
             await run_search(provider, client, SearchRequest(tags=("x",)), author="Rex")
     assert "503" in exc.value.site_message
+
+
+@respx.mock
+async def test_run_search_2xx_non_json_raises_not_no_results() -> None:
+    # A 200 with an undecodable body must surface as an error, not silent "no image".
+    respx.get("https://e621.net/posts.json").mock(
+        return_value=httpx.Response(200, text="<html>not json</html>")
+    )
+    provider = e621.E621Provider(user_agent="PetBot/2.0 (test)")
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(SiteFailureStatusError):
+            await run_search(provider, client, SearchRequest(tags=("x",)), author="Rex")
 
 
 # --- skills end to end --------------------------------------------------------

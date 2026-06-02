@@ -127,7 +127,7 @@ class DerpibooruProvider:
         params: dict[str, str | int] = {
             "q": ",".join(terms) or "*",
             "sf": (search.sort or Sort.random).value,
-            "sd": "desc",
+            "sd": "desc" if search.descending else "asc",
             "per_page": min(max(search.limit, 1), _MAX_PER_PAGE),
             "page": search.page,
             "filter_id": _FILTER_EVERYTHING,

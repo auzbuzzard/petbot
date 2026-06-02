@@ -41,34 +41,48 @@ class FileType(SystemTag):
 
 @dataclass(frozen=True, slots=True)
 class Range:
-    """An inclusive numeric bound; either side optional (e.g. score ≥ 100)."""
+    """A numeric bound. Each side is independent and may be inclusive or exclusive:
+    ``at_least`` (``>=``) / ``greater_than`` (``>``) and ``at_most`` (``<=``) /
+    ``less_than`` (``<``). All optional; an empty range serializes to nothing."""
 
     at_least: int | None = None
+    greater_than: int | None = None
     at_most: int | None = None
+    less_than: int | None = None
 
     def __bool__(self) -> bool:
-        return self.at_least is not None or self.at_most is not None
+        return any(
+            v is not None for v in (self.at_least, self.greater_than, self.at_most, self.less_than)
+        )
 
 
 def operator_range(field: str, r: Range | None) -> list[str]:
-    """e621 operator dialect: ``score:>=100``, ``score:<=200``."""
+    """e621 operator dialect: ``score:>=100``, ``score:>100``, ``score:<=200``."""
     if not r:
         return []
     out: list[str] = []
     if r.at_least is not None:
         out.append(f"{field}:>={r.at_least}")
+    if r.greater_than is not None:
+        out.append(f"{field}:>{r.greater_than}")
     if r.at_most is not None:
         out.append(f"{field}:<={r.at_most}")
+    if r.less_than is not None:
+        out.append(f"{field}:<{r.less_than}")
     return out
 
 
 def dotted_range(field: str, r: Range | None) -> list[str]:
-    """Derpibooru qualifier dialect: ``score.gte:100``, ``score.lte:200``."""
+    """Derpibooru qualifier dialect: ``score.gte:100``, ``score.gt:100``, ``score.lte:200``."""
     if not r:
         return []
     out: list[str] = []
     if r.at_least is not None:
         out.append(f"{field}.gte:{r.at_least}")
+    if r.greater_than is not None:
+        out.append(f"{field}.gt:{r.greater_than}")
     if r.at_most is not None:
         out.append(f"{field}.lte:{r.at_most}")
+    if r.less_than is not None:
+        out.append(f"{field}.lt:{r.less_than}")
     return out
