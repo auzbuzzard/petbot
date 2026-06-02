@@ -173,8 +173,8 @@ class E621Provider:
             out.append(f"order:{s.sort.value}")
         if s.file_type is not None:
             out.append(f"type:{s.file_type.value}")
-        out += tags.operator_range("score", s.score)
-        out += tags.operator_range("favcount", s.favorites)
+        out += tags.operator_filter("score", s.score)
+        out += tags.operator_filter("favcount", s.favorites)
         return out
 
     def _auth_header(self) -> dict[str, str]:

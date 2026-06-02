@@ -18,7 +18,7 @@ from petbot.core.capabilities.boorus import derpibooru, e621
 from petbot.core.capabilities.boorus.base import BooruProvider
 from petbot.core.capabilities.boorus.engine import run_search
 from petbot.core.capabilities.boorus.errors import SiteFailureStatusError
-from petbot.core.capabilities.boorus.tags import FileType, Range, Sort
+from petbot.core.capabilities.boorus.tags import FileType, NumericFilter, Sort
 from petbot.core.capabilities.boorus.types import SearchRequest
 from petbot.core.skills.base import Skill
 from petbot.core.skills.context import SkillContext, SkillResult
@@ -66,7 +66,7 @@ def _build_search(
     sort = provider.Sort(str(args["sort"])) if args.get("sort") else None
     file_type = provider.FileType(str(args["file_type"])) if args.get("file_type") else None
     min_score = args.get("min_score")
-    score = Range(at_least=int(min_score)) if min_score is not None else None
+    score = NumericFilter(at_least=int(min_score)) if min_score is not None else None
     return SearchRequest(
         tags=provider.parse_tags(str(args["tags"])),
         safe_only=not ctx.capabilities.allows_explicit,

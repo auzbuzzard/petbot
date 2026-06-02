@@ -3,7 +3,7 @@
 Layout:
 
 - :mod:`tags` — the abstract search vocabulary (``SystemTag`` → ``Sort``/
-  ``Rating``/``FileType``) and the ``Range`` numeric concept, shared by all sites.
+  ``Rating``/``FileType``) and the ``NumericFilter`` concept, shared by all sites.
 - :mod:`types` — neutral ``SearchRequest`` in, ``Post`` out (frozen dataclasses).
 - :mod:`base` — the ``BooruProvider`` protocol the engine talks to.
 - :mod:`engine` — the shared ``run_search`` every provider flows through (httpx).

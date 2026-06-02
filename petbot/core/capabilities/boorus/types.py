@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from petbot.core.capabilities.boorus.tags import FileType, Range, Rating, Sort
+from petbot.core.capabilities.boorus.tags import FileType, NumericFilter, Rating, Sort
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,7 +22,7 @@ class SearchRequest:
     the provider restricts results to the safe rating; a NSFW channel sets it
     ``False`` and applies no rating filter (``rating``, if given, still narrows).
     The ``sort``/``rating``/``file_type`` fields hold a *provider* enum member
-    (its ``.value`` is the wire token); ``score``/``favorites`` are numeric ranges.
+    (its ``.value`` is the wire token); ``score``/``favorites`` are numeric filters.
     ``descending`` applies only where a site exposes direction as a separate axis
     (Derpibooru ``sd``); e621 encodes direction in the ``sort`` member itself.
     """
@@ -33,8 +33,8 @@ class SearchRequest:
     descending: bool = True  # applies where a site has a separate direction axis
     rating: Rating | None = None
     file_type: FileType | None = None
-    score: Range | None = None
-    favorites: Range | None = None
+    score: NumericFilter | None = None
+    favorites: NumericFilter | None = None
     limit: int = 1
     page: int = 1
 

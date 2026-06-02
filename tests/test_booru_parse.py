@@ -35,18 +35,26 @@ def test_vocabulary_is_per_site_and_full_native() -> None:
 
 
 def test_range_serialization_dialects() -> None:
-    r = tags.Range(at_least=100, at_most=200)
-    assert tags.operator_range("score", r) == ["score:>=100", "score:<=200"]
-    assert tags.dotted_range("score", r) == ["score.gte:100", "score.lte:200"]
-    assert tags.operator_range("score", None) == []
-    assert tags.operator_range("score", tags.Range()) == []
+    r = tags.NumericFilter(at_least=100, at_most=200)
+    assert tags.operator_filter("score", r) == ["score:>=100", "score:<=200"]
+    assert tags.dotted_filter("score", r) == ["score.gte:100", "score.lte:200"]
+    assert tags.operator_filter("score", None) == []
+    assert tags.operator_filter("score", tags.NumericFilter()) == []
 
 
 def test_range_exclusive_bounds() -> None:
-    r = tags.Range(greater_than=10, less_than=20)
-    assert tags.operator_range("score", r) == ["score:>10", "score:<20"]
-    assert tags.dotted_range("score", r) == ["score.gt:10", "score.lt:20"]
-    assert bool(tags.Range(less_than=5)) is True
+    r = tags.NumericFilter(greater_than=10, less_than=20)
+    assert tags.operator_filter("score", r) == ["score:>10", "score:<20"]
+    assert tags.dotted_filter("score", r) == ["score.gt:10", "score.lt:20"]
+    assert bool(tags.NumericFilter(less_than=5)) is True
+
+
+def test_numeric_filter_eq_and_ne() -> None:
+    # Equality and inequality spell the same on both sites (negation is `-tag`).
+    assert tags.operator_filter("score", tags.NumericFilter(eq=100)) == ["score:100"]
+    assert tags.dotted_filter("score", tags.NumericFilter(eq=100)) == ["score:100"]
+    assert tags.operator_filter("score", tags.NumericFilter(ne=5)) == ["-score:5"]
+    assert tags.dotted_filter("faves", tags.NumericFilter(ne=5)) == ["-faves:5"]
 
 
 def test_parse_tags_follows_site_convention() -> None:
@@ -69,7 +77,7 @@ async def test_e621_build_request_serializes_system_tags() -> None:
         tags=("canine", "forest"),
         safe_only=True,
         sort=e621.Sort.favorites,
-        score=tags.Range(at_least=100),
+        score=tags.NumericFilter(at_least=100),
         file_type=e621.FileType.png,
     )
     async with httpx.AsyncClient() as client:
@@ -103,7 +111,7 @@ async def test_derpi_build_request_uses_q_and_dotted_ranges() -> None:
         tags=("twilight sparkle",),
         safe_only=True,
         sort=derpibooru.Sort.favorites,
-        score=tags.Range(at_least=100),
+        score=tags.NumericFilter(at_least=100),
     )
     async with httpx.AsyncClient() as client:
         req = provider.build_request(client, search)

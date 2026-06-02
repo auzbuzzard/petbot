@@ -8,8 +8,9 @@ has its own wire spelling for these, but the *concepts* are shared.
 `Sort`/`Rating`/`FileType` with their **full native** value set, and the member's
 `.value` is the on-the-wire token. The neutral :class:`SearchRequest` references
 the abstract bases, so the engine stays generic while each provider keeps 100% of
-its vocabulary. ``Range`` models a numeric bound; the syntax helpers turn it into
-each site's dialect (``score:>=100`` on e621, ``score.gte:100`` on Derpibooru).
+its vocabulary. ``NumericFilter`` models a numeric constraint (eq/ne/bounds); the
+syntax helpers turn it into each site's dialect (``score:>=100`` on e621,
+``score.gte:100`` on Derpibooru).
 """
 
 from __future__ import annotations
@@ -40,11 +41,19 @@ class FileType(SystemTag):
 
 
 @dataclass(frozen=True, slots=True)
-class Range:
-    """A numeric bound. Each side is independent and may be inclusive or exclusive:
-    ``at_least`` (``>=``) / ``greater_than`` (``>``) and ``at_most`` (``<=``) /
-    ``less_than`` (``<``). All optional; an empty range serializes to nothing."""
+class NumericFilter:
+    """A numeric constraint on a field (score, favourites, …).
 
+    Models every comparison both sites support portably: equality (``eq``),
+    inequality (``ne`` — tag negation on both sites), and the four ordered bounds
+    ``at_least`` (``>=``), ``greater_than`` (``>``), ``at_most`` (``<=``),
+    ``less_than`` (``<``). A "between" is just ``at_least`` + ``at_most``. (e621's
+    ``a..b`` range and ``1,2,3`` value-list aren't portable — Derpibooru has no
+    equivalent — so they stay in raw tags.) All sides optional.
+    """
+
+    eq: int | None = None
+    ne: int | None = None
     at_least: int | None = None
     greater_than: int | None = None
     at_most: int | None = None
@@ -52,37 +61,53 @@ class Range:
 
     def __bool__(self) -> bool:
         return any(
-            v is not None for v in (self.at_least, self.greater_than, self.at_most, self.less_than)
+            v is not None
+            for v in (
+                self.eq,
+                self.ne,
+                self.at_least,
+                self.greater_than,
+                self.at_most,
+                self.less_than,
+            )
         )
 
 
-def operator_range(field: str, r: Range | None) -> list[str]:
-    """e621 operator dialect: ``score:>=100``, ``score:>100``, ``score:<=200``."""
-    if not r:
+def operator_filter(field: str, f: NumericFilter | None) -> list[str]:
+    """e621 dialect: ``score:100``, ``-score:5``, ``score:>=10``, ``score:<20``."""
+    if not f:
         return []
     out: list[str] = []
-    if r.at_least is not None:
-        out.append(f"{field}:>={r.at_least}")
-    if r.greater_than is not None:
-        out.append(f"{field}:>{r.greater_than}")
-    if r.at_most is not None:
-        out.append(f"{field}:<={r.at_most}")
-    if r.less_than is not None:
-        out.append(f"{field}:<{r.less_than}")
+    if f.eq is not None:
+        out.append(f"{field}:{f.eq}")
+    if f.ne is not None:
+        out.append(f"-{field}:{f.ne}")
+    if f.at_least is not None:
+        out.append(f"{field}:>={f.at_least}")
+    if f.greater_than is not None:
+        out.append(f"{field}:>{f.greater_than}")
+    if f.at_most is not None:
+        out.append(f"{field}:<={f.at_most}")
+    if f.less_than is not None:
+        out.append(f"{field}:<{f.less_than}")
     return out
 
 
-def dotted_range(field: str, r: Range | None) -> list[str]:
-    """Derpibooru qualifier dialect: ``score.gte:100``, ``score.gt:100``, ``score.lte:200``."""
-    if not r:
+def dotted_filter(field: str, f: NumericFilter | None) -> list[str]:
+    """Derpibooru dialect: ``score:100``, ``-score:5``, ``score.gte:10``, ``score.lt:20``."""
+    if not f:
         return []
     out: list[str] = []
-    if r.at_least is not None:
-        out.append(f"{field}.gte:{r.at_least}")
-    if r.greater_than is not None:
-        out.append(f"{field}.gt:{r.greater_than}")
-    if r.at_most is not None:
-        out.append(f"{field}.lte:{r.at_most}")
-    if r.less_than is not None:
-        out.append(f"{field}.lt:{r.less_than}")
+    if f.eq is not None:
+        out.append(f"{field}:{f.eq}")
+    if f.ne is not None:
+        out.append(f"-{field}:{f.ne}")
+    if f.at_least is not None:
+        out.append(f"{field}.gte:{f.at_least}")
+    if f.greater_than is not None:
+        out.append(f"{field}.gt:{f.greater_than}")
+    if f.at_most is not None:
+        out.append(f"{field}.lte:{f.at_most}")
+    if f.less_than is not None:
+        out.append(f"{field}.lt:{f.less_than}")
     return out

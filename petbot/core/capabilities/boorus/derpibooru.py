@@ -171,6 +171,6 @@ class DerpibooruProvider:
             out.append(s.rating.value)
         if s.file_type is not None:
             out.append(f"format:{s.file_type.value}")
-        out += tags.dotted_range("score", s.score)
-        out += tags.dotted_range("faves", s.favorites)
+        out += tags.dotted_filter("score", s.score)
+        out += tags.dotted_filter("faves", s.favorites)
         return out
