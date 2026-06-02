@@ -1,238 +1,176 @@
-"""Derpibooru provider (My Little Pony imageboard), modernized to API v1.
+"""Derpibooru provider (My Little Pony imageboard), API v1.
 
-Endpoint moved from the legacy ``/search.json`` to
-``/api/v1/json/search/images`` (response: ``{"images": [...], "total": N}``).
-Optional ``key`` raises rate limits. Returns a neutral ``SkillResult``.
+Tags are comma-separated and may contain spaces within a tag (the site's own
+convention; we don't coerce). Rating is a *tag* on Derpibooru, derived from the
+image's tag names on the way out. The "everything" filter is always used so the
+``safe`` system tag is the only content gate. Errors come back as a 400
+``{"error": "..."}``.
 """
 
 from __future__ import annotations
 
-import re
-from collections.abc import Mapping, Sequence
-from enum import Enum
-from typing import Any
+import httpx
+from pydantic import BaseModel, Field
 
-from petbot.core.capabilities.boorus import datastruct
-from petbot.core.skills.context import EmbedSpec, SkillResult
+from petbot.core.capabilities.boorus import tags
+from petbot.core.capabilities.boorus.types import Post, SearchRequest
 
-ROOT_URL = "https://derpibooru.org/"
-API_URL = "https://derpibooru.org/api/v1/json/search/images"
-_ARG_PATTERN = re.compile(r"--([\w:]+)")
-
-# Filter IDs control which content the API may return.
-_FILTERS = {"everything": "56027", "steady": "150237", "default": "100073"}
-
-# Embed accent colors per rating.
-_COLOR_SAFE = 0x00FF00
-_COLOR_SUGGESTIVE = 0x0000FF
-_COLOR_QUESTIONABLE = 0xFFFF00
-_COLOR_EXPLICIT = 0xFF0000
+_NAME = "Derpibooru"
+_ROOT = "https://derpibooru.org/"
+_ENDPOINT = "https://derpibooru.org/api/v1/json/search/images"
+_ICON = "https://derpicdn.net/img/2017/10/22/1567638/thumb_small.jpeg"
+_FILTER_EVERYTHING = "56027"  # show all ratings; the `safe` tag is the only gate
+_MAX_PER_PAGE = 50
 
 
-class Rating(Enum):
+class Sort(tags.Sort):
+    random = "random"
+    score = "score"
+    wilson = "wilson_score"
+    relevance = "relevance"
+    newest = "created_at"
+    first_seen = "first_seen_at"
+    updated = "updated_at"
+    comments = "comment_count"
+    tag_count = "tag_count"
+    favorites = "faves"
+    width = "width"
+    height = "height"
+    aspect_ratio = "aspect_ratio"
+    duration = "duration"
+
+
+class Rating(tags.Rating):
     safe = "safe"
     suggestive = "suggestive"
     questionable = "questionable"
     explicit = "explicit"
+    semi_grimdark = "semi-grimdark"
+    grimdark = "grimdark"
+    grotesque = "grotesque"
 
 
-_RATING_COLOR = {
-    Rating.safe: _COLOR_SAFE,
-    Rating.suggestive: _COLOR_SUGGESTIVE,
-    Rating.questionable: _COLOR_QUESTIONABLE,
-    Rating.explicit: _COLOR_EXPLICIT,
+class FileType(tags.FileType):
+    png = "png"
+    jpeg = "jpeg"
+    gif = "gif"
+    svg = "svg"
+    webm = "webm"
+    mp4 = "mp4"
+
+
+_COLOR = {
+    Rating.safe: 0x00FF00,
+    Rating.suggestive: 0x0000FF,
+    Rating.questionable: 0xFFFF00,
+    Rating.explicit: 0xFF0000,
+    Rating.semi_grimdark: 0x80008B,
+    Rating.grimdark: 0x000000,
+    Rating.grotesque: 0x8B0000,
 }
+# Most severe first: the worst rating tag present decides colour/safety.
+_SEVERITY = (
+    Rating.explicit,
+    Rating.grimdark,
+    Rating.grotesque,
+    Rating.semi_grimdark,
+    Rating.questionable,
+    Rating.suggestive,
+    Rating.safe,
+)
 
 
-class Order(Enum):
-    creation_date = "created_at"
-    score = "score"
-    wilson_score = "wilson_score"
-    relevance = "relevance"
-    comments = "comments"
-    random = "random"
+def _rating(image_tags: list[str]) -> Rating:
+    names = {tag.lower() for tag in image_tags}
+    return next((r for r in _SEVERITY if r.value in names), Rating.safe)
 
 
-class ImageResult(datastruct.Result):
-    """A single Derpibooru image.
+class _Repr(BaseModel):
+    large: str | None = None
 
-    Rating is derived from the image's tag *names* (robust across API versions),
-    and the preview image prefers ``view_url`` then the ``large`` representation.
-    """
 
+class _Image(BaseModel):
     id: int
-    score: int
-    faves: int
-    format: str
-    tags: list[str]
-    representations: Mapping[str, str]
-    view_url: str
-
-    def __init__(self, data: Mapping[str, Any]):
-        super().__init__(data)
-        self.rating = self._rating()
-
-    def _rating(self) -> Rating | None:
-        tags = {str(t).lower() for t in getattr(self, "tags", [])}
-        for rating in (Rating.safe, Rating.suggestive, Rating.questionable, Rating.explicit):
-            if rating.value in tags:
-                return rating
-        return None
-
-    @property
-    def is_explicit(self) -> bool:
-        return self.rating is Rating.explicit
-
-    @property
-    def image_url(self) -> str:
-        if getattr(self, "view_url", None):
-            return self.view_url
-        return self.representations.get("large", "")
+    score: int = 0
+    faves: int = 0
+    format: str = ""
+    tags: list[str] = Field(default_factory=list)
+    representations: _Repr = Field(default_factory=_Repr)
+    view_url: str | None = None
 
 
-class SearchQuery(datastruct.SearchQuery):
-    def __init__(
-        self,
-        tags: Sequence[str],
-        args: Mapping[str, Any],
-        *,
-        session: datastruct.HttpSession,
-        api_key: str | None = None,
-    ):
-        super().__init__(tags, args, session=session)
-        self.order: Order = args.get("order", Order.random)
-        self.is_desc_order: bool = args.get("sort", True)
+class _Response(BaseModel):
+    total: int = 0
+    images: list[_Image] = Field(default_factory=list)
+
+
+class _Error(BaseModel):
+    error: str | None = None
+
+
+class DerpibooruProvider:
+    name: str = _NAME
+    site_name: str = _NAME
+    Sort: type[tags.Sort] = Sort
+    Rating: type[tags.Rating] = Rating
+    FileType: type[tags.FileType] = FileType
+
+    def __init__(self, *, api_key: str | None = None):
         self._api_key = api_key
 
-    def endpoint(self) -> str:
-        return API_URL
+    def parse_tags(self, raw: str) -> tuple[str, ...]:
+        # Derpibooru separates tags by commas; spaces are allowed within a tag.
+        return tuple(t.strip() for t in raw.split(",") if t.strip())
 
-    def params(self) -> dict[str, Any]:
-        if self.args.get("filter") == "everything":
-            filter_id = _FILTERS["everything"]
-        elif self.is_explicit:
-            filter_id = _FILTERS["steady"]
-        else:
-            filter_id = _FILTERS["default"]
-        params: dict[str, Any] = {
-            "q": ",".join(self.tags) or "*",
-            "sf": self.order.value,
-            "sd": "desc" if self.is_desc_order else "asc",
-            "filter_id": filter_id,
-            "per_page": 1,
+    def build_request(self, client: httpx.AsyncClient, search: SearchRequest) -> httpx.Request:
+        terms = [*search.tags, *self._q_tags(search)]
+        params: dict[str, str | int] = {
+            "q": ",".join(terms) or "*",
+            "sf": (search.sort or Sort.random).value,
+            "sd": "desc" if search.descending else "asc",
+            "per_page": min(max(search.limit, 1), _MAX_PER_PAGE),
+            "page": search.page,
+            "filter_id": _FILTER_EVERYTHING,
         }
         if self._api_key:
             params["key"] = self._api_key
-        return params
+        return client.build_request("GET", _ENDPOINT, params=params)
 
-    def web_url(self) -> str:
-        joined = ",".join(tag.replace(" ", "+") for tag in self.tags)
-        return f"{ROOT_URL}search?q={joined}"
-
-
-def parse_args(message: str) -> tuple[dict[str, Any], list[str]]:
-    """Split a raw query into ``(args, tags)``.
-
-    Flags use ``--flag`` syntax (e.g. ``--e`` for explicit, ``--sort_score``).
-    """
-    flags = set(_ARG_PATTERN.findall(message))
-    args: dict[str, Any] = {"order": Order.random, "explicit": False}
-
-    if "e" in flags:
-        args["explicit"] = True
-    if "sort_new" in flags:
-        args["order"] = Order.creation_date
-    if flags & {"sort_relevance", "sort_rel"}:
-        args["order"] = Order.relevance
-    if "sort_score" in flags:
-        args["order"] = Order.score
-    if "sort_wscore" in flags:
-        args["order"] = Order.wilson_score
-    if "sort_comments" in flags:
-        args["order"] = Order.comments
-    if flags & {"filter_everything", "f_everything"}:
-        args["filter"] = "everything"
-
-    cleaned = _ARG_PATTERN.sub("", message)
-    tags = [tag.strip() for tag in cleaned.split(",") if tag.strip()]
-    return args, tags
-
-
-def image(json_dict: Mapping[str, Any]) -> tuple[ImageResult | None, int]:
-    """Extract the first image and the total match count from a response."""
-    images = json_dict.get("images") or []
-    total = int(json_dict.get("total", len(images)))
-    if not images:
-        return None, 0
-    return ImageResult(images[0]), total
-
-
-def build_result(
-    query: SearchQuery,
-    found: tuple[ImageResult | None, int],
-    *,
-    author: str,
-) -> SkillResult:
-    """Turn a parsed search outcome into a neutral :class:`SkillResult`."""
-    result, count = found
-    if result is None or count == 0:
-        text = datastruct.result_greeter(
-            has_image=False, is_explicit=query.is_explicit, author=author
+    def parse(self, body: object) -> Post | None:
+        decoded = _Response.model_validate(body)
+        if not decoded.images:
+            return None
+        img = decoded.images[0]
+        url = img.view_url or img.representations.large
+        if not url:
+            return None
+        rating = _rating(img.tags)
+        return Post(
+            post_id=img.id,
+            image_url=url,
+            color=_COLOR.get(rating, 0xFFFF00),
+            is_safe=rating is Rating.safe,
+            score=img.score,
+            favorites=img.faves,
+            file_ext=img.format,
+            page_url=f"{_ROOT}{img.id}",
+            site_name=_NAME,
+            site_root=_ROOT,
+            site_icon_url=_ICON,
+            total=decoded.total,
         )
-        return SkillResult.message(text.format(tags=", ".join(query.tags)))
 
-    greeter = datastruct.result_greeter(
-        has_image=True, is_explicit=result.is_explicit, author=author
-    )
-    tags_label = _tags_label(query.tags)
-    description = (
-        f"score: {result.score} | faves: {result.faves} | "
-        f"source: [derpibooru]({ROOT_URL}{result.id}) | filetype: {result.format}"
-    )
-    embed = EmbedSpec(
-        title=f"{count} result{'s' if count != 1 else ''}: {tags_label}",
-        description=description,
-        url=query.web_url(),
-        color=_RATING_COLOR.get(result.rating) if result.rating else None,
-        image_url=result.image_url,
-        author_name="Derpibooru",
-        author_url=ROOT_URL,
-        author_icon_url="https://derpicdn.net/img/2017/10/22/1567638/thumb_small.jpeg",
-    )
-    return SkillResult.message(greeter, embed=embed)
+    def error(self, body: object) -> str | None:
+        return _Error.model_validate(body).error
 
-
-def _tags_label(tags: Sequence[str], *, limit: int = 256) -> str:
-    label = ", ".join(tags)
-    if len(label) <= limit:
-        return label
-    truncated: list[str] = []
-    used = 0
-    for tag in tags:
-        if used + len(tag) + 2 > limit:
-            break
-        truncated.append(tag)
-        used += len(tag) + 2
-    return ", ".join(truncated) + " …"
-
-
-async def search(
-    message: str,
-    *,
-    session: datastruct.HttpSession,
-    allows_explicit: bool,
-    author: str,
-    api_key: str | None = None,
-) -> SkillResult:
-    """Parse, query, and render a Derpibooru search into a ``SkillResult``.
-
-    Explicit content is requested only when the caller's context permits it.
-    """
-    args, tags = parse_args(message)
-    if args.get("explicit") and not allows_explicit:
-        return SkillResult.failure(
-            "Explicit results are only available in age-restricted (NSFW) channels."
-        )
-    query = SearchQuery(tags, args, session=session, api_key=api_key)
-    payload = await query.request()
-    return build_result(query, image(payload), author=author)
+    def _q_tags(self, s: SearchRequest) -> list[str]:
+        out: list[str] = []
+        if s.safe_only:
+            out.append(Rating.safe.value)
+        elif s.rating is not None:
+            out.append(s.rating.value)
+        if s.file_type is not None:
+            out.append(f"format:{s.file_type.value}")
+        out += tags.dotted_filter("score", s.score)
+        out += tags.dotted_filter("faves", s.favorites)
+        return out

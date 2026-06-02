@@ -1,4 +1,5 @@
 {
   "success": false,
-  "reason": "you cannot search for more than 40 tags at once"
+  "message": "You cannot search for more than 40 tags at a time.",
+  "code": null
 }
