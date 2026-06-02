@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Iterator
 
 from petbot.core.skills.base import Skill
 from petbot.core.skills.context import Capabilities
+
+logger = logging.getLogger(__name__)
 
 # Maps a port requirement declared in ``Skill.requires`` to the capability flag
 # a frontend must advertise to be offered that skill.
@@ -28,6 +31,11 @@ class SkillRegistry:
             if skill.name in self._skills:
                 raise ValueError(f"Duplicate skill name registered: {skill.name!r}")
             self._skills[skill.name] = skill
+        logger.debug(
+            "Skill registry initialised with %d skill(s): %s",
+            len(self._skills),
+            sorted(self._skills),
+        )
 
     def get(self, name: str) -> Skill:
         """Return the skill registered under ``name``.

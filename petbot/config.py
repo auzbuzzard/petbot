@@ -37,11 +37,22 @@ class Settings:
     e621_api_key: str | None = None
     derpibooru_api_key: str | None = None
     user_agent: str = DEFAULT_USER_AGENT
+    log_level: str = "INFO"
+    #: ``"plain"`` | ``"json"``, or ``None`` to derive from :attr:`env`.
+    log_format: str | None = None
 
     @property
     def is_prod(self) -> bool:
         """Whether the bot is running against the production environment."""
         return self.env.lower() == "prod"
+
+    @property
+    def resolved_log_format(self) -> str:
+        """The logging profile to use: explicit ``LOG_FORMAT`` wins, else derived
+        from the environment (``prod`` → structured JSON, otherwise human-readable)."""
+        if self.log_format is not None:
+            return self.log_format
+        return "json" if self.is_prod else "plain"
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Settings:
@@ -69,6 +80,14 @@ class Settings:
         else:
             dev_guild_id = None
 
+        log_format = env.get("LOG_FORMAT") or None
+        if log_format is not None:
+            log_format = log_format.lower()
+            if log_format not in ("plain", "json"):
+                raise ConfigError(
+                    f"LOG_FORMAT must be 'plain' or 'json', got {env['LOG_FORMAT']!r}."
+                )
+
         return cls(
             discord_token=token,
             env=env.get("ENV", "dev"),
@@ -77,4 +96,6 @@ class Settings:
             e621_api_key=env.get("E621_API_KEY") or None,
             derpibooru_api_key=env.get("DERPIBOORU_API_KEY") or None,
             user_agent=env.get("USER_AGENT") or DEFAULT_USER_AGENT,
+            log_level=env.get("LOG_LEVEL") or "INFO",
+            log_format=log_format,
         )

@@ -6,9 +6,13 @@ The legacy ``ghost_talk`` (cross-guild impersonation) is intentionally removed.
 
 from __future__ import annotations
 
+import logging
+
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+logger = logging.getLogger(__name__)
 
 
 class AdminCog(commands.Cog):
@@ -32,6 +36,9 @@ class AdminCog(commands.Cog):
             return
         await interaction.response.defer(ephemeral=True)
         deleted = await channel.purge(limit=count)
+        logger.info(
+            "purge: %s deleted %d message(s) in #%s", interaction.user, len(deleted), channel.name
+        )
         await interaction.followup.send(f"🧹 Deleted {len(deleted)} message(s).", ephemeral=True)
 
     @purge.error
@@ -41,6 +48,7 @@ class AdminCog(commands.Cog):
         if isinstance(error, app_commands.MissingPermissions):
             message = "You need the Manage Messages permission to do that."
         else:
+            logger.error("purge failed unexpectedly", exc_info=error)
             message = "Something went wrong running that command."
         if interaction.response.is_done():
             await interaction.followup.send(message, ephemeral=True)
