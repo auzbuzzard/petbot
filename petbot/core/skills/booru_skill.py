@@ -87,14 +87,18 @@ async def _run(
     ctx: SkillContext,
 ) -> SkillResult:
     search = _build_search(provider, args, ctx)
+    # This is the boundary that *handles* a failed search (turns it into a
+    # SkillResult), so it's the one place that logs it — at a level that matches
+    # severity, with a traceback only where one helps.
     try:
         return await run_search(provider, client, search, author=ctx.user.display_name)
     except SiteFailureStatusError as exc:
-        # Already surfaced to the user as a friendly message; the engine logged
-        # the cause at WARNING, so this is just a breadcrumb.
-        logger.debug("%s search returned a site error: %s", provider.name, exc.site_message)
+        # Expected, fully handled, and shown to the user — not a bug. A DEBUG
+        # breadcrumb is enough; no traceback.
+        logger.debug("%s rejected the search: %s", provider.name, exc.site_message)
         return SkillResult.failure(exc.print_message)
     except (httpx.HTTPError, ValueError):
+        # Unexpected: we couldn't reach or decode the site. Capture the traceback.
         logger.warning("%s search failed to reach/parse the site", provider.name, exc_info=True)
         return SkillResult.failure(_NETWORK_FAILURE)
 

@@ -44,6 +44,17 @@ never blocks that loop. The reference is mCoding's "modern logging" talk
   `SearchRequest` (tags/flags), never the wire request, which can carry an
   api-key/User-Agent. Levels: DEBUG for request/parse internals, INFO for
   lifecycle, WARNING/ERROR for failures.
+- **Log errors once, at the handler — never log-and-raise.** A raised exception
+  *is* the error report; logging it at the `raise` site and again where it's
+  caught produces duplicate, confusing output. So the low-level code (e.g. the
+  booru `engine`) only raises; the boundary that *handles* the exception (the
+  skill's `try/except`, which turns it into a `SkillResult`) is the single place
+  that logs it, choosing the level by severity and attaching a traceback
+  (`exc_info=True` / `logger.exception`) only when one aids debugging. An
+  expected, user-surfaced failure (a site rejecting a query) is a DEBUG
+  breadcrumb with no traceback; an unexpected network/parse failure is a WARNING
+  with the traceback. Code that merely re-raises logs nothing and lets it
+  propagate.
 
 ## Consequences
 
