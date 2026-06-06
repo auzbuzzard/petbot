@@ -18,6 +18,12 @@ read [`docs/architecture.md`](docs/architecture.md) for the *why*.
    (fixtures + `FakeSession`); never hit them live.
 6. **`ghost_talk` is intentionally removed** (cross-guild impersonation). Don't
    reintroduce it. Admin deletion (`/purge`) stays permission-gated.
+7. **Logging is configured once, at the entrypoint.** Modules do
+   `logger = logging.getLogger(__name__)` and never configure handlers/levels at
+   import time; `configure_logging()` (called from `bootstrap.run`) is the only
+   setup point. **Never log secrets/tokens** — log booru searches from the
+   neutral `SearchRequest`, never the wire request. See
+   [`docs/adr/0004-logging.md`](docs/adr/0004-logging.md).
 
 ## Where things live
 

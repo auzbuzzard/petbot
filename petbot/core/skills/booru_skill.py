@@ -9,6 +9,7 @@ from ``ctx.capabilities.allows_explicit``, which the Discord adapter fills from
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
@@ -22,6 +23,8 @@ from petbot.core.capabilities.boorus.tags import FileType, NumericFilter, Sort
 from petbot.core.capabilities.boorus.types import SearchRequest
 from petbot.core.skills.base import Skill
 from petbot.core.skills.context import SkillContext, SkillResult
+
+logger = logging.getLogger(__name__)
 
 _NETWORK_FAILURE = "uwu the booru didn't answer — please try again in a bit."
 
@@ -84,11 +87,19 @@ async def _run(
     ctx: SkillContext,
 ) -> SkillResult:
     search = _build_search(provider, args, ctx)
+    # This is the boundary that *handles* a failed search (turns it into a
+    # SkillResult), so it's the one place that logs it — at a level that matches
+    # severity, with a traceback only where one helps.
     try:
         return await run_search(provider, client, search, author=ctx.user.display_name)
     except SiteFailureStatusError as exc:
+        # Expected, fully handled, and shown to the user — not a bug. A DEBUG
+        # breadcrumb is enough; no traceback.
+        logger.debug("%s rejected the search: %s", provider.name, exc.site_message)
         return SkillResult.failure(exc.print_message)
     except (httpx.HTTPError, ValueError):
+        # Unexpected: we couldn't reach or decode the site. Capture the traceback.
+        logger.warning("%s search failed to reach/parse the site", provider.name, exc_info=True)
         return SkillResult.failure(_NETWORK_FAILURE)
 
 

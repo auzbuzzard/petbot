@@ -8,11 +8,14 @@ worker thread so the gateway heartbeat is never blocked; playback uses
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import discord
 import yt_dlp
 
 from petbot.core.skills.ports import TrackFinishedCallback
+
+logger = logging.getLogger(__name__)
 
 # Reconnect options keep streamed sources alive across transient network blips.
 _FFMPEG_BEFORE_OPTIONS = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
@@ -63,6 +66,7 @@ class DiscordVoicePort:
         on_finished: TrackFinishedCallback | None = None,
     ) -> None:
         voice_client = await self._ensure_connected()
+        logger.debug("voice: resolving stream URL for %r", source_url)
         stream_url = await asyncio.to_thread(_extract_stream_url, source_url)
         source = discord.FFmpegPCMAudio(stream_url, before_options=_FFMPEG_BEFORE_OPTIONS)
         transformed = discord.PCMVolumeTransformer(source, volume=volume)
