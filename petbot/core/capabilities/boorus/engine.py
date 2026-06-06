@@ -9,6 +9,8 @@ body still raises rather than silently looking like "no results".
 
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from petbot.core.capabilities.boorus.base import BooruProvider
@@ -16,6 +18,8 @@ from petbot.core.capabilities.boorus.errors import SiteFailureStatusError
 from petbot.core.capabilities.boorus.render import render
 from petbot.core.capabilities.boorus.types import SearchRequest
 from petbot.core.skills.context import SkillResult
+
+logger = logging.getLogger(__name__)
 
 
 async def run_search(
@@ -26,9 +30,23 @@ async def run_search(
     author: str,
 ) -> SkillResult:
     """Send the search, surface any site/HTTP error, then render the first result."""
+    # Logged from the neutral SearchRequest, never the wire request — the latter
+    # can carry an api_key/User-Agent, and secrets must never reach the logs.
+    logger.debug(
+        "%s search: tags=%s safe_only=%s sort=%s",
+        provider.name,
+        search.tags,
+        search.safe_only,
+        search.sort,
+    )
     request = provider.build_request(client, search)
     response = await client.send(request)
+    logger.debug("%s responded HTTP %d", provider.name, response.status_code)
     body = _json_body(response)
+
+    # Each failure below is signalled by *raising* — the exception is the error
+    # report. We deliberately don't log here: that would double-log (the caller
+    # that handles the exception is the right place to decide level + traceback).
 
     # 1. The site's own error message wins (best UX) — when the body decoded.
     if body is not None and (reason := provider.error(body)) is not None:

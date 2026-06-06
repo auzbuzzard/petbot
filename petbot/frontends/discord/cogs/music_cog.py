@@ -7,6 +7,8 @@ member's guild, then delegates all queue/skip-vote logic to the shared neutral
 
 from __future__ import annotations
 
+import logging
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -15,6 +17,8 @@ from petbot.core.skills.music_skill import MusicSkill
 from petbot.frontends.discord import render
 from petbot.frontends.discord.context import build_context
 from petbot.frontends.discord.voice import DiscordVoicePort
+
+logger = logging.getLogger(__name__)
 
 
 class MusicCog(commands.Cog):
@@ -33,6 +37,7 @@ class MusicCog(commands.Cog):
 
     async def _dispatch(self, interaction: discord.Interaction, args: dict[str, object]) -> None:
         await interaction.response.defer(thinking=True)
+        logger.debug("/music %s invoked by %s", args.get("action"), interaction.user)
         voice = self._voice_port(interaction)
         if voice is None:
             await interaction.followup.send("Music only works in a server voice channel.")
