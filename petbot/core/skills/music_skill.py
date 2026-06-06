@@ -200,7 +200,7 @@ class MusicSkill(Skill):
         state.skip_votes.clear()
         state.play_token += 1  # invalidate the pending finished-callback
         await voice.stop()
-        logger.info("music: stopped playback and cleared the queue")
+        logger.debug("music: stopped playback and cleared the queue")
         return SkillResult.message("⏹️ Stopped and cleared the queue.")
 
     def _show_queue(self, state: ConversationMusic) -> SkillResult:

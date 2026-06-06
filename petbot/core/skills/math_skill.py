@@ -48,8 +48,8 @@ class MathSkill(Skill):
             result: Any = await asyncio.to_thread(_evaluate, expression)
         except Exception as exc:
             # Preserve the legacy behavior: the error is the *output*, shown in
-            # the same code block, not an exceptional failure.
+            # the same code block, not an exceptional failure. (The result itself
+            # goes to the user, so there's nothing to log on the happy path.)
             logger.debug("math: %r could not be evaluated: %s", expression, exc)
             return SkillResult.message(f"```py\n>>>\t{expression}\n<<<\t{exc}\n```")
-        logger.debug("math: %r -> %s", expression, result)
         return SkillResult.message(f"```py\n>>>\t{expression}\n<<<\t{result}\n```")

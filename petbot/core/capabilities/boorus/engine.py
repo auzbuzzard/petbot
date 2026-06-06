@@ -44,27 +44,24 @@ async def run_search(
     logger.debug("%s responded HTTP %d", provider.name, response.status_code)
     body = _json_body(response)
 
+    # Each failure below is signalled by *raising* — the exception is the error
+    # report. We deliberately don't log here: that would double-log (the caller
+    # that handles the exception is the right place to decide level + traceback).
+
     # 1. The site's own error message wins (best UX) — when the body decoded.
     if body is not None and (reason := provider.error(body)) is not None:
-        logger.warning("%s rejected the search: %s", provider.name, reason)
         raise SiteFailureStatusError(
             site_message=reason,
             print_message=f"uwu I couldn't do that. {provider.name} says: {reason}",
         )
     # 2. Any other non-2xx is still an error, even with no recognizable error body.
     if response.status_code >= 400:
-        logger.warning(
-            "%s returned HTTP %d with no recognizable error body",
-            provider.name,
-            response.status_code,
-        )
         raise SiteFailureStatusError(
             site_message=f"HTTP {response.status_code}",
             print_message=f"uwu {provider.name} returned an error (HTTP {response.status_code}).",
         )
     # 3. A 2xx we couldn't decode is an anomaly — surface it, don't fake "no results".
     if body is None:
-        logger.warning("%s returned a non-JSON %d response", provider.name, response.status_code)
         raise SiteFailureStatusError(
             site_message="non-JSON response",
             print_message=f"uwu {provider.name} sent a response I couldn't read.",
