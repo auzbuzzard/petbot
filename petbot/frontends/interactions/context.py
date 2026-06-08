@@ -49,9 +49,15 @@ def build_context(interaction: Mapping[str, Any]) -> SkillContext:
         supports_rich_embeds=True,
         max_text_length=2000,
     )
+    # Channel is the natural session unit; fall back to the interaction id so the
+    # conversation id is never the literal string "discord:None".
+    channel_id = interaction.get("channel_id")
+    conversation_id = (
+        f"discord:{channel_id}" if channel_id else f"discord:interaction:{interaction.get('id')}"
+    )
     return SkillContext(
         platform=Platform.DISCORD,
         user=user,
-        conversation_id=f"discord:{interaction.get('channel_id')}",
+        conversation_id=conversation_id,
         capabilities=capabilities,
     )

@@ -7,83 +7,84 @@ except it emits **raw dicts** (Discord embed/response JSON) rather than
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from petbot.core.skills.context import EmbedSpec, SkillResult
 from petbot.frontends.interactions.wire import CHANNEL_MESSAGE_WITH_SOURCE
 
+logger = logging.getLogger(__name__)
+
 #: Discord's hard limit on message content length.
 DISCORD_MAX_TEXT = 2000
+#: Shown when output exceeds a single message (see :func:`to_response_data`).
+_TRUNCATION_NOTICE = "\n... (output truncated; {omitted} more characters)"
+#: Sent instead of an empty body, which Discord would reject.
+_EMPTY_PLACEHOLDER = "(no output)"
 
 
 def to_embed_dict(spec: EmbedSpec) -> dict[str, Any]:
-    """Convert a neutral :class:`EmbedSpec` into a Discord embed JSON object."""
-    embed: dict[str, Any] = {}
-    if spec.title is not None:
-        embed["title"] = spec.title
-    if spec.description is not None:
-        embed["description"] = spec.description
-    if spec.url is not None:
-        embed["url"] = spec.url
-    if spec.color is not None:
-        embed["color"] = spec.color
-    if spec.image_url:
-        embed["image"] = {"url": spec.image_url}
-    if spec.author_name:
-        author: dict[str, Any] = {"name": spec.author_name}
-        if spec.author_url:
-            author["url"] = spec.author_url
-        if spec.author_icon_url:
-            author["icon_url"] = spec.author_icon_url
-        embed["author"] = author
-    return embed
+    """Convert a neutral :class:`EmbedSpec` into a Discord embed JSON object.
 
-
-def chunk_text(text: str, *, limit: int = DISCORD_MAX_TEXT) -> list[str]:
-    """Split ``text`` into chunks no longer than ``limit``, preferring newlines.
-
-    Mirrors the gateway adapter's chunker. Never splits mid-line unless a single
-    line itself exceeds ``limit``.
+    Declared as one literal so the output structure is obvious at a glance; keys
+    whose value is ``None`` are pruned (Discord omits absent fields).
     """
-    if len(text) <= limit:
-        return [text] if text else []
+    author: dict[str, Any] | None = None
+    if spec.author_name:
+        author = {
+            "name": spec.author_name,
+            "url": spec.author_url or None,
+            "icon_url": spec.author_icon_url or None,
+        }
+        author = {key: value for key, value in author.items() if value is not None}
 
-    chunks: list[str] = []
-    current = ""
-    for line in text.splitlines(keepends=True):
-        while len(line) > limit:
-            if current:
-                chunks.append(current)
-                current = ""
-            chunks.append(line[:limit])
-            line = line[limit:]
-        if len(current) + len(line) > limit:
-            chunks.append(current)
-            current = line
-        else:
-            current += line
-    if current:
-        chunks.append(current)
-    return [chunk for chunk in chunks if chunk]
+    embed: dict[str, Any] = {
+        "title": spec.title,
+        "description": spec.description,
+        "url": spec.url,
+        "color": spec.color,
+        "image": {"url": spec.image_url} if spec.image_url else None,
+        "author": author,
+    }
+    return {key: value for key, value in embed.items() if value is not None}
+
+
+def _truncate_to_single_message(text: str, *, limit: int = DISCORD_MAX_TEXT) -> str:
+    """Fit ``text`` into one message, appending a visible truncation notice.
+
+    A single *immediate* interaction response is one message (Discord's model),
+    so output spanning multiple chunks cannot be delivered here. Rather than
+    silently dropping the overflow, we keep as much as fits alongside an explicit
+    notice. Full multi-message output needs the deferred follow-up path (#33).
+    """
+    # Reserve worst-case notice width (omitted <= len(text)) so the result is
+    # guaranteed to fit within ``limit``.
+    reserved = len(_TRUNCATION_NOTICE.format(omitted=len(text)))
+    head = text[: max(0, limit - reserved)]
+    omitted = len(text) - len(head)
+    return head + _TRUNCATION_NOTICE.format(omitted=omitted)
 
 
 def to_response_data(result: SkillResult) -> dict[str, Any]:
-    """Build the ``data`` object of a CHANNEL_MESSAGE_WITH_SOURCE response.
-
-    Expected failures render as plain content. A single immediate response holds
-    one message; text longer than the limit keeps only the first chunk for now —
-    multi-message output needs the deferred-follow-up path (a documented TODO,
-    not yet needed for the stateless skills).
-    """
+    """Build the ``data`` object of a CHANNEL_MESSAGE_WITH_SOURCE response."""
     if result.is_error:
         return {"content": result.error}
 
     data: dict[str, Any] = {}
-    chunks = chunk_text(result.text or "")
-    if chunks:
-        data["content"] = chunks[0]
+    text = result.text or ""
+    if len(text) > DISCORD_MAX_TEXT:
+        logger.warning("Interaction output exceeds one message (%d chars); truncating.", len(text))
+        data["content"] = _truncate_to_single_message(text)
+    elif text:
+        data["content"] = text
     if result.embed is not None:
         data["embeds"] = [to_embed_dict(result.embed)]
+
+    if not data:
+        # A successful result with neither text nor embed would serialise to an
+        # empty message, which Discord rejects. Surface it explicitly.
+        logger.warning("Skill returned an empty result; sending a placeholder.")
+        data["content"] = _EMPTY_PLACEHOLDER
     return data
 
 

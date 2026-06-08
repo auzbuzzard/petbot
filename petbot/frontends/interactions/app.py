@@ -41,7 +41,7 @@ def build_handler(settings: Settings, *, http_client: httpx.AsyncClient) -> Inte
     if not settings.discord_public_key:
         raise ConfigError(
             "DISCORD_PUBLIC_KEY is not set. The HTTP-Interactions frontend needs the "
-            "application's public key (Discord Developer Portal → General Information) "
+            "application's public key (Discord Developer Portal, General Information) "
             "to verify request signatures."
         )
     registry = SkillRegistry(

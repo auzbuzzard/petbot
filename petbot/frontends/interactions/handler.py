@@ -1,4 +1,4 @@
-"""The interaction handler: verify → parse → dispatch → render.
+"""The interaction handler: verify -> parse -> dispatch -> render.
 
 Framework-agnostic on purpose. :meth:`InteractionHandler.handle` takes the raw
 request body plus the two signature headers and returns an
@@ -8,6 +8,7 @@ HTTP server and bound to a concrete runtime (AWS Lambda) in :mod:`.app`.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Mapping
@@ -20,7 +21,13 @@ from petbot.frontends.interactions.render import message_response
 from petbot.frontends.interactions.verify import verify_signature
 from petbot.frontends.interactions.wire import APPLICATION_COMMAND, PING, PONG
 
-log = logging.getLogger("petbot.interactions")
+logger = logging.getLogger(__name__)
+
+#: Per-skill budget for the *immediate* response. Discord cancels an interaction
+#: not answered within 3 seconds of its POST; we cap a skill below that so a slow
+#: or hung skill yields a clear message instead of a silent Discord timeout. The
+#: real fix for genuinely long work is the deferred follow-up path (tracked: #33).
+DEFAULT_SKILL_TIMEOUT_SECONDS = 2.5
 
 
 class InteractionHandler:
@@ -32,10 +39,12 @@ class InteractionHandler:
         registry: SkillRegistry,
         capabilities: Capabilities,
         public_key: str,
+        skill_timeout: float = DEFAULT_SKILL_TIMEOUT_SECONDS,
     ) -> None:
         self._registry = registry
         self._capabilities = capabilities
         self._public_key = public_key
+        self._skill_timeout = skill_timeout
         # The skills this frontend may expose, by name. Capability gating means
         # voice-only skills (``/music``) are absent here automatically.
         self._allowed = {skill.name for skill in registry.available_for(capabilities)}
@@ -69,6 +78,7 @@ class InteractionHandler:
             return 200, {"type": PONG}
         if itype == APPLICATION_COMMAND:
             return 200, await self._dispatch(interaction)
+        logger.warning("Received unsupported interaction type: %r", itype)
         return 200, message_response(SkillResult.failure("Unsupported interaction type."))
 
     async def _dispatch(self, interaction: Mapping[str, Any]) -> dict[str, Any]:
@@ -78,15 +88,18 @@ class InteractionHandler:
         # ``/ping`` is an adapter-level liveness check, not a neutral skill
         # (mirrors the gateway adapter's PingCog).
         if name == "ping":
-            return message_response(SkillResult.message("🏓 Pong!"))
+            return message_response(SkillResult.message("Pong!"))
 
         if name not in self._allowed:
             # NOTE: ``/purge`` acts on Discord directly (REST bulk-delete +
             # Manage Messages gating) rather than via a neutral skill; it is a
             # tracked follow-up and is intentionally not handled here yet.
-            log.warning("Received unhandled command: /%s", name)
+            logger.warning("Received unhandled command: /%s", name)
             return message_response(SkillResult.failure(f"`/{name}` isn't available here yet."))
 
+        # Registered skills take flat options only (``{name: value}``). The
+        # registered set has no subcommands; a value-less option would mean an
+        # unexpected nested structure, so skipping it is intentional, not silent.
         args = {
             option["name"]: option["value"]
             for option in data.get("options", [])
@@ -97,5 +110,24 @@ class InteractionHandler:
             skill = self._registry.get(name)
         except SkillNotFoundError:
             return message_response(SkillResult.failure(f"Unknown command: `/{name}`."))
-        result = await skill.run(args, ctx)
+
+        try:
+            result = await asyncio.wait_for(skill.run(args, ctx), self._skill_timeout)
+        except TimeoutError:
+            logger.warning(
+                "Skill /%s exceeded the %.1fs budget; Discord may have already timed out.",
+                name,
+                self._skill_timeout,
+            )
+            return message_response(
+                SkillResult.failure(
+                    "That took too long to respond. (Long-running commands need the "
+                    "deferred-response path, which isn't wired up yet.)"
+                )
+            )
+        except Exception:
+            logger.exception("Skill /%s raised an unexpected error.", name)
+            return message_response(
+                SkillResult.failure("Something went wrong running that command.")
+            )
         return message_response(result)
