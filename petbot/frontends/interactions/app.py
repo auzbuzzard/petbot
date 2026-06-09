@@ -22,6 +22,7 @@ from petbot.core.skills.context import Capabilities
 from petbot.core.skills.math_skill import MathSkill
 from petbot.core.skills.registry import SkillRegistry
 from petbot.frontends.interactions.handler import InteractionHandler
+from petbot.logging_setup import configure_logging
 
 #: Capabilities of the stateless HTTP-interactions frontend: no voice (so the
 #: registry hides ``/music``), rich embeds, Discord's 2000-char limit.
@@ -71,8 +72,26 @@ def _extract(event: Mapping[str, Any]) -> tuple[bytes, str | None, str | None]:
     return body, headers.get("x-signature-ed25519"), headers.get("x-signature-timestamp")
 
 
-async def _ahandle(event: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
-    settings = Settings.from_env()
+#: Set once per warm container so :func:`configure_logging` (which restarts the
+#: queue listener on each call) runs a single time, not per invocation.
+_logging_configured = False
+
+
+def _ensure_logging_configured(settings: Settings) -> None:
+    """Configure process logging once per container (never at import time).
+
+    Mirrors the gateway, which configures logging in ``bootstrap.run``; the
+    Lambda entrypoint is the equivalent start-up point here, so the interactions
+    frontend emits the same structured/plain logs (see ADR 0004) instead of the
+    root logger's unconfigured default.
+    """
+    global _logging_configured
+    if not _logging_configured:
+        configure_logging(level=settings.log_level, fmt=settings.resolved_log_format)
+        _logging_configured = True
+
+
+async def _ahandle(event: Mapping[str, Any], settings: Settings) -> tuple[int, dict[str, Any]]:
     # A short-lived client per invocation keeps it bound to this event loop. A
     # warm-reuse optimization can come later if traffic warrants it.
     async with httpx.AsyncClient(timeout=20.0) as client:
@@ -83,7 +102,9 @@ async def _ahandle(event: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
 
 def lambda_handler(event: Mapping[str, Any], context: Any = None) -> dict[str, Any]:
     """AWS Lambda Function URL handler: parse the event, run, return a response."""
-    status, payload = asyncio.run(_ahandle(event))
+    settings = Settings.from_env()
+    _ensure_logging_configured(settings)
+    status, payload = asyncio.run(_ahandle(event, settings))
     return {
         "statusCode": status,
         "headers": {"content-type": "application/json"},
