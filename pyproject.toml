@@ -22,6 +22,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# The HTTP-Interactions frontend (AWS Lambda). PyNaCl verifies Discord's Ed25519
+# request signatures. Kept out of the base install so the gateway runtime stays
+# lean. See docs/adr/0004-serverless-deployment.md.
+interactions = [
+    "pynacl>=1.5",
+]
 dev = [
     "ruff>=0.5",
     "mypy>=1.10",
@@ -31,6 +37,7 @@ dev = [
     "pytest-cov>=5.0",
     "respx>=0.21",
     "pre-commit>=3.7",
+    "pynacl>=1.5",
 ]
 
 [project.scripts]
@@ -58,7 +65,7 @@ files = ["petbot", "tests"]
 # discord.py and third-party libs ship their own types or are ignored below.
 
 [[tool.mypy.overrides]]
-module = ["numexpr.*", "yt_dlp.*"]
+module = ["numexpr.*", "yt_dlp.*", "nacl.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -89,4 +96,10 @@ forbidden_modules = ["petbot.frontends"]
 name = "The neutral core must not import discord"
 type = "forbidden"
 source_modules = ["petbot.core"]
+forbidden_modules = ["discord"]
+
+[[tool.importlinter.contracts]]
+name = "The interactions frontend must not import discord (stays serverless-portable)"
+type = "forbidden"
+source_modules = ["petbot.frontends.interactions"]
 forbidden_modules = ["discord"]

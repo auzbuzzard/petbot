@@ -33,6 +33,10 @@ class Settings:
     discord_token: str
     env: str = "dev"
     dev_guild_id: int | None = None
+    #: The application's public key, used by the HTTP-Interactions frontend to
+    #: verify Discord's Ed25519 request signatures. Not needed by the gateway
+    #: frontend, hence optional.
+    discord_public_key: str | None = None
     e621_username: str | None = None
     e621_api_key: str | None = None
     derpibooru_api_key: str | None = None
@@ -92,6 +96,7 @@ class Settings:
             discord_token=token,
             env=env.get("ENV", "dev"),
             dev_guild_id=dev_guild_id,
+            discord_public_key=env.get("DISCORD_PUBLIC_KEY") or None,
             e621_username=env.get("E621_USERNAME") or None,
             e621_api_key=env.get("E621_API_KEY") or None,
             derpibooru_api_key=env.get("DERPIBOORU_API_KEY") or None,

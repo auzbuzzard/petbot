@@ -10,6 +10,7 @@ from __future__ import annotations
 import discord
 
 from petbot.core.skills.context import EmbedSpec, SkillResult
+from petbot.core.text import chunk_text
 
 #: Discord's hard limit on message content length.
 DISCORD_MAX_TEXT = 2000
@@ -34,34 +35,6 @@ def to_embed(spec: EmbedSpec) -> discord.Embed:
     return embed
 
 
-def chunk_text(text: str, *, limit: int = DISCORD_MAX_TEXT) -> list[str]:
-    """Split ``text`` into chunks no longer than ``limit``, preferring newlines.
-
-    Never splits mid-line unless a single line itself exceeds ``limit``.
-    """
-    if len(text) <= limit:
-        return [text] if text else []
-
-    chunks: list[str] = []
-    current = ""
-    for line in text.splitlines(keepends=True):
-        while len(line) > limit:
-            # A single over-long line: hard-split it.
-            if current:
-                chunks.append(current)
-                current = ""
-            chunks.append(line[:limit])
-            line = line[limit:]
-        if len(current) + len(line) > limit:
-            chunks.append(current)
-            current = line
-        else:
-            current += line
-    if current:
-        chunks.append(current)
-    return [chunk for chunk in chunks if chunk]
-
-
 async def respond(interaction: discord.Interaction, result: SkillResult) -> None:
     """Send ``result`` as a reply to a (deferred) slash-command interaction.
 
@@ -73,7 +46,7 @@ async def respond(interaction: discord.Interaction, result: SkillResult) -> None
         return
 
     embed = to_embed(result.embed) if result.embed is not None else None
-    chunks = chunk_text(result.text or "")
+    chunks = chunk_text(result.text or "", limit=DISCORD_MAX_TEXT)
 
     if not chunks:
         await _send(interaction, content=None, embed=embed)
