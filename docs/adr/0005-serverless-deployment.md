@@ -1,4 +1,4 @@
-# ADR 0004: Serverless deployment — HTTP-Interactions core on AWS Lambda, gateway skills as remote workers
+# ADR 0005: Serverless deployment — HTTP-Interactions core on AWS Lambda, gateway skills as remote workers
 
 - Status: Accepted
 - Date: 2026-06-04

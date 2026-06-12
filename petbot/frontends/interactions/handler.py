@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 #: Per-skill budget for the *immediate* response. Discord cancels an interaction
 #: not answered within 3 seconds of its POST; we cap a skill below that so a slow
 #: or hung skill yields a clear message instead of a silent Discord timeout. The
-#: real fix for genuinely long work is the deferred follow-up path (tracked: #33).
+#: real fix for genuinely long work is the deferred follow-up path (tracked: #35).
 DEFAULT_SKILL_TIMEOUT_SECONDS = 2.5
 
 
