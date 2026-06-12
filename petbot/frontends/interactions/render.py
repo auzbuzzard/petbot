@@ -55,7 +55,7 @@ def _truncate_to_single_message(text: str, *, limit: int = DISCORD_MAX_TEXT) -> 
     A single *immediate* interaction response is one message (Discord's model),
     so output spanning multiple chunks cannot be delivered here. Rather than
     silently dropping the overflow, we keep as much as fits alongside an explicit
-    notice. Full multi-message output needs the deferred follow-up path (#33).
+    notice. Full multi-message output needs the deferred follow-up path (#35).
     """
     # Reserve worst-case notice width (omitted <= len(text)) so the result is
     # guaranteed to fit within ``limit``.
