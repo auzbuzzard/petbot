@@ -9,7 +9,7 @@ adapter verifies the request signature, maps the interaction onto a neutral
 JSON.
 
 It imports **no** ``discord`` (it emits raw JSON), so it runs on minimal
-serverless runtimes. See ``docs/adr/0004-serverless-deployment.md``.
+serverless runtimes. See ``docs/adr/0005-serverless-deployment.md``.
 """
 
 from __future__ import annotations

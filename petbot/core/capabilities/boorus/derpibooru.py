@@ -144,6 +144,8 @@ class DerpibooruProvider:
         url = img.view_url or img.representations.large
         if not url:
             return None
+        if url.startswith("//"):  # `representations` come back protocol-relative
+            url = f"https:{url}"
         rating = _rating(img.tags)
         return Post(
             post_id=img.id,

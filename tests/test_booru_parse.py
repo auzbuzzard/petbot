@@ -160,6 +160,18 @@ def test_derpi_parse() -> None:
     assert post.color == 0x00FF00
 
 
+def test_derpi_absolutizes_protocol_relative_url() -> None:
+    # `representations` come back protocol-relative (`//derpicdn.net/...`); when
+    # `view_url` is absent we must add a scheme so Discord can render the image.
+    body = {
+        "total": 1,
+        "images": [{"id": 7, "representations": {"large": "//derpicdn.net/img/large.png"}}],
+    }
+    post = derpibooru.DerpibooruProvider().parse(body)
+    assert post is not None
+    assert post.image_url == "https://derpicdn.net/img/large.png"
+
+
 def test_parse_none_on_empty_or_blocked() -> None:
     e = e621.E621Provider(user_agent="x")
     assert e.parse(load_fixture("e621_empty")) is None
