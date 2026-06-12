@@ -14,7 +14,7 @@ import discord
 import httpx
 from discord.ext import commands
 
-from petbot.config import Settings
+from petbot.config import GatewaySettings
 from petbot.core.skills.booru_skill import DerpiSkill, E621Skill
 from petbot.core.skills.context import Capabilities
 from petbot.core.skills.math_skill import MathSkill
@@ -37,7 +37,7 @@ DISCORD_CAPABILITIES = Capabilities(supports_voice=True, supports_rich_embeds=Tr
 class PetBot(commands.Bot):
     """The Discord client. Slash-command first; the prefix is vestigial."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: GatewaySettings) -> None:
         intents = discord.Intents.default()
         intents.voice_states = True
         # message_content stays OFF: slash commands don't need it, and it's a
@@ -96,7 +96,7 @@ class PetBot(commands.Bot):
         await super().close()
 
 
-def run(settings: Settings) -> None:
+def run(settings: GatewaySettings) -> None:
     """Start the bot (blocking) with the given settings.
 
     This is the single place logging is configured. ``log_handler=None`` stops
