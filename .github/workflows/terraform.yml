@@ -1,0 +1,40 @@
+name: Terraform
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "deploy/terraform/**"
+      - ".github/workflows/terraform.yml"
+  pull_request:
+    paths:
+      - "deploy/terraform/**"
+      - ".github/workflows/terraform.yml"
+
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Format check
+        run: terraform -chdir=deploy/terraform fmt -check -recursive
+
+      # `-backend=false` so validation needs no AWS credentials or remote state.
+      - name: Validate (root stack)
+        run: |
+          terraform -chdir=deploy/terraform init -backend=false
+          terraform -chdir=deploy/terraform validate
+
+      - name: Validate (bootstrap stack)
+        run: |
+          terraform -chdir=deploy/terraform/bootstrap init -backend=false
+          terraform -chdir=deploy/terraform/bootstrap validate

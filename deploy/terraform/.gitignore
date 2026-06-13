@@ -1,0 +1,13 @@
+# Terraform working files — never commit state, provider binaries, or secrets.
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+.terraform.tfstate.lock.info
+
+# Real inputs (the *.example templates are committed; the filled-in copies aren't).
+backend.hcl
+*.tfvars
+!*.tfvars.example

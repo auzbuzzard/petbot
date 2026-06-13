@@ -1,0 +1,19 @@
+# Copy to terraform.tfvars and adjust. No secrets live here — secret *values*
+# are stored as SSM SecureString parameters (see README), referenced by name.
+
+aws_region = "us-east-1"
+image_tag  = "latest" # prefer a unique tag per deploy, e.g. the git SHA
+
+# ENV drives the logging profile (prod => structured JSON).
+lambda_environment = "prod"
+log_level          = "INFO"
+
+# Required SSM SecureString holding the Discord application public key.
+public_key_ssm_parameter = "/petbot/interactions/discord_public_key"
+
+# Optional booru auth: ENV-VAR-NAME => SSM-parameter-name.
+# booru_ssm_parameters = {
+#   DERPIBOORU_API_KEY = "/petbot/interactions/derpibooru_api_key"
+#   E621_USERNAME      = "/petbot/interactions/e621_username"
+#   E621_API_KEY       = "/petbot/interactions/e621_api_key"
+# }

@@ -1,0 +1,8 @@
+# Copy to backend.hcl and fill in, then:
+#   terraform init -backend-config=backend.hcl
+# The bucket and lock table are created by deploy/terraform/bootstrap.
+bucket         = "petbot-tfstate-<your-account-id>"
+key            = "interactions/terraform.tfstate"
+region         = "us-east-1"
+dynamodb_table = "petbot-tf-locks"
+encrypt        = true

@@ -1,0 +1,24 @@
+# PetBot HTTP-Interactions Lambda image.
+#
+# A container image (not a zip) because the adapter pulls in C-extensions
+# (pynacl for Ed25519, numexpr/numpy for /math); the AWS Lambda Python base
+# image gives a matching manylinux runtime with no wheel wrangling.
+#
+# Build from the repository root (the build context must see pyproject.toml and
+# petbot/), targeting arm64 to match the Lambda's Graviton architecture:
+#
+#   docker build --platform linux/arm64 -f deploy/Dockerfile.lambda -t <ecr_url>:<tag> .
+#
+FROM public.ecr.aws/lambda/python:3.12
+
+# ${LAMBDA_TASK_ROOT} is /var/task, already the WORKDIR and on sys.path.
+COPY pyproject.toml README.md ./
+COPY petbot ./petbot
+
+# `[interactions]` pulls in pynacl; the base dependencies bring pydantic,
+# pydantic-settings, httpx, numexpr, etc. No secrets are baked in — they are
+# supplied as environment variables by Terraform (see deploy/terraform).
+RUN pip install --no-cache-dir ".[interactions]"
+
+# module.function the Lambda runtime invokes per request.
+CMD ["petbot.frontends.interactions.app.lambda_handler"]
