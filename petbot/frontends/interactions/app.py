@@ -16,7 +16,7 @@ from typing import Any
 
 import httpx
 
-from petbot.config import ConfigError, Settings
+from petbot.config import InteractionsSettings
 from petbot.core.skills.booru_skill import DerpiSkill, E621Skill
 from petbot.core.skills.context import Capabilities
 from petbot.core.skills.math_skill import MathSkill
@@ -33,18 +33,15 @@ INTERACTIONS_CAPABILITIES = Capabilities(
 )
 
 
-def build_handler(settings: Settings, *, http_client: httpx.AsyncClient) -> InteractionHandler:
+def build_handler(
+    settings: InteractionsSettings, *, http_client: httpx.AsyncClient
+) -> InteractionHandler:
     """Wire the stateless skills into an :class:`InteractionHandler`.
 
-    Raises :class:`ConfigError` if ``DISCORD_PUBLIC_KEY`` is unset — it is
-    required to verify Discord's request signatures.
+    ``settings`` guarantees a ``discord_public_key`` (constructing
+    :class:`InteractionsSettings` fails otherwise), so the signature-verification
+    key is always present here.
     """
-    if not settings.discord_public_key:
-        raise ConfigError(
-            "DISCORD_PUBLIC_KEY is not set. The HTTP-Interactions frontend needs the "
-            "application's public key (Discord Developer Portal, General Information) "
-            "to verify request signatures."
-        )
     registry = SkillRegistry(
         [
             MathSkill(),
@@ -72,26 +69,31 @@ def _extract(event: Mapping[str, Any]) -> tuple[bytes, str | None, str | None]:
     return body, headers.get("x-signature-ed25519"), headers.get("x-signature-timestamp")
 
 
-#: Set once per warm container so :func:`configure_logging` (which restarts the
-#: queue listener on each call) runs a single time, not per invocation.
-_logging_configured = False
+#: Process-wide settings, built once per warm container on the first invocation
+#: (not at import, so the module stays importable for tests/tooling). Caching here
+#: keeps env parsing/validation and logging setup off the per-request path; a
+#: misconfigured function fails on its first invocation rather than every call.
+_settings: InteractionsSettings | None = None
 
 
-def _ensure_logging_configured(settings: Settings) -> None:
-    """Configure process logging once per container (never at import time).
+def _startup() -> InteractionsSettings:
+    """Build settings and configure logging once per container; reuse thereafter.
 
-    Mirrors the gateway, which configures logging in ``bootstrap.run``; the
-    Lambda entrypoint is the equivalent start-up point here, so the interactions
-    frontend emits the same structured/plain logs (see ADR 0004) instead of the
-    root logger's unconfigured default.
+    Mirrors the gateway, which configures logging in ``bootstrap.run``; the first
+    Lambda invocation is the equivalent start-up point, so the interactions
+    frontend emits the same structured/plain logs (ADR 0004).
     """
-    global _logging_configured
-    if not _logging_configured:
+    global _settings
+    if _settings is None:
+        settings = InteractionsSettings()
         configure_logging(level=settings.log_level, fmt=settings.resolved_log_format)
-        _logging_configured = True
+        _settings = settings
+    return _settings
 
 
-async def _ahandle(event: Mapping[str, Any], settings: Settings) -> tuple[int, dict[str, Any]]:
+async def _ahandle(
+    event: Mapping[str, Any], settings: InteractionsSettings
+) -> tuple[int, dict[str, Any]]:
     # A short-lived client per invocation keeps it bound to this event loop. A
     # warm-reuse optimization can come later if traffic warrants it.
     async with httpx.AsyncClient(timeout=20.0) as client:
@@ -102,8 +104,7 @@ async def _ahandle(event: Mapping[str, Any], settings: Settings) -> tuple[int, d
 
 def lambda_handler(event: Mapping[str, Any], context: Any = None) -> dict[str, Any]:
     """AWS Lambda Function URL handler: parse the event, run, return a response."""
-    settings = Settings.from_env()
-    _ensure_logging_configured(settings)
+    settings = _startup()
     status, payload = asyncio.run(_ahandle(event, settings))
     return {
         "statusCode": status,
