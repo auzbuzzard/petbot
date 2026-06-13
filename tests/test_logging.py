@@ -1,8 +1,9 @@
-"""Tests for the logging setup: JSON formatter, the non-error filter, the
-``configure_logging`` entrypoint, and ``Settings`` log parsing.
+"""Tests for the logging setup: JSON formatter, the non-error filter, and the
+``configure_logging`` entrypoint.
 
 These never touch the network and restore the root logger afterwards, so they
-don't leak handlers into the rest of the suite.
+don't leak handlers into the rest of the suite. (``Settings`` log-field parsing
+is covered in ``test_config.py``.)
 """
 
 from __future__ import annotations
@@ -15,7 +16,6 @@ from types import TracebackType
 
 import pytest
 
-from petbot.config import ConfigError, Settings
 from petbot.logging_setup import JSONFormatter, NonErrorFilter, configure_logging
 
 
@@ -126,32 +126,3 @@ def test_configure_logging_rejects_unknown_format(restore_logging: None) -> None
 def test_configure_logging_rejects_unknown_level(restore_logging: None) -> None:
     with pytest.raises(ValueError, match="Unknown log level"):
         configure_logging(level="LOUD", fmt="plain")
-
-
-# --- Settings log parsing ----------------------------------------------------
-
-
-def test_settings_log_defaults() -> None:
-    settings = Settings.from_env({"DISCORD_TOKEN": "x"})
-    assert settings.log_level == "INFO"
-    assert settings.log_format is None
-    assert settings.resolved_log_format == "plain"
-
-
-def test_settings_prod_defaults_to_json() -> None:
-    settings = Settings.from_env({"DISCORD_TOKEN": "x", "ENV": "prod"})
-    assert settings.resolved_log_format == "json"
-
-
-def test_settings_log_overrides_are_parsed() -> None:
-    settings = Settings.from_env(
-        {"DISCORD_TOKEN": "x", "ENV": "prod", "LOG_LEVEL": "DEBUG", "LOG_FORMAT": "Plain"}
-    )
-    assert settings.log_level == "DEBUG"
-    assert settings.log_format == "plain"  # explicit LOG_FORMAT wins over the env default
-    assert settings.resolved_log_format == "plain"
-
-
-def test_settings_rejects_bad_log_format() -> None:
-    with pytest.raises(ConfigError, match="LOG_FORMAT"):
-        Settings.from_env({"DISCORD_TOKEN": "x", "LOG_FORMAT": "yaml"})

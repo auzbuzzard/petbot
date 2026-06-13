@@ -15,7 +15,7 @@ import httpx
 import pytest
 from nacl.signing import SigningKey
 
-from petbot.config import ConfigError, Settings
+from petbot.config import InteractionsSettings
 from petbot.core.skills.base import Skill
 from petbot.core.skills.context import Capabilities, EmbedSpec, SkillContext, SkillResult
 from petbot.core.skills.math_skill import MathSkill
@@ -279,16 +279,19 @@ async def test_unexpected_skill_exception_is_caught() -> None:
 # --- app (composition root + Lambda entrypoint) ------------------------------
 
 
-async def test_build_handler_requires_public_key() -> None:
+async def test_build_handler_builds_from_settings() -> None:
+    settings = InteractionsSettings(_env_file=None, discord_public_key="ab12")
     async with httpx.AsyncClient() as client:
-        with pytest.raises(ConfigError, match="DISCORD_PUBLIC_KEY"):
-            app.build_handler(Settings(discord_token="x"), http_client=client)
+        handler = app.build_handler(settings, http_client=client)
+    assert isinstance(handler, InteractionHandler)
 
 
 def test_lambda_handler_answers_ping(monkeypatch: pytest.MonkeyPatch) -> None:
     signing_key, public_key = _keypair()
-    monkeypatch.setenv("DISCORD_TOKEN", "x")
+    # The Lambda needs only the public key — no bot token on this path.
+    monkeypatch.delenv("DISCORD_TOKEN", raising=False)
     monkeypatch.setenv("DISCORD_PUBLIC_KEY", public_key)
+    monkeypatch.setattr(app, "_settings", None)  # rebuild the cached cold-start settings
     body = '{"type":1}'
     event = {
         "headers": {

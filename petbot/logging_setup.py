@@ -14,7 +14,8 @@ The configuration itself lives in JSON (loaded via :mod:`importlib.resources` an
   blocks the asyncio event loop (the prod default).
 
 Nothing here reads the environment: the level and profile are passed in by the
-caller, which got them from :class:`~petbot.config.Settings` (the one env reader).
+caller, which got them from the :class:`~petbot.config.AppSettings` config (the
+only place that reads the environment).
 """
 
 from __future__ import annotations
