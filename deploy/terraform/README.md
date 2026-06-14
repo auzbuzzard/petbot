@@ -6,7 +6,7 @@ least-privilege IAM role. The Function URL output is what #31 sets as Discord's
 Interactions Endpoint URL.
 
 ```
-bootstrap/        one-time S3 state bucket + DynamoDB lock table (local state)
+bootstrap/        one-time encrypted S3 state bucket (local state)
 *.tf              the Lambda + ECR + IAM + Function URL stack (S3 remote state)
 backend.hcl.example       remote-state backend config (copy -> backend.hcl)
 terraform.tfvars.example  inputs (copy -> terraform.tfvars); no secrets here
@@ -17,7 +17,7 @@ The Lambda image is built from [`../Dockerfile.lambda`](../Dockerfile.lambda).
 ## Prerequisites
 
 - An AWS account with credentials in your shell (e.g. `aws sso login`).
-- Terraform >= 1.6, Docker, and the AWS CLI.
+- Terraform >= 1.11 (for S3-native state locking), Docker, and the AWS CLI.
 - Secrets live in **SSM SecureString** parameters, created out-of-band so their
   values never touch Terraform state as managed resources:
 

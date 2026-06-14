@@ -1,5 +1,6 @@
 # One-time bootstrap for the remote state backend: an encrypted, versioned S3
-# bucket for state and a DynamoDB table for locking. Uses LOCAL state itself
+# bucket for state. State locking is handled natively by S3 (`use_lockfile`,
+# Terraform >= 1.11), so no DynamoDB table is needed. Uses LOCAL state itself
 # (chicken-and-egg), so just keep the small state file it produces.
 #
 #   cd deploy/terraform/bootstrap
@@ -7,12 +8,12 @@
 #   terraform apply -var "state_bucket=petbot-tfstate-<your-account-id>"
 
 terraform {
-  required_version = ">= 1.6"
+  required_version = ">= 1.11"
 
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
   }
 }
@@ -29,11 +30,6 @@ variable "aws_region" {
 variable "state_bucket" {
   type        = string
   description = "Globally-unique S3 bucket name for Terraform state."
-}
-
-variable "lock_table" {
-  type    = string
-  default = "petbot-tf-locks"
 }
 
 resource "aws_s3_bucket" "state" {
@@ -67,21 +63,6 @@ resource "aws_s3_bucket_public_access_block" "state" {
   restrict_public_buckets = true
 }
 
-resource "aws_dynamodb_table" "locks" {
-  name         = var.lock_table
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "LockID"
-
-  attribute {
-    name = "LockID"
-    type = "S"
-  }
-}
-
 output "state_bucket" {
   value = aws_s3_bucket.state.id
-}
-
-output "lock_table" {
-  value = aws_dynamodb_table.locks.name
 }
