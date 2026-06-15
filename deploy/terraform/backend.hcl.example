@@ -1,0 +1,9 @@
+# Copy to backend.hcl and fill in, then:
+#   terraform init -backend-config=backend.hcl
+# The bucket is created by deploy/terraform/bootstrap. State locking is native
+# to S3 via use_lockfile (Terraform >= 1.11) — no DynamoDB table required.
+bucket       = "petbot-tfstate-<your-account-id>"
+key          = "interactions/terraform.tfstate"
+region       = "us-east-1"
+encrypt      = true
+use_lockfile = true
