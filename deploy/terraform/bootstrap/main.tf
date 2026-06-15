@@ -38,6 +38,12 @@ variable "github_repo" {
   default     = "auzbuzzard/petbot"
 }
 
+variable "name_prefix" {
+  type        = string
+  description = "Must match var.name_prefix in the root stack; used to scope the deploy role's permissions to exactly that stack's resources."
+  default     = "petbot-interactions"
+}
+
 resource "aws_s3_bucket" "state" {
   bucket = var.state_bucket
 }
@@ -117,10 +123,22 @@ resource "aws_iam_role" "github_deploy" {
   assume_role_policy = data.aws_iam_policy_document.deploy_trust.json
 }
 
-# Permissions the deploy workflow needs: Terraform state in S3, read the runtime
-# secrets in SSM, and manage the interactions stack (Lambda/ECR/role/logs/budget).
-# Wildcarded on the service actions for a single-stack bootstrap; tighten to ARNs
-# if this account ever hosts more than petbot.
+locals {
+  account_id = data.aws_caller_identity.current.account_id
+
+  # Every resource the deploy role may touch is one of the named stack resources
+  # below; scoping to these ARNs means a stolen CI token can't reach anything
+  # else in the account.
+  lambda_arn    = "arn:aws:lambda:${var.aws_region}:${local.account_id}:function:${var.name_prefix}"
+  ecr_repo_arn  = "arn:aws:ecr:${var.aws_region}:${local.account_id}:repository/${var.name_prefix}"
+  log_group_arn = "arn:aws:logs:${var.aws_region}:${local.account_id}:log-group:/aws/lambda/${var.name_prefix}"
+  exec_role_arn = "arn:aws:iam::${local.account_id}:role/${var.name_prefix}-role"
+}
+
+# Least-privilege permissions for the deploy workflow. Service-level action
+# wildcards (e.g. ecr:*) are kept where enumerating every Terraform-issued call
+# is brittle, but each statement is pinned to this stack's resource ARNs so the
+# role's blast radius is exactly the interactions stack and nothing more.
 data "aws_iam_policy_document" "deploy_permissions" {
   statement {
     sid       = "TerraformState"
@@ -131,18 +149,59 @@ data "aws_iam_policy_document" "deploy_permissions" {
   statement {
     sid       = "ReadRuntimeSecrets"
     actions   = ["ssm:GetParameter", "ssm:GetParameters"]
-    resources = ["arn:aws:ssm:*:${data.aws_caller_identity.current.account_id}:parameter/petbot/interactions/*"]
+    resources = ["arn:aws:ssm:${var.aws_region}:${local.account_id}:parameter/petbot/interactions/*"]
+  }
+
+  # SecureString parameters are KMS-encrypted; reading them with decryption needs
+  # kms:Decrypt. Scoped via kms:ViaService so the role can only use KMS through
+  # SSM — never to decrypt arbitrary data directly.
+  statement {
+    sid       = "DecryptSecretsViaSSM"
+    actions   = ["kms:Decrypt"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["ssm.${var.aws_region}.amazonaws.com"]
+    }
+  }
+
+  # ECR login is an account-level call with no resource to scope to.
+  statement {
+    sid       = "EcrAuth"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
   }
 
   statement {
-    sid = "ManageInteractionsStack"
+    sid       = "ManageEcrRepo"
+    actions   = ["ecr:*"]
+    resources = [local.ecr_repo_arn]
+  }
+
+  statement {
+    sid       = "ManageLambda"
+    actions   = ["lambda:*"]
+    resources = [local.lambda_arn, "${local.lambda_arn}:*"]
+  }
+
+  statement {
+    sid       = "ManageLogs"
+    actions   = ["logs:*"]
+    resources = [local.log_group_arn, "${local.log_group_arn}:*"]
+  }
+
+  statement {
+    sid       = "ManageBudget"
+    actions   = ["budgets:*"]
+    resources = ["arn:aws:budgets::${local.account_id}:budget/*"]
+  }
+
+  # Create/manage only the Lambda execution role this stack owns.
+  statement {
+    sid = "ManageExecRole"
     actions = [
-      "lambda:*",
-      "ecr:*",
-      "logs:*",
-      "budgets:*",
       "iam:GetRole",
-      "iam:PassRole",
       "iam:CreateRole",
       "iam:DeleteRole",
       "iam:AttachRolePolicy",
@@ -152,10 +211,24 @@ data "aws_iam_policy_document" "deploy_permissions" {
       "iam:GetRolePolicy",
       "iam:ListRolePolicies",
       "iam:ListAttachedRolePolicies",
+      "iam:ListInstanceProfilesForRole",
       "iam:TagRole",
       "iam:UntagRole",
     ]
-    resources = ["*"]
+    resources = [local.exec_role_arn]
+  }
+
+  # PassRole is the classic privilege-escalation lever, so it is doubly fenced:
+  # only the one exec role, and only when handed to the Lambda service.
+  statement {
+    sid       = "PassExecRoleToLambda"
+    actions   = ["iam:PassRole"]
+    resources = [local.exec_role_arn]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["lambda.amazonaws.com"]
+    }
   }
 }
 

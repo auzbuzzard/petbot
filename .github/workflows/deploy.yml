@@ -104,7 +104,9 @@ jobs:
           DISCORD_GUILD_ID: ${{ github.event.inputs.guild_id }}
         run: |
           pip install -e .
-          DISCORD_BOT_TOKEN="$(aws ssm get-parameter \
+          TOKEN="$(aws ssm get-parameter \
             --name /petbot/interactions/discord_bot_token \
-            --with-decryption --query Parameter.Value --output text)" \
-          python -m petbot.frontends.interactions.register
+            --with-decryption --query Parameter.Value --output text)"
+          # Mask it in the Actions log: if anything ever echoes it, it shows as ***.
+          echo "::add-mask::$TOKEN"
+          DISCORD_BOT_TOKEN="$TOKEN" python -m petbot.frontends.interactions.register
