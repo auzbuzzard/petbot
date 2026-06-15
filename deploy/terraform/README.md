@@ -70,6 +70,21 @@ terraform output function_url   # -> set this as Discord's Interactions Endpoint
 For subsequent deploys, push a new image (prefer a unique tag, e.g. the git SHA,
 set via `-var image_tag=...`) and re-run `terraform apply`.
 
+## Cost & retention
+
+The stack keeps storage bounded and `destroy` complete:
+
+- **ECR lifecycle** (`retention.tf`) expires untagged images after
+  `ecr_untagged_expire_days` and keeps only the last `ecr_keep_last_images`.
+- **CloudWatch Logs** are an explicit `aws_cloudwatch_log_group` with
+  `log_retention_days` retention — so logs don't accumulate forever, and
+  `terraform destroy` removes the group (Lambda's auto-created one never expires
+  and wouldn't be owned by Terraform).
+- **Cost alerts** are opt-in: AWS has no hard spend cap, so set
+  `monthly_budget_usd` + `budget_alert_emails` to create an AWS Budget that
+  emails you at 80% and 100% of the limit. At PetBot's scale spend is ~$0, so
+  this is a smoke alarm, not a throttle.
+
 ## Teardown
 
 ```sh

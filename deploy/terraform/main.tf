@@ -1,5 +1,3 @@
-data "aws_caller_identity" "current" {}
-
 # --- Container image registry -------------------------------------------------
 
 resource "aws_ecr_repository" "this" {
@@ -60,6 +58,10 @@ resource "aws_lambda_function" "this" {
   environment {
     variables = local.lambda_env
   }
+
+  # Ensure our retention-managed log group exists before the function can be
+  # invoked, so Lambda doesn't auto-create an unmanaged, never-expiring one.
+  depends_on = [aws_cloudwatch_log_group.lambda]
 }
 
 resource "aws_lambda_function_url" "this" {

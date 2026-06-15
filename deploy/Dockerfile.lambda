@@ -9,7 +9,10 @@
 #
 #   docker build --platform linux/arm64 -f deploy/Dockerfile.lambda -t <ecr_url>:<tag> .
 #
-FROM public.ecr.aws/lambda/python:3.13
+# Match the runtime to what CI tests and the toolchain targets (pyproject:
+# requires-python, mypy, ruff are all 3.12). Shipping a newer interpreter than
+# CI exercises would deploy an untested runtime — keep them in lockstep.
+FROM public.ecr.aws/lambda/python:3.12
 
 # ${LAMBDA_TASK_ROOT} is /var/task, already the WORKDIR and on sys.path.
 COPY pyproject.toml README.md ./

@@ -1,6 +1,15 @@
 variable "aws_region" {
   type        = string
-  description = "AWS region for all resources."
+  description = <<-EOT
+    Region for every regional resource in this stack (Lambda, ECR, CloudWatch,
+    SSM, and the state bucket). This is the single knob — you decide; all
+    resources inherit it (IAM is global and unaffected). Default us-east-1: it's
+    AWS's cheapest US region (the pricing baseline) and where the global pieces a
+    future custom domain needs (ACM for CloudFront) must live, avoiding
+    cross-region friction. us-east-2 / us-west-2 cost the same if you prefer one
+    of those. NOTE: the SSM secret parameters must be created in this region, and
+    the state-bucket region in backend.hcl should match.
+  EOT
   default     = "us-east-1"
 }
 
@@ -68,4 +77,36 @@ variable "booru_ssm_parameters" {
     referenced parameter must already exist as a SecureString.
   EOT
   default     = {}
+}
+
+# --- Retention / cost controls ------------------------------------------------
+
+variable "log_retention_days" {
+  type        = number
+  description = "CloudWatch Logs retention for the function (a valid CloudWatch value, e.g. 7/14/30/90)."
+  default     = 30
+}
+
+variable "ecr_keep_last_images" {
+  type        = number
+  description = "Keep this many of the most-recent tagged images; older ones are expired."
+  default     = 10
+}
+
+variable "ecr_untagged_expire_days" {
+  type        = number
+  description = "Expire untagged images older than this many days."
+  default     = 7
+}
+
+variable "monthly_budget_usd" {
+  type        = number
+  description = "Monthly AWS Budgets alert limit (USD). 0 (default) creates no budget."
+  default     = 0
+}
+
+variable "budget_alert_emails" {
+  type        = list(string)
+  description = "Emails notified at 80% and 100% of monthly_budget_usd; required to enable the budget."
+  default     = []
 }

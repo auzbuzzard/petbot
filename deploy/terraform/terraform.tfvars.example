@@ -1,6 +1,8 @@
 # Copy to terraform.tfvars and adjust. No secrets live here — secret *values*
 # are stored as SSM SecureString parameters (see README), referenced by name.
 
+# us-east-1 is AWS's cheapest US region and where ACM/CloudFront (future custom
+# domain) must live. us-east-2 / us-west-2 cost the same; pick one if you prefer.
 aws_region = "us-east-1"
 image_tag  = "latest" # prefer a unique tag per deploy, e.g. the git SHA
 
@@ -17,3 +19,12 @@ public_key_ssm_parameter = "/petbot/interactions/discord_public_key"
 #   E621_USERNAME      = "/petbot/interactions/e621_username"
 #   E621_API_KEY       = "/petbot/interactions/e621_api_key"
 # }
+
+# --- Retention / cost (sensible defaults; override to taste) ---
+# log_retention_days       = 30
+# ecr_keep_last_images     = 10
+# ecr_untagged_expire_days = 7
+
+# Optional monthly cost alert (AWS Budgets). Both must be set to enable it.
+# monthly_budget_usd  = 5
+# budget_alert_emails = ["you@example.com"]
