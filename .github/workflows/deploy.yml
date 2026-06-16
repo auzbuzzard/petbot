@@ -108,7 +108,9 @@ jobs:
           DISCORD_APP_ID: ${{ vars.DISCORD_APP_ID }}
           DISCORD_GUILD_ID: ${{ github.event.inputs.guild_id }}
         run: |
-          pip install -e .
+          # The [interactions] extra brings pynacl: importing the interactions
+          # package (via register) loads app -> handler -> verify, which needs it.
+          pip install -e ".[interactions]"
           TOKEN="$(aws ssm get-parameter \
             --name /petbot/interactions/discord_bot_token \
             --with-decryption --query Parameter.Value --output text)"
