@@ -49,19 +49,86 @@ cp backend.hcl.example backend.hcl   # fill in the bucket name
 
 The bootstrap stack also creates the **GitHub Actions OIDC provider** and the
 **`petbot-github-deploy` IAM role** the CI pipeline assumes (no static AWS keys).
-After applying, wire its outputs as repo **variables** (Settings → Secrets and
-variables → Actions → Variables — non-secret):
+After applying, wire its outputs as **variables** (Settings → Secrets and
+variables → Actions → Variables — non-secret).
+
+## Variable matrix: Repository vs Environment
+
+The deploy supports a `production` / `dev` environment axis (see
+**Environments** below). The guiding principle is simple:
+
+> **A value lives in a GitHub _Environment_ iff it differs per environment.
+> Everything that is the same across environments stays a _Repository_ variable.**
+
+| GitHub variable | Scope | Value | Why this scope |
+| --- | --- | --- | --- |
+| `AWS_REGION` | **Repository** | e.g. `us-east-1` (match `backend.hcl` / your SSM region) | Same region for every env |
+| `TF_STATE_BUCKET` | **Repository** | the `state_bucket` you chose above | One state bucket, per-env *key* (see below) |
+| `DEPLOY_ROLE_ARN` | **Environment** | `deploy_role_arn` bootstrap output for that env | Each env has its own scoped deploy role |
+| `DISCORD_APP_ID` | **Environment** | that env's Discord application ID | Each env is a distinct Discord app |
 
 ```sh
-terraform -chdir=bootstrap output deploy_role_arn   # -> DEPLOY_ROLE_ARN
+terraform -chdir=bootstrap output deploy_role_arn   # -> DEPLOY_ROLE_ARN (per env)
 ```
 
-| GitHub Actions variable | Value |
-| --- | --- |
-| `DEPLOY_ROLE_ARN` | `deploy_role_arn` bootstrap output |
-| `AWS_REGION` | e.g. `us-east-1` (match `backend.hcl` / your SSM region) |
-| `TF_STATE_BUCKET` | the `state_bucket` you chose above |
-| `DISCORD_APP_ID` | your Discord application ID |
+The workflow reads `vars.DEPLOY_ROLE_ARN` / `vars.DISCORD_APP_ID` exactly as
+before — but because they are now **Environment** variables and the job sets
+`environment: <selected env>`, GitHub resolves each to that environment's value.
+`AWS_REGION` / `TF_STATE_BUCKET` resolve from the repository as before.
+
+## Environments (production / dev)
+
+The deploy is environment-aware while keeping **production byte-identical to
+today**:
+
+- **Target selection.** A push to `master` always deploys `production`. A manual
+  *Run workflow* picks `production` (default) or `dev` via the `environment`
+  input. The chosen value is the GitHub `environment:` for the job (resolving the
+  Environment variables above).
+- **Per-env state key** (one bucket, distinct keys):
+  - `production` → `interactions/terraform.tfstate` *(unchanged)*
+  - any other env → `interactions/<env>/terraform.tfstate`
+- **Per-env resource names** (`name_prefix`):
+  - `production` → `petbot-interactions` *(unchanged)*
+  - non-prod → `petbot-interactions-<env>`
+- **Lambda `ENV`** (`lambda_environment`): `production` maps to `prod` (so the
+  app's `is_prod` / JSON-logging behaviour is unchanged); non-prod uses the env
+  name.
+
+Because prod's state key, `name_prefix`, resource names, and `lambda_environment`
+all stay exactly as they are now, a prod deploy is a no-op against the existing
+state and the existing `petbot-github-deploy` role.
+
+## Provisioning a new `dev` environment
+
+`dev` is purely additive — nothing here is required for prod. To stand it up:
+
+1. **Create the GitHub Environment** `dev` (Settings → Environments → New).
+2. **Bootstrap dev's AWS trust** (same account as prod). The OIDC provider is
+   account-global and already owned by the prod bootstrap, so dev must **not**
+   recreate it — pass `manage_oidc_provider=false` and a distinct role name:
+
+   ```sh
+   cd bootstrap
+   terraform apply \
+     -var "state_bucket=petbot-tfstate-<account-id>" \
+     -var "name_prefix=petbot-interactions-dev" \
+     -var "deploy_role_name=petbot-interactions-dev-github-deploy" \
+     -var "manage_oidc_provider=false"
+   ```
+
+   This produces a **distinct** deploy role scoped to the `petbot-interactions-dev`
+   ARNs, referencing the existing provider by its deterministic ARN. (The prod
+   bootstrap keeps `deploy_role_name` at its default `petbot-github-deploy` and
+   `manage_oidc_provider=true`; a `moved` block migrates the provider's state
+   address so prod's plan stays a no-op.)
+3. **Set the two Environment variables** on `dev`: `DEPLOY_ROLE_ARN`
+   (`terraform -chdir=bootstrap output deploy_role_arn` from the dev apply) and
+   `DISCORD_APP_ID` (the dev Discord app's ID).
+4. **Create a separate dev Discord application** (its own bot token + public
+   key) and put its SSM SecureString secrets in place for the dev stack.
+5. **Run the workflow** with `environment=dev` (optionally a `guild_id` for
+   instant guild-scoped command registration).
 
 ## CI deploy (the steady-state path)
 
