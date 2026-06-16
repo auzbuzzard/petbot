@@ -30,7 +30,10 @@ env:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    # Native arm64 runner: the image targets Graviton, so building here avoids
+    # QEMU emulation entirely (it was ~100s of the build) and matches the
+    # Lambda architecture exactly.
+    runs-on: ubuntu-24.04-arm
     # Optional manual-approval gate; configure required reviewers on the
     # `production` GitHub Environment to require sign-off before a deploy runs.
     environment: production
@@ -43,7 +46,7 @@ jobs:
           role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - uses: docker/setup-qemu-action@v3
+      # No setup-qemu-action: the runner is already arm64, so we build natively.
       - uses: docker/setup-buildx-action@v3
 
       - uses: hashicorp/setup-terraform@v3
@@ -69,24 +72,30 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: terraform apply -auto-approve -target=aws_ecr_repository.this
 
-      - name: Build & push arm64 image
+      - name: ECR login
         working-directory: ${{ env.TF_DIR }}
         run: |
           REPO=$(terraform output -raw ecr_repository_url)
           echo "ECR_REPO=$REPO" >> "$GITHUB_ENV"
           aws ecr get-login-password --region "${{ vars.AWS_REGION }}" \
             | docker login --username AWS --password-stdin "${REPO%%/*}"
-          # --provenance=false: buildx otherwise attaches a provenance
-          # attestation and pushes an OCI image *index*, which Lambda rejects
-          # ("image manifest ... media type ... is not supported"). Disabling it
-          # pushes a single image manifest Lambda accepts.
-          docker buildx build \
-            --platform linux/arm64 \
-            --provenance=false \
-            -f ../Dockerfile.lambda \
-            -t "$REPO:$IMAGE_TAG" \
-            --push \
-            ../..
+
+      - name: Build & push arm64 image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.lambda
+          tags: ${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
+          push: true
+          # provenance=false: buildx otherwise attaches a provenance attestation
+          # and pushes an OCI image *index*, which Lambda rejects ("image
+          # manifest ... media type ... is not supported"). This pushes a single
+          # image manifest Lambda accepts.
+          provenance: false
+          # Reuse layers across runs: when pyproject/deps are unchanged the
+          # install layer is restored instead of rebuilt.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Terraform apply
         working-directory: ${{ env.TF_DIR }}
