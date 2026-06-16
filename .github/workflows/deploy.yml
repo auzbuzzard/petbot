@@ -76,8 +76,13 @@ jobs:
           echo "ECR_REPO=$REPO" >> "$GITHUB_ENV"
           aws ecr get-login-password --region "${{ vars.AWS_REGION }}" \
             | docker login --username AWS --password-stdin "${REPO%%/*}"
+          # --provenance=false: buildx otherwise attaches a provenance
+          # attestation and pushes an OCI image *index*, which Lambda rejects
+          # ("image manifest ... media type ... is not supported"). Disabling it
+          # pushes a single image manifest Lambda accepts.
           docker buildx build \
             --platform linux/arm64 \
+            --provenance=false \
             -f ../Dockerfile.lambda \
             -t "$REPO:$IMAGE_TAG" \
             --push \
