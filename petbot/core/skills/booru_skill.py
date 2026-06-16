@@ -63,10 +63,22 @@ def _schema(
     }
 
 
+def _default_sort(provider: BooruProvider) -> Sort | None:
+    """The ordering used when the caller names none: ``random``, so that a bare
+    search (e.g. ``/e621 tag:hyena``) returns a *different* image each time rather
+    than always the newest match. Both providers expose a ``random`` order; the
+    guard keeps this safe if a future provider's vocabulary ever lacks one.
+    """
+    try:
+        return provider.Sort("random")
+    except ValueError:
+        return None
+
+
 def _build_search(
     provider: BooruProvider, args: Mapping[str, Any], ctx: SkillContext
 ) -> SearchRequest:
-    sort = provider.Sort(str(args["sort"])) if args.get("sort") else None
+    sort = provider.Sort(str(args["sort"])) if args.get("sort") else _default_sort(provider)
     file_type = provider.FileType(str(args["file_type"])) if args.get("file_type") else None
     min_score = args.get("min_score")
     score = NumericFilter(at_least=int(min_score)) if min_score is not None else None
