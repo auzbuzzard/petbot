@@ -1,0 +1,112 @@
+name: Deploy
+
+# Build + push the arm64 Lambda image, terraform apply, and register the slash
+# commands — entirely from CI via GitHub OIDC (no static AWS keys). See issue #42
+# and deploy/terraform/README.md. The one-time trust bootstrap (OIDC provider +
+# deploy role + state bucket + SSM secrets) is run once from AWS CloudShell.
+on:
+  # Manual run: lets you target a single guild for instant, guild-scoped command
+  # registration (the dev-guild rollout) before going global.
+  workflow_dispatch:
+    inputs:
+      guild_id:
+        description: "Guild ID for instant guild-scoped command registration (blank = global)."
+        required: false
+        default: ""
+  push:
+    branches: [master]
+
+# OIDC: request a short-lived token to assume the AWS deploy role.
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TF_DIR: deploy/terraform
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Optional manual-approval gate; configure required reviewers on the
+    # `production` GitHub Environment to require sign-off before a deploy runs.
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.11.4"
+
+      - name: Image tag (short git SHA)
+        run: echo "IMAGE_TAG=${GITHUB_SHA::12}" >> "$GITHUB_ENV"
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=interactions/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+
+      # The function is pinned to the image digest, so the image must exist before
+      # the full apply. Create just the ECR repo first (idempotent on re-runs).
+      - name: Ensure ECR repository exists
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform apply -auto-approve -target=aws_ecr_repository.this
+
+      - name: Build & push arm64 image
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          REPO=$(terraform output -raw ecr_repository_url)
+          echo "ECR_REPO=$REPO" >> "$GITHUB_ENV"
+          aws ecr get-login-password --region "${{ vars.AWS_REGION }}" \
+            | docker login --username AWS --password-stdin "${REPO%%/*}"
+          docker buildx build \
+            --platform linux/arm64 \
+            -f ../Dockerfile.lambda \
+            -t "$REPO:$IMAGE_TAG" \
+            --push \
+            ../..
+
+      - name: Terraform apply
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform apply -auto-approve -var "image_tag=$IMAGE_TAG"
+
+      - name: Show Function URL
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform output -raw function_url
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # Register the slash commands. The bot token is read from SSM at run time
+      # (never stored in GitHub) and lives only in this step's environment.
+      - name: Register slash commands
+        env:
+          DISCORD_APP_ID: ${{ vars.DISCORD_APP_ID }}
+          DISCORD_GUILD_ID: ${{ github.event.inputs.guild_id }}
+        run: |
+          pip install -e .
+          TOKEN="$(aws ssm get-parameter \
+            --name /petbot/interactions/discord_bot_token \
+            --with-decryption --query Parameter.Value --output text)"
+          # Mask it in the Actions log: if anything ever echoes it, it shows as ***.
+          echo "::add-mask::$TOKEN"
+          DISCORD_BOT_TOKEN="$TOKEN" python -m petbot.frontends.interactions.register
