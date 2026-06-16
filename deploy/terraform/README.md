@@ -24,6 +24,10 @@ The Lambda image is built from [`../Dockerfile.lambda`](../Dockerfile.lambda).
   ```sh
   aws ssm put-parameter --type SecureString \
     --name /petbot/interactions/discord_public_key --value "<application public key>"
+  # Bot token — used ONLY by the CI command-registration step (register.py),
+  # never by the Lambda at request time. Read from SSM in CI; never in GitHub.
+  aws ssm put-parameter --type SecureString \
+    --name /petbot/interactions/discord_bot_token --value "<bot token>"
   # optional booru auth:
   # aws ssm put-parameter --type SecureString --name /petbot/interactions/derpibooru_api_key --value "..."
   ```
@@ -42,6 +46,38 @@ terraform apply -var "state_bucket=petbot-tfstate-<your-account-id>"
 cd ..
 cp backend.hcl.example backend.hcl   # fill in the bucket name
 ```
+
+The bootstrap stack also creates the **GitHub Actions OIDC provider** and the
+**`petbot-github-deploy` IAM role** the CI pipeline assumes (no static AWS keys).
+After applying, wire its outputs as repo **variables** (Settings → Secrets and
+variables → Actions → Variables — non-secret):
+
+```sh
+terraform -chdir=bootstrap output deploy_role_arn   # -> DEPLOY_ROLE_ARN
+```
+
+| GitHub Actions variable | Value |
+| --- | --- |
+| `DEPLOY_ROLE_ARN` | `deploy_role_arn` bootstrap output |
+| `AWS_REGION` | e.g. `us-east-1` (match `backend.hcl` / your SSM region) |
+| `TF_STATE_BUCKET` | the `state_bucket` you chose above |
+| `DISCORD_APP_ID` | your Discord application ID |
+
+## CI deploy (the steady-state path)
+
+`.github/workflows/deploy.yml` does the whole rollout via OIDC — build + push the
+arm64 image (tagged with the git SHA), `terraform apply`, then register the slash
+commands. **No deploy is ever run from a developer machine.**
+
+- **Roll out to one guild first (instant):** run the workflow via
+  *Actions → Deploy → Run workflow* with **`guild_id`** set to your dev/private
+  server's ID. `register.py` registers the commands guild-scoped, so they appear
+  in that guild immediately and nowhere else.
+- **Go global:** a push to `master` runs the same pipeline with an empty
+  `guild_id`, registering the commands application-wide (up to ~1h to propagate).
+- **First run only:** set Discord's *Interactions Endpoint URL* to the
+  `function_url` the workflow prints, and invite the app to the target guild
+  (`bot` + `applications.commands` scopes).
 
 ## Deploy
 
@@ -96,5 +132,6 @@ cd bootstrap && terraform destroy -var "state_bucket=petbot-tfstate-<your-accoun
 ## CI
 
 `.github/workflows/terraform.yml` runs `fmt -check` + `validate` on PRs (no AWS
-credentials needed). `plan`/`apply` are run manually from here for now; a full
-OIDC pipeline can be added later.
+credentials needed). `.github/workflows/deploy.yml` runs the full OIDC
+build/apply/register pipeline (see **CI deploy** above). The manual two-step
+`terraform apply` flow above remains valid for local/break-glass use.
