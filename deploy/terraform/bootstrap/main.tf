@@ -191,6 +191,16 @@ data "aws_iam_policy_document" "deploy_permissions" {
     resources = [local.log_group_arn, "${local.log_group_arn}:*"]
   }
 
+  # logs:DescribeLogGroups is a list operation that AWS only authorizes on "*"
+  # (it has no per-log-group resource form). Terraform calls it to check whether
+  # the log group already exists, so it must be granted account-wide — it's a
+  # read-only listing, so the blast radius is just visibility of log-group names.
+  statement {
+    sid       = "DescribeLogGroups"
+    actions   = ["logs:DescribeLogGroups"]
+    resources = ["*"]
+  }
+
   statement {
     sid       = "ManageBudget"
     actions   = ["budgets:*"]
