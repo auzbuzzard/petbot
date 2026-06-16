@@ -30,9 +30,8 @@ env:
 
 jobs:
   deploy:
-    # Native arm64 runner: the image targets Graviton, so building here avoids
-    # QEMU emulation entirely (it was ~100s of the build) and matches the
-    # Lambda architecture exactly.
+    # arm64 runner matches the Lambda's Graviton architecture, so the image
+    # builds natively without QEMU emulation.
     runs-on: ubuntu-24.04-arm
     # Optional manual-approval gate; configure required reviewers on the
     # `production` GitHub Environment to require sign-off before a deploy runs.
@@ -46,7 +45,8 @@ jobs:
           role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      # No setup-qemu-action: the runner is already arm64, so we build natively.
+      # buildx for the build-push step's gha layer cache; no QEMU needed on an
+      # arm64 runner building an arm64 image.
       - uses: docker/setup-buildx-action@v3
 
       - uses: hashicorp/setup-terraform@v3
