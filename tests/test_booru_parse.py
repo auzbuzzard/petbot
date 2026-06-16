@@ -15,7 +15,7 @@ from petbot.core.capabilities.boorus import derpibooru, e621, tags
 from petbot.core.capabilities.boorus.engine import run_search
 from petbot.core.capabilities.boorus.errors import SiteFailureStatusError
 from petbot.core.capabilities.boorus.types import SearchRequest
-from petbot.core.skills.booru_skill import DerpiSkill, E621Skill
+from petbot.core.skills.booru_skill import DerpiSkill, E621Skill, _build_search
 
 # --- abstract vocabulary ------------------------------------------------------
 
@@ -94,6 +94,24 @@ async def test_e621_build_request_serializes_system_tags() -> None:
     assert req.url.params["limit"] == "1"
     assert req.headers["user-agent"] == "PetBot/2.0 (test)"
     assert req.headers["authorization"].startswith("Basic ")
+
+
+def test_default_sort_is_random_on_both_providers() -> None:
+    # A bare search (no `sort` arg) must default to each site's random order so
+    # repeated calls vary instead of always returning the newest match.
+    ctx = make_context()
+    e621_search = _build_search(e621.E621Provider(user_agent="x"), {"tags": "hyena"}, ctx)
+    derpi_search = _build_search(derpibooru.DerpibooruProvider(), {"tags": "pinkie pie"}, ctx)
+    assert e621_search.sort is e621.Sort.random
+    assert derpi_search.sort is derpibooru.Sort.random
+
+
+async def test_e621_bare_search_requests_random_order() -> None:
+    # End-to-end shaping: the default flows through into the `order:random` tag.
+    search = _build_search(e621.E621Provider(user_agent="x"), {"tags": "hyena"}, make_context())
+    async with httpx.AsyncClient() as client:
+        req = e621.E621Provider(user_agent="x").build_request(client, search)
+    assert "order:random" in req.url.params["tags"].split()
 
 
 async def test_e621_nsfw_omits_rating_and_no_auth_without_creds() -> None:
