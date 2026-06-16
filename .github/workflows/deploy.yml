@@ -9,6 +9,13 @@ on:
   # registration (the dev-guild rollout) before going global.
   workflow_dispatch:
     inputs:
+      environment:
+        description: "Target deploy environment (resolves per-environment variables + state key)."
+        type: choice
+        options:
+          - production
+          - dev
+        default: production
       guild_id:
         description: "Guild ID for instant guild-scoped command registration (blank = global)."
         required: false
@@ -27,13 +34,19 @@ concurrency:
 
 env:
   TF_DIR: deploy/terraform
+  # Target environment, computed once: a manual run uses the chosen input; a push
+  # to master always deploys `production`. Per-environment GitHub Environment
+  # variables (DEPLOY_ROLE_ARN, DISCORD_APP_ID) resolve against this; the state
+  # key and resource name_prefix are namespaced for non-prod (prod is unchanged).
+  DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # Optional manual-approval gate; configure required reviewers on the
-    # `production` GitHub Environment to require sign-off before a deploy runs.
-    environment: production
+    # Optional manual-approval gate; configure required reviewers on the selected
+    # GitHub Environment to require sign-off before a deploy runs. A push to
+    # master resolves to `production` (matching DEPLOY_ENV above).
+    environment: ${{ github.event.inputs.environment || 'production' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -53,12 +66,30 @@ jobs:
       - name: Image tag (short git SHA)
         run: echo "IMAGE_TAG=${GITHUB_SHA::12}" >> "$GITHUB_ENV"
 
+      # Per-environment state-key + name_prefix. production stays byte-identical
+      # to today (key interactions/terraform.tfstate, prefix petbot-interactions)
+      # so the live state and the existing scoped deploy role are never orphaned;
+      # any other env is namespaced under interactions/<env>/.
+      - name: Resolve environment-scoped Terraform inputs
+        run: |
+          if [ "$DEPLOY_ENV" = "production" ]; then
+            echo "TF_STATE_KEY=interactions/terraform.tfstate" >> "$GITHUB_ENV"
+            echo "TF_NAME_PREFIX=petbot-interactions" >> "$GITHUB_ENV"
+            # The app keys is_prod (and thus JSON logging) on ENV == "prod", so
+            # production keeps lambda_environment=prod unchanged from today.
+            echo "TF_LAMBDA_ENV=prod" >> "$GITHUB_ENV"
+          else
+            echo "TF_STATE_KEY=interactions/${DEPLOY_ENV}/terraform.tfstate" >> "$GITHUB_ENV"
+            echo "TF_NAME_PREFIX=petbot-interactions-${DEPLOY_ENV}" >> "$GITHUB_ENV"
+            echo "TF_LAMBDA_ENV=${DEPLOY_ENV}" >> "$GITHUB_ENV"
+          fi
+
       - name: Terraform init
         working-directory: ${{ env.TF_DIR }}
         run: |
           terraform init \
             -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
-            -backend-config="key=interactions/terraform.tfstate" \
+            -backend-config="key=${TF_STATE_KEY}" \
             -backend-config="region=${{ vars.AWS_REGION }}" \
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
@@ -67,7 +98,7 @@ jobs:
       # the full apply. Create just the ECR repo first (idempotent on re-runs).
       - name: Ensure ECR repository exists
         working-directory: ${{ env.TF_DIR }}
-        run: terraform apply -auto-approve -target=aws_ecr_repository.this
+        run: terraform apply -auto-approve -var "name_prefix=$TF_NAME_PREFIX" -target=aws_ecr_repository.this
 
       - name: Build & push arm64 image
         working-directory: ${{ env.TF_DIR }}
@@ -85,7 +116,11 @@ jobs:
 
       - name: Terraform apply
         working-directory: ${{ env.TF_DIR }}
-        run: terraform apply -auto-approve -var "image_tag=$IMAGE_TAG"
+        run: |
+          terraform apply -auto-approve \
+            -var "image_tag=$IMAGE_TAG" \
+            -var "name_prefix=$TF_NAME_PREFIX" \
+            -var "lambda_environment=$TF_LAMBDA_ENV"
 
       - name: Show Function URL
         working-directory: ${{ env.TF_DIR }}

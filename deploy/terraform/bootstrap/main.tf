@@ -44,6 +44,28 @@ variable "name_prefix" {
   default     = "petbot-interactions"
 }
 
+# Deploy-role name is an explicit variable (NOT derived from name_prefix) so the
+# existing prod role keeps its exact current name `petbot-github-deploy` even
+# though prod's name_prefix is `petbot-interactions`. A second environment passes
+# a distinct name (e.g. `petbot-interactions-dev-github-deploy`) to provision its
+# own role + scoped permissions without clobbering prod's.
+variable "deploy_role_name" {
+  type        = string
+  description = "IAM role name for the CI deploy role. Default keeps the existing prod role; override per non-prod env."
+  default     = "petbot-github-deploy"
+}
+
+# The GitHub OIDC provider is account-global: exactly one
+# `token.actions.githubusercontent.com` provider can exist per account, and prod
+# bootstrap already created it. A second environment in the SAME account must NOT
+# try to create a duplicate — set this to false there and the role's trust policy
+# references the existing provider by its (deterministic) ARN instead.
+variable "manage_oidc_provider" {
+  type        = bool
+  description = "Whether THIS apply owns the account-global GitHub OIDC provider. true for the first/prod bootstrap; false for additional same-account envs."
+  default     = true
+}
+
 resource "aws_s3_bucket" "state" {
   bucket = var.state_bucket
 }
@@ -86,12 +108,31 @@ output "state_bucket" {
 
 data "aws_caller_identity" "current" {}
 
+# Owned by the first/prod bootstrap only (manage_oidc_provider = true). Account
+# can hold exactly one provider for this URL, so additional same-account envs
+# reference the existing one instead of recreating it.
 resource "aws_iam_openid_connect_provider" "github" {
+  count          = var.manage_oidc_provider ? 1 : 0
   url            = "https://token.actions.githubusercontent.com"
   client_id_list = ["sts.amazonaws.com"]
   # AWS validates GitHub's OIDC cert against its trust store now, but the
   # argument is still required; this is GitHub's documented thumbprint.
   thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
+}
+
+# Adding `count` above re-indexes the resource address from `.github` to
+# `.github[0]`. This `moved` block migrates the EXISTING prod state entry to the
+# new address automatically, so prod's next `terraform plan` is a true no-op
+# (no destroy/recreate of the live OIDC provider) with no manual `state mv`.
+moved {
+  from = aws_iam_openid_connect_provider.github
+  to   = aws_iam_openid_connect_provider.github[0]
+}
+
+locals {
+  # The provider ARN is deterministic for a given account, so non-managing envs
+  # can reference the already-existing provider without a data lookup or import.
+  oidc_provider_arn = var.manage_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/token.actions.githubusercontent.com"
 }
 
 # Trust policy: only this repo's workflows (any ref) may assume the role.
@@ -101,7 +142,7 @@ data "aws_iam_policy_document" "deploy_trust" {
 
     principals {
       type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github.arn]
+      identifiers = [local.oidc_provider_arn]
     }
 
     condition {
@@ -119,7 +160,7 @@ data "aws_iam_policy_document" "deploy_trust" {
 }
 
 resource "aws_iam_role" "github_deploy" {
-  name               = "petbot-github-deploy"
+  name               = var.deploy_role_name
   assume_role_policy = data.aws_iam_policy_document.deploy_trust.json
 }
 
