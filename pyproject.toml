@@ -60,7 +60,7 @@ petbot = "petbot.__main__:main"
 
 # uv workspace members. `domain` is the Shared Kernel (depends on nothing).
 [tool.uv.workspace]
-members = ["domain"]
+members = ["domain", "skills/math"]
 
 [tool.setuptools.packages.find]
 include = ["petbot*"]
@@ -76,11 +76,16 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
 
+# First-party = every PetBot distribution, so the kernel/skills sort apart from
+# true third-party deps (numexpr, httpx, …) in a multi-package workspace.
+[tool.ruff.lint.isort]
+known-first-party = ["petbot", "petbot_domain", "petbot_skill_math"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-files = ["petbot", "domain", "tests"]
+files = ["petbot", "domain", "skills", "tests"]
 # discord.py and third-party libs ship their own types or are ignored below.
 
 [[tool.mypy.overrides]]
@@ -89,7 +94,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests", "domain/tests"]
+testpaths = ["tests", "domain/tests", "skills/math/tests"]
 addopts = "--cov=petbot --cov-report=term-missing"
 
 [tool.coverage.run]
@@ -102,13 +107,19 @@ omit = [
 
 # import-linter: enforce the one-way core -> adapter dependency rule.
 [tool.importlinter]
-root_packages = ["petbot", "petbot_domain"]
+root_packages = ["petbot", "petbot_domain", "petbot_skill_math"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "The domain Shared Kernel depends on nothing first-party or platform"
 type = "forbidden"
 source_modules = ["petbot_domain"]
+forbidden_modules = ["petbot", "discord"]
+
+[[tool.importlinter.contracts]]
+name = "A skill depends only on the kernel — never a frontend, platform, or sibling skill"
+type = "forbidden"
+source_modules = ["petbot_skill_math"]
 forbidden_modules = ["petbot", "discord"]
 
 [[tool.importlinter.contracts]]

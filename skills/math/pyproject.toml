@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "petbot-skill-math"
+version = "0.1.0"
+description = "PetBot math skill: evaluate an arithmetic expression."
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "petbot-domain",
+    "numexpr>=2.8", # restricted arithmetic grammar — far safer than eval
+    "numpy>=1.26",  # numexpr backend
+]
+
+# Discovered by a runtime host via importlib.metadata.entry_points("petbot.skills").
+# The value points at the Skill class; a host instantiates it (math takes no deps).
+[project.entry-points."petbot.skills"]
+math = "petbot_skill_math:MathSkill"
+
+[tool.setuptools.packages.find]
+include = ["petbot_skill_math*"]
+
+[tool.setuptools.package-data]
+"petbot_skill_math" = ["py.typed"]
+
+# Resolve the kernel from the workspace, not the index.
+[tool.uv.sources]
+petbot-domain = { workspace = true }
