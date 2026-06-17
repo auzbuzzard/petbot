@@ -12,16 +12,19 @@ from petbot_domain.context import DispatchRequest, Platform, SkillContext, User
 from petbot_domain.ports import DispatchPort, TrackFinishedCallback, VoicePort
 from petbot_domain.result import EmbedSpec, SkillResult
 from petbot_domain.skill import Skill
+from petbot_domain.spec import Manifest, SkillSpec
 
 __all__ = [
     "Capability",
     "DispatchPort",
     "DispatchRequest",
     "EmbedSpec",
+    "Manifest",
     "Platform",
     "Skill",
     "SkillContext",
     "SkillResult",
+    "SkillSpec",
     "TrackFinishedCallback",
     "User",
     "VoicePort",
