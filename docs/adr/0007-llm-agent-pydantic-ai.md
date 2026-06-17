@@ -19,8 +19,8 @@ Implement chat as a normal skill — `petbot.skills.chat` — built on **pydanti
 - The agent's tools **are the sibling skills**. Each tool's argument type is the
   very same `petbot.types.*Args` pydantic model the skill validates, so one
   declaration feeds the typed client, the worker's validation, and the LLM tool
-  schema. Tool bodies dispatch through a `Skills` client (`LocalSkills` in the
-  brain worker — an in-process hop, no wire round-trip).
+  schema. Tool bodies dispatch through a `Skills` client (`SkillsClient` over a
+  local transport in the core worker — an in-process hop, no wire round-trip).
 - The model is **provider-agnostic**, chosen by `CHAT_PROVIDER`: Amazon Bedrock
   for prod (a real, cheap on-Bedrock model — note Bedrock does *not* host Gemma),
   an OpenAI-compatible endpoint (OpenRouter, with free models like Gemma) for dev.
@@ -29,7 +29,7 @@ Implement chat as a normal skill — `petbot.skills.chat` — built on **pydanti
   booru image) into a single neutral `SkillResult`, so the edge renders it
   exactly like any other result.
 
-The chat skill runs in the **brain worker** alongside math + booru; the edge only
+The chat skill runs in the **core worker** alongside math + booru; the edge only
 calls `skills.chat(...)`. Tests drive the agent with pydantic-ai's `TestModel` /
 `FunctionModel`, so CI exercises the tool-calling path with no live LLM and no
 secrets.
