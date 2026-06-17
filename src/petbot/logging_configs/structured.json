@@ -3,7 +3,7 @@
   "disable_existing_loggers": false,
   "formatters": {
     "json": {
-      "()": "petbot.logging.JSONFormatter",
+      "()": "petbot.logging_setup.JSONFormatter",
       "fmt_keys": {
         "level": "levelname",
         "logger": "name",
@@ -16,7 +16,7 @@
   },
   "filters": {
     "non_error": {
-      "()": "petbot.logging.NonErrorFilter"
+      "()": "petbot.logging_setup.NonErrorFilter"
     }
   },
   "handlers": {

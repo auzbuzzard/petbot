@@ -16,7 +16,7 @@ from collections.abc import Iterable, Iterator
 from importlib.metadata import entry_points
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from petbot.domain import Skill, SkillCall, SkillContext, SkillResult
 
@@ -86,11 +86,17 @@ class Worker:
         args are validated against the named skill's ``args_model`` here, so the
         envelope never needs to know any skill's argument shape.
         """
-        raw: dict[str, Any] = json.loads(body)
-        skill = self._skills.get(raw.get("skill", ""))
-        if skill is None:
-            return SkillResult.failure(f"Unknown skill: `{raw.get('skill')}`.").model_dump_json()
-        args: BaseModel = skill.args_model.model_validate(raw["args"])
-        context = SkillContext.model_validate(raw["context"])
+        try:
+            raw: dict[str, Any] = json.loads(body)
+            skill = self._skills.get(raw["skill"])
+            if skill is None:
+                return SkillResult.failure(f"Unknown skill: `{raw['skill']}`.").model_dump_json()
+            args: BaseModel = skill.args_model.model_validate(raw["args"])
+            context = SkillContext.model_validate(raw["context"])
+        except (ValueError, KeyError, ValidationError):
+            # Bad JSON, missing fields, or args that fail validation — never let a
+            # malformed payload escape the boundary; always return a result.
+            logger.warning("Malformed dispatch payload", exc_info=True)
+            return SkillResult.failure("That request was malformed.").model_dump_json()
         result = await self.run(SkillCall(skill=raw["skill"], args=args, context=context))
         return result.model_dump_json()

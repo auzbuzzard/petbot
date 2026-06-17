@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import AsyncIterator
+
 import discord
 
 from petbot.domain import EmbedSpec, Platform, SkillResult
+from petbot.edge.bot import PetBot, _without_mention
 from petbot.edge.context import build_context
 from petbot.edge.render import respond, to_embed
+from petbot.edge.settings import EdgeSettings
 from petbot.edge.text import chunk_text
 
 
@@ -23,6 +28,10 @@ class FakeChannel:
 
     async def send(self, content: str | None = None, embed: discord.Embed | None = None) -> None:
         self.sent.append({"content": content, "embed": embed})
+
+    @contextlib.asynccontextmanager
+    async def typing(self) -> AsyncIterator[None]:
+        yield
 
 
 class FakeAuthor:
@@ -77,3 +86,25 @@ def test_build_context_reads_nsfw_and_ids() -> None:
     assert nsfw.user.display_name == "Rex"
     sfw = build_context(FakeMessage(FakeChannel(nsfw=False)))  # type: ignore[arg-type]
     assert sfw.allows_explicit is False
+
+
+def test_without_mention_strips_only_this_bot() -> None:
+    # The bot's own mention (both forms) goes; other users' mentions stay.
+    assert _without_mention("<@1> hi <@2>", 1) == " hi <@2>"
+    assert _without_mention("<@!1> yo", 1) == " yo"
+
+
+class _RaisingSkills:
+    """A Skills client whose every call fails — stands in for an unreachable worker."""
+
+    async def _boom(self, *_: object) -> SkillResult:
+        raise RuntimeError("worker unreachable")
+
+    math = derpi = e621 = music = chat = _boom
+
+
+async def test_chat_maps_transport_error_to_friendly_failure() -> None:
+    bot = PetBot(EdgeSettings(discord_token="x"))
+    bot.skills = _RaisingSkills()
+    result = await bot._chat("hello", FakeMessage(FakeChannel()))  # type: ignore[arg-type]
+    assert result.is_error  # the transport failure became a friendly result, not a crash

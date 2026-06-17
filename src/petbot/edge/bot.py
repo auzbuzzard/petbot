@@ -17,16 +17,20 @@ import discord
 import httpx
 from discord.ext import commands
 
+from petbot.domain import SkillResult
 from petbot.edge.context import build_context
 from petbot.edge.render import respond
 from petbot.edge.settings import EdgeSettings
-from petbot.logging import configure_logging
+from petbot.logging_setup import configure_logging
 from petbot.platform import HttpTransport, LambdaTransport, SkillsClient
 from petbot.types import ChatArgs, Skills
 
 logger = logging.getLogger(__name__)
 
-_MENTION = re.compile(r"<@!?\d+>")
+
+def _without_mention(content: str, user_id: int) -> str:
+    """Remove only this bot's mention (``<@id>`` / ``<@!id>``), leaving others intact."""
+    return re.sub(rf"<@!?{user_id}>", "", content)
 
 
 class PetBot(commands.Bot):
@@ -65,13 +69,22 @@ class PetBot(commands.Bot):
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot or self.user is None or self.user not in message.mentions:
             return
-        assert self.skills is not None
-        text = _MENTION.sub("", message.content).strip()
+        text = _without_mention(message.content, self.user.id).strip()
         if not text:
             return
-        async with message.channel.typing():
-            result = await self.skills.chat(ChatArgs(message=text), build_context(message))
-        await respond(message.channel, result)
+        await respond(message.channel, await self._chat(text, message))
+
+    async def _chat(self, text: str, message: discord.Message) -> SkillResult:
+        """Dispatch to the worker, mapping any transport failure to a friendly result."""
+        assert self.skills is not None
+        try:
+            async with message.channel.typing():
+                return await self.skills.chat(ChatArgs(message=text), build_context(message))
+        except Exception:
+            logger.exception("dispatch failed")
+            return SkillResult.failure(
+                "uwu I couldn't reach my brain right now — please try again soon."
+            )
 
     async def close(self) -> None:
         if self._http is not None:
