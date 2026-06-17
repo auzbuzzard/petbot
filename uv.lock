@@ -11,6 +11,7 @@ resolution-markers = [
 members = [
     "petbot",
     "petbot-domain",
+    "petbot-platform",
     "petbot-skill-math",
 ]
 
@@ -1149,6 +1150,17 @@ provides-extras = ["interactions", "discord", "music", "dev"]
 name = "petbot-domain"
 version = "0.1.0"
 source = { editable = "domain" }
+
+[[package]]
+name = "petbot-platform"
+version = "0.1.0"
+source = { editable = "platform" }
+dependencies = [
+    { name = "petbot-domain" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "petbot-domain", editable = "domain" }]
 
 [[package]]
 name = "petbot-skill-math"
