@@ -8,10 +8,9 @@ version = "0.1.0"
 description = "PetBot Shared Kernel: neutral domain types and port interfaces."
 requires-python = ">=3.12"
 license = { text = "MIT" }
-# The Shared Kernel depends on NOTHING. Value objects, enums, and port
-# interfaces only — no utilities, HTTP clients, or adapters (that would make it
-# a utility library, not a shared kernel). Enforced by import-linter.
-dependencies = []
+# The Shared Kernel: neutral models + ports. Pydantic (already the project's
+# model library) makes the data self-serialising at the boundary; no other deps.
+dependencies = ["pydantic>=2"]
 
 [tool.setuptools.packages.find]
 include = ["petbot_domain*"]

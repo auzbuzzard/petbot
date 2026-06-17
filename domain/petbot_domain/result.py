@@ -1,17 +1,19 @@
-"""The neutral outcome of running a skill.
+"""The neutral outcome of running a skill — immutable pydantic models.
 
-Rendering and length-chunking are the frontend's job, never the skill's — a
-skill returns an ``EmbedSpec`` (a neutral card description), never a
-platform-native embed.
+Rendering and length-chunking are the frontend's job, never the skill's: a skill
+returns an ``EmbedSpec`` (a neutral card description), never a platform embed.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from pydantic import BaseModel, ConfigDict
 
 
-@dataclass(frozen=True, slots=True)
-class EmbedSpec:
+class _Frozen(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+
+class EmbedSpec(_Frozen):
     """A platform-neutral description of a rich card."""
 
     title: str | None = None
@@ -24,8 +26,7 @@ class EmbedSpec:
     author_icon_url: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class SkillResult:
+class SkillResult(_Frozen):
     """A skill's neutral result: optional text, an optional card, files, an error.
 
     ``error`` carries *expected* failures (empty search, bad input) rendered as a

@@ -47,4 +47,4 @@ async def test_dispatch_forwards_request_and_returns_result() -> None:
     assert fake.seen is not None
     assert fake.seen.skill == "demo"
     assert fake.seen.args == {"q": "pony"}
-    assert fake.seen.context is ctx
+    assert fake.seen.context == ctx

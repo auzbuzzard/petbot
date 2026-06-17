@@ -1,4 +1,5 @@
-"""The worker runs the dispatched skill, and turns failures into result objects."""
+"""The worker discovers plugins, runs the dispatched skill, and turns failures
+into result objects."""
 
 from __future__ import annotations
 
@@ -6,7 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from petbot_domain import DispatchRequest, Platform, Skill, SkillContext, SkillResult, User
-from petbot_platform import SkillRegistry, Worker, build_registry
+from petbot_platform import Worker
 
 
 def _ctx() -> SkillContext:
@@ -29,7 +30,7 @@ async def test_handle_runs_a_real_plugin() -> None:
 
 
 async def test_unknown_skill_is_expected_failure() -> None:
-    worker = Worker(build_registry())
+    worker = Worker([])
     result = await worker.handle(_request("nope"))
     assert result.is_error
 
@@ -43,6 +44,6 @@ async def test_skill_exception_becomes_failure_result() -> None:
         async def run(self, args: Mapping[str, Any], ctx: SkillContext) -> SkillResult:
             raise RuntimeError("kaboom")
 
-    worker = Worker(SkillRegistry([_Boom()]))
+    worker = Worker([_Boom()])
     result = await worker.handle(_request("boom"))
     assert result.is_error

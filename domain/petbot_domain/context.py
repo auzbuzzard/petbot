@@ -1,18 +1,17 @@
 """Neutral request context and the dispatch envelope.
 
-Frozen, slotted dataclasses — pure data, no platform nouns and no live objects.
-A frontend maps its native request onto these; a worker runs a skill against
-them. They cross process boundaries, so they carry only serialisable data: a
+Immutable pydantic models — pure, serialisable data: no platform nouns and no
+live objects. They cross process boundaries, so they carry only data; a
 capability like voice is a *port* injected by the worker that needs it, never a
 field here.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict
 
 
 class Platform(StrEnum):
@@ -25,8 +24,11 @@ class Platform(StrEnum):
     DISCORD = "discord"
 
 
-@dataclass(frozen=True, slots=True)
-class User:
+class _Frozen(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+
+class User(_Frozen):
     """The invoking user, platform-qualified. ``id`` stays ``str`` for neutrality."""
 
     platform: Platform
@@ -34,8 +36,7 @@ class User:
     display_name: str
 
 
-@dataclass(frozen=True, slots=True)
-class SkillContext:
+class SkillContext(_Frozen):
     """Everything a skill needs about a request, with no platform nouns.
 
     ``allows_explicit`` is a *runtime* flag (the booru skills raise their rating
@@ -52,14 +53,9 @@ class SkillContext:
     max_text_length: int = 2000
 
 
-@dataclass(frozen=True, slots=True)
-class DispatchRequest:
-    """A unit of work a frontend hands to compute over a ``DispatchPort``.
-
-    Carries only serialisable data — the target skill, its validated ``args``,
-    and the neutral ``SkillContext``.
-    """
+class DispatchRequest(_Frozen):
+    """A unit of work a frontend hands to compute over a ``DispatchPort``."""
 
     skill: str
-    args: Mapping[str, Any]
+    args: dict[str, Any]
     context: SkillContext

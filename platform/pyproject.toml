@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "PetBot runtime: entry-point skill loader, registry, manifest, and dispatch adapters."
 requires-python = ">=3.12"
 license = { text = "MIT" }
-dependencies = ["petbot-domain", "pydantic>=2"]
+dependencies = ["petbot-domain"]
 
 [tool.setuptools.packages.find]
 include = ["petbot_platform*"]
