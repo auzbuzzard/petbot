@@ -2,51 +2,50 @@
 
 ## Working agreement
 
-No behavior change merges without **tests and green CI**. A new skill ships with
+No behaviour change merges without **tests and green CI**. A new skill ships with
 its tests; a bug fix ships with a regression test that fails before the fix; a
-refactor keeps existing tests green. Update the docs in the same change that
-alters the behavior they describe.
+refactor keeps existing tests green. Update the docs in the same change.
 
 The four gates (all required to merge, all runnable locally):
 
 ```bash
-ruff check . && ruff format --check .   # lint + format
-mypy                                    # strict typing
-lint-imports                            # core/adapter boundary
-pytest                                  # offline tests
+uv run ruff check . && uv run ruff format --check .   # lint + format
+uv run mypy                                           # strict typing
+uv run lint-imports                                   # package boundaries
+uv run pytest                                         # offline tests
 ```
-
-`pre-commit install` runs lint/type on every commit.
 
 ## Adding a skill
 
-1. Create `petbot/core/skills/<name>_skill.py` with a `Skill` subclass:
-   - class vars `name`, `description`, `input_schema` (JSON Schema), and
-     `requires` (e.g. `frozenset({"voice"})`) if it needs a port;
-   - `async def run(self, args, ctx) -> SkillResult`.
-2. Keep it **pure**: read from `args`/`ctx`, return a `SkillResult`, never import
-   `discord`. Gate explicit content on `ctx.capabilities.allows_explicit`.
-   Offload blocking work with `asyncio.to_thread`.
-3. Register it in `petbot/frontends/discord/bootstrap.py` and add a thin cog in
-   `petbot/frontends/discord/cogs/` that builds a context, calls the skill, and
-   renders via `render.respond`.
-4. Add tests in `tests/` using `make_context(...)` and (for network) mock the
-   HTTP transport with `respx` plus saved fixtures. Never hit a live API.
+The full recipe is in [`AGENTS.md`](../AGENTS.md). In short:
 
-## Adding a frontend (adapter)
+1. Add the skill's `*Args` model and a `Skills` Protocol method in
+   `types/petbot/types/`.
+2. Add the one-line `RemoteSkills` + `LocalSkills` methods in
+   `platform/petbot/platform/skills.py`.
+3. Create `skills/<name>/` with a `Skill[<Args>]` subclass (typed `args_model`,
+   `async def run(self, args, ctx) -> SkillResult`). Keep it **pure**: read
+   `args`/`ctx`, return a `SkillResult`, never import `discord`. Gate explicit
+   content on `ctx.allows_explicit`; offload blocking work with
+   `asyncio.to_thread`. Register an entry point under `petbot.skills` (or build it
+   explicitly if it needs DI, like `music`/`chat`).
+4. Host it in the relevant worker (`workers/brain` or `workers/music`); expose it
+   as a `@agent.tool` in `skills/chat` if it should be conversational.
+5. Add tests in `<package>/tests/`. Mock HTTP with `respx` + saved fixtures;
+   drive the LLM with pydantic-ai's `TestModel`. Never hit a live API or LLM.
 
-Create `petbot/frontends/<platform>/`. Translate the platform's events into a
-`SkillContext` (set the `Capabilities` flags honestly), call skills via a
-`SkillRegistry`, implement any ports the skills need (e.g. a `VoicePort`), and
-render `SkillResult`/`EmbedSpec` natively. Do **not** import the new frontend
-from `petbot.core`.
+## Adding a frontend
+
+Create `frontends/<platform>/` as a new `petbot.<platform>` package. Map the
+platform's events onto a neutral `SkillContext`, hold a typed `Skills` client
+(`RemoteSkills` over a `Transport`), and render `SkillResult`/`EmbedSpec`
+natively. Do **not** import a skill (`lint-imports` enforces this).
 
 ## Tests & fixtures
 
-- Core logic is tested directly (no gateway). See `tests/test_*_skill.py`.
+- Skills are tested directly (no gateway), per package under `<pkg>/tests/`.
 - External APIs are mocked at the transport layer with `respx`, replaying saved
-  JSON fixtures from `tests/fixtures/`. Add new fixtures (including error/empty
-  cases) rather than calling the real site. Opt-in live checks live in
-  `tests/live/` and run only with `PETBOT_LIVE=1`.
-- The Discord gateway bootstrap is smoke-tested manually against a dev guild,
-  not in CI.
+  JSON fixtures (`skills/booru/tests/fixtures/`). Add error/empty fixtures rather
+  than calling the real site.
+- The Discord gateway (edge, music worker) is smoke-tested manually against a dev
+  guild, not in CI.

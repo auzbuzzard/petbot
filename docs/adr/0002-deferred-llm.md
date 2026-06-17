@@ -1,7 +1,11 @@
 # ADR 0002: Defer the LLM layer behind a provider-agnostic seam
 
-- Status: Accepted
+- Status: Superseded by [ADR 0007](0007-llm-agent-pydantic-ai.md) (2026-06-17)
 - Date: 2026-05-30
+
+> The deferral is over: the LLM layer landed in 2.1 as the `chat` skill (a
+> pydantic-ai agent whose tools are the sibling skills), provider-agnostic via
+> `CHAT_PROVIDER` (Bedrock / OpenRouter). See ADR 0007.
 
 ## Context
 

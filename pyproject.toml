@@ -2,45 +2,31 @@
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+# The workspace root is an umbrella: it owns no code, it just pulls in every
+# member (editable) for dev + CI and holds the shared tooling config. Each member
+# is an independently-installable dist under the `petbot.*` namespace (PEP 420),
+# so the edge and a worker each install only what they need.
 [project]
 name = "petbot"
-version = "2.0.0"
-description = "A modern, slash-command-first Discord bot with a platform-neutral core."
+version = "2.1.0"
+description = "A modern Discord bot: a thin always-on edge dispatching to skill workers (A3a)."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
-# Base install: the lean, serverless-portable core the HTTP-Interactions Lambda
-# runs. The Discord gateway and music are opt-in extras, never base deps, so the
-# serverless image carries neither. `aiohttp`/`certifi` are intentionally
-# absent: transitive (via discord.py and httpx), never imported directly. See
-# AGENTS.md import map.
 dependencies = [
-    "httpx>=0.27",
-    "pydantic>=2",
-    "pydantic-settings>=2",
-    "numexpr>=2.8",        # /math skill (runs in the Lambda)
-    "numpy>=1.26",         # numexpr backend
-    # Used by pydantic-settings to read the optional local `.env` file.
-    "python-dotenv>=1.0",
+    "petbot-domain",
+    "petbot-types",
+    "petbot-platform",
+    "petbot-skill-math",
+    "petbot-skill-booru",
+    "petbot-skill-music",
+    "petbot-skill-chat",
+    "petbot-discord",
+    "petbot-worker-brain",
+    "petbot-worker-music",
 ]
 
 [project.optional-dependencies]
-# The HTTP-Interactions frontend (AWS Lambda). PyNaCl verifies Discord's Ed25519
-# request signatures. The only extra installed in the prod image.
-# See docs/adr/0005-serverless-deployment.md.
-interactions = [
-    "pynacl>=1.5",
-]
-# The long-running Discord gateway bot (`python -m petbot`); not part of the
-# serverless deployment.
-discord = [
-    "discord.py>=2.7,<2.8",
-]
-# Voice playback for the gateway's `/music`. Opt-in so its heavy media deps
-# stay out of the base/Lambda install.
-music = [
-    "yt-dlp>=2024.0.0",
-]
 dev = [
     "ruff>=0.5",
     "mypy>=1.10",
@@ -50,24 +36,26 @@ dev = [
     "pytest-cov>=5.0",
     "respx>=0.21",
     "pre-commit>=3.7",
-    "pynacl>=1.5",
-    "discord.py>=2.7,<2.8",
-    "yt-dlp>=2024.0.0",
 ]
 
-[project.scripts]
-petbot = "petbot.__main__:main"
+# The umbrella ships no modules of its own.
+[tool.setuptools]
+packages = []
 
-# uv workspace members. `domain` is the Shared Kernel (depends on nothing).
 [tool.uv.workspace]
-members = ["domain"]
+members = ["domain", "types", "platform", "skills/math", "skills/booru", "skills/music", "skills/chat", "frontends/discord", "workers/brain", "workers/music"]
 
-[tool.setuptools.packages.find]
-include = ["petbot*"]
-
-[tool.setuptools.package-data]
-"petbot" = ["logging_configs/*.json"]
-"petbot.core.capabilities.boorus" = ["*.json"]
+[tool.uv.sources]
+petbot-domain = { workspace = true }
+petbot-types = { workspace = true }
+petbot-platform = { workspace = true }
+petbot-skill-math = { workspace = true }
+petbot-skill-booru = { workspace = true }
+petbot-skill-music = { workspace = true }
+petbot-skill-chat = { workspace = true }
+petbot-discord = { workspace = true }
+petbot-worker-brain = { workspace = true }
+petbot-worker-music = { workspace = true }
 
 [tool.ruff]
 line-length = 100
@@ -76,55 +64,106 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["petbot"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-files = ["petbot", "domain", "tests"]
-# discord.py and third-party libs ship their own types or are ignored below.
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "domain:types:platform:skills/math:skills/booru:skills/music:skills/chat:frontends/discord:workers/brain:workers/music"
+files = ["domain", "types", "platform", "skills", "frontends", "workers"]
 
 [[tool.mypy.overrides]]
-module = ["numexpr.*", "yt_dlp.*", "nacl.*"]
+module = ["numexpr.*", "yt_dlp.*", "nacl.*", "boto3.*"]
+ignore_missing_imports = true
+
+# Test helpers are imported by file name (pytest's rootdir-relative `conftest`),
+# which mypy can't resolve as a package; the modules themselves are still checked.
+[[tool.mypy.overrides]]
+module = ["conftest"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests", "domain/tests"]
-addopts = "--cov=petbot --cov-report=term-missing"
-
-[tool.coverage.run]
-omit = [
-    # The Discord gateway bootstrap requires a live connection; it is smoke-tested
-    # manually against a dev guild rather than in CI.
-    "petbot/frontends/discord/bootstrap.py",
-    "petbot/__main__.py",
+testpaths = [
+    "domain/tests",
+    "types/tests",
+    "platform/tests",
+    "skills/math/tests",
+    "skills/booru/tests",
+    "skills/music/tests",
+    "skills/chat/tests",
+    "frontends/discord/tests",
+    "workers/brain/tests",
+    "workers/music/tests",
 ]
 
-# import-linter: enforce the one-way core -> adapter dependency rule.
+# import-linter: enforce the package dependency rules of the A3a layering. The
+# leaf packages are listed explicitly because grimp cannot walk a bare PEP 420
+# namespace (`petbot`) that is spread across several editable installs.
 [tool.importlinter]
-root_packages = ["petbot", "petbot_domain"]
+root_packages = [
+    "petbot.domain",
+    "petbot.types",
+    "petbot.platform",
+    "petbot.skills.math",
+    "petbot.skills.booru",
+    "petbot.skills.music",
+    "petbot.skills.chat",
+    "petbot.discord",
+]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "The domain Shared Kernel depends on nothing first-party or platform"
 type = "forbidden"
-source_modules = ["petbot_domain"]
-forbidden_modules = ["petbot", "discord"]
+source_modules = ["petbot.domain"]
+forbidden_modules = [
+    "petbot.types",
+    "petbot.platform",
+    "petbot.skills.math",
+    "petbot.skills.booru",
+    "petbot.skills.music",
+    "petbot.skills.chat",
+    "discord",
+    "httpx",
+]
 
 [[tool.importlinter.contracts]]
-name = "The neutral core must not depend on any frontend/adapter"
+name = "The typed surface depends only on the kernel"
 type = "forbidden"
-source_modules = ["petbot.core"]
-forbidden_modules = ["petbot.frontends"]
+source_modules = ["petbot.types"]
+forbidden_modules = [
+    "petbot.platform",
+    "petbot.skills.math",
+    "petbot.skills.booru",
+    "petbot.skills.music",
+    "petbot.skills.chat",
+    "discord",
+]
 
 [[tool.importlinter.contracts]]
-name = "The neutral core must not import discord"
+name = "The platform must not import a skill or a frontend"
 type = "forbidden"
-source_modules = ["petbot.core"]
-forbidden_modules = ["discord"]
+source_modules = ["petbot.platform"]
+forbidden_modules = [
+    "petbot.skills.math",
+    "petbot.skills.booru",
+    "petbot.skills.music",
+    "petbot.skills.chat",
+    "discord",
+]
 
 [[tool.importlinter.contracts]]
-name = "The interactions frontend must not import discord (stays serverless-portable)"
+name = "The edge dispatches to workers; it never imports a skill"
 type = "forbidden"
-source_modules = ["petbot.frontends.interactions"]
-forbidden_modules = ["discord"]
+source_modules = ["petbot.discord"]
+forbidden_modules = [
+    "petbot.skills.math",
+    "petbot.skills.booru",
+    "petbot.skills.music",
+    "petbot.skills.chat",
+]

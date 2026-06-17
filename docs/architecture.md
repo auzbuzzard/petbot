@@ -1,133 +1,41 @@
 # Architecture
 
-PetBot is built as **ports & adapters** around a platform-neutral core. The goal:
-the genuinely reusable logic (skills, booru search, the future LLM layer) never
-knows it's talking to Discord, so adding Telegram, a web frontend, or swapping
-`discord.py` for a fork is purely additive work at the edge.
+PetBot is **A3a**: a thin, always-on Discord **edge** that holds the gateway and
+runs no skills, dispatching every request to a **worker** that does. The codebase
+is one uv workspace of independently-installable packages under the `petbot.*`
+namespace (PEP 420).
 
-## The dependency rule
+For the package map, the typed calling pattern, and the invariants, see
+[`AGENTS.md`](../AGENTS.md). For the *why* behind the splits and the LLM layer,
+see the ADRs:
 
-```
-petbot.frontends.discord  ──▶  petbot.core        (allowed)
-petbot.core               ──X  petbot.frontends   (forbidden)
-petbot.core               ──X  discord            (forbidden)
-```
+- [ADR 0006](adr/0006-gateway-edge-microservice-skills.md) — the edge/worker
+  (microservice skills) split and why music is its own worker.
+- [ADR 0007](adr/0007-llm-agent-pydantic-ai.md) — the chat agent (pydantic-ai),
+  skills-as-tools, and the provider-agnostic model choice.
+- [ADR 0003](adr/0003-neutral-core.md) — the original neutral-core decision the
+  `petbot.domain` kernel descends from (historical).
+- [ADR 0005](adr/0005-serverless-deployment.md) — serverless compute (the brain
+  worker's Lambda path).
 
-The core depends on nothing platform-specific. This is enforced two ways:
-
-- **`import-linter`** (`lint-imports`) via the contracts in `pyproject.toml`.
-- **`tests/test_core_isolation.py`**, which fails if any `petbot.core` module
-  imports `discord` or `petbot.frontends`.
-
-A change that violates the rule fails CI.
-
-## Request flow
+## The request path
 
 ```
-Discord event (slash command)
-  └─ cog  (petbot/frontends/discord/cogs/*)
-       ├─ build_context(interaction)          → SkillContext   (neutral in)
-       ├─ skill.run(args, ctx)                 → SkillResult    (neutral out)
-       └─ render.respond(interaction, result)  → discord.Embed + chunked text
+Discord ⇄ [ edge ]  --SkillCall(JSON)-->  [ brain worker ]  math · booru · chat(LLM)
+          petbot.discord   Transport        petbot.workers.brain
+                                              \--> [ music worker ]  gateway + voice
+                                                    petbot.workers.music
 ```
 
-The cog is the only thing that touches `discord`. It maps the interaction onto a
-neutral [`SkillContext`](../petbot/core/skills/context.py), calls the skill, and
-renders the [`SkillResult`](../petbot/core/skills/context.py) back. The skill
-itself is pure with respect to the platform.
+1. The edge maps an @mention to a neutral `SkillContext` and calls
+   `await skills.chat(ChatArgs(message), ctx)` on its typed `Skills` client
+   (`RemoteSkills` over an HTTP or Lambda `Transport`).
+2. The client serialises a `SkillCall`; the worker re-validates the args against
+   the skill's `args_model` and runs it. The chat skill's LLM tools are its
+   sibling skills (math/booru), called in-process via `LocalSkills`.
+3. The worker returns a neutral `SkillResult`; the edge renders it to Discord
+   (the one place neutral results become `discord.Embed`/messages).
 
-## Capability flags, not platform checks
-
-A skill must never ask "am I on Discord?". It asks "can this conversation do X?"
-via [`Capabilities`](../petbot/core/skills/context.py):
-
-| Flag | Set by the Discord adapter from… |
-| --- | --- |
-| `allows_explicit` | `channel.is_nsfw()` |
-| `supports_voice` | whether a `VoicePort` was injected |
-| `supports_rich_embeds` | always true on Discord |
-| `max_text_length` | Discord's 2000-char limit |
-
-This keeps skills honest and portable: a future Telegram adapter sets the same
-flags its own way, and the skills work unchanged.
-
-## Ports
-
-A **port** is an interface the core defines and an adapter implements, so neutral
-logic can drive a platform capability without importing the platform. Today there
-is one: [`VoicePort`](../petbot/core/skills/ports.py). The music skill owns the
-queue and skip-vote logic; it plays audio through `ctx.voice`, which the Discord
-adapter fills with [`DiscordVoicePort`](../petbot/frontends/discord/voice.py)
-(yt-dlp extraction + `FFmpegPCMAudio`).
-
-A skill declares `requires={"voice"}`; the
-[`SkillRegistry`](../petbot/core/skills/registry.py) only offers it on frontends
-whose `Capabilities` advertise that port. On a voice-less platform the skill is
-simply never exposed.
-
-`VoicePort.play` accepts an optional `on_finished` callback; the Discord adapter
-invokes it (via the player's `after` hook, hopped back onto the event loop) when
-a track ends on its own, so the music queue **auto-advances**. The skill guards
-against stale callbacks with a per-conversation play token, so an explicit
-`/music skip` or `/music stop` never double-advances.
-
-## Rendering is per-platform
-
-[`SkillResult`](../petbot/core/skills/context.py) carries an optional
-`EmbedSpec` (a neutral description of a rich card) — never a `discord.Embed`.
-Turning that into a `discord.Embed`, and splitting long text into ≤2000-char
-messages, lives entirely in
-[`render.py`](../petbot/frontends/discord/render.py). A Telegram adapter would
-render the same `SkillResult` into its own 4096-char messages.
-
-## Logging
-
-Logging follows the modern (3.12) shape: every module grabs
-`logger = logging.getLogger(__name__)` and just emits — **no** module configures
-handlers or levels at import time. The single configuration point is
-[`configure_logging`](../petbot/logging_setup.py), called from `bootstrap.run`
-before the bot starts. Config lives in JSON (loaded via `importlib.resources` +
-`logging.config.dictConfig`), with two packaged profiles:
-
-| Profile | When | Shape |
-| --- | --- | --- |
-| `plain` | dev (default) | one human-readable line → stderr |
-| `json` | prod (default) | structured JSON-lines, **non-blocking** via `QueueHandler`/`QueueListener`; INFO→stdout, WARNING+→stderr |
-
-`LOG_LEVEL` and `LOG_FORMAT` (read only by [`config.py`](../petbot/config.py))
-set the level and pick the profile. The queue profile keeps log I/O off the
-asyncio event loop (the "never block the loop" rule). Level discipline: DEBUG for
-request/parse internals, INFO for lifecycle, WARNING/ERROR for failures — and
-**never** log secrets (booru searches are logged from the neutral `SearchRequest`,
-never the wire URL). The rationale lives in
-[`adr/0004-logging.md`](adr/0004-logging.md).
-
-## Why this shape
-
-See the ADRs in [`adr/`](adr/) for the load-bearing decisions: choosing
-`discord.py`, deferring the LLM layer behind a provider-agnostic seam, and the
-platform-neutral core. The short version: it keeps us in Python (reusing booru
-logic and enabling future LLM tooling), hedges the single-maintainer risk of any
-one Discord library, and makes new frontends additive rather than a rewrite.
-
-## Where things live
-
-```
-petbot/
-  config.py                     Settings (reads the environment only)
-  core/                         PLATFORM-NEUTRAL — never imports discord
-    skills/
-      base.py                   the Skill ABC (name/description/input_schema/requires)
-      context.py                SkillContext, SkillResult, Capabilities, EmbedSpec, …
-      registry.py               name lookup + capability filtering
-      ports.py                  VoicePort (and future ports)
-      math_skill.py  booru_skill.py  music_skill.py
-    capabilities/boorus/        modernized booru providers (async, neutral)
-  frontends/
-    discord/                    the only adapter built today
-      bootstrap.py              intents, setup_hook, dependency wiring, tree sync
-      context.py                interaction → SkillContext
-      render.py                 SkillResult → discord.Embed + chunking
-      voice.py                  VoicePort implementation
-      cogs/                     slash-command wrappers
-```
+The dependency rules (kernel imports nothing first-party; the edge never imports
+a skill) are enforced by `lint-imports` — see `[tool.importlinter]` in
+`pyproject.toml`.

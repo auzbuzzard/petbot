@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "petbot-types"
+version = "2.1.0"
+description = "PetBot typed skill surface: per-skill argument models and the Skills client protocol."
+requires-python = ">=3.12"
+license = { text = "MIT" }
+# Only the kernel. No skill runtime deps (numexpr/yt-dlp/boto3) — that is the
+# whole point: the edge imports these types without pulling skill internals.
+dependencies = ["petbot-domain"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["petbot.types*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+"petbot.types" = ["py.typed"]
+
+[tool.uv.sources]
+petbot-domain = { workspace = true }
