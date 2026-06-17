@@ -25,11 +25,12 @@ channels; inside a NSFW channel every rating is returned.
 
 ## Quickstart
 
-Requirements: **Python 3.12+** and, for voice, the **FFmpeg** system binary.
+Requirements: **[uv](https://docs.astral.sh/uv/)** (it fetches Python 3.12 for
+you) and, for voice, the **FFmpeg** system binary.
 
 ```bash
-pip install -e ".[dev]"      # install PetBot + dev tooling
-cp .env.example .env         # then fill in your secrets/references
+uv sync --all-extras --all-packages   # install PetBot + workspace members + dev tooling
+cp .env.example .env                  # then fill in your secrets/references
 ```
 
 ### Configuration
