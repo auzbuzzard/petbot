@@ -59,6 +59,14 @@ async def test_unknown_skill_is_expected_failure() -> None:
     assert (await worker.run(_call("nope", "1"))).is_error
 
 
+async def test_serve_maps_malformed_payload_to_failure() -> None:
+    worker = Worker([_EchoSkill()])
+    # Missing "args"/"context", and outright non-JSON, both become a result — never
+    # an exception escaping the boundary.
+    assert SkillResult.model_validate_json(await worker.serve('{"skill": "math"}')).is_error
+    assert SkillResult.model_validate_json(await worker.serve("not json")).is_error
+
+
 async def test_skill_exception_becomes_failure() -> None:
     worker = Worker([_BoomSkill()])
     assert (await worker.run(_call("boom", "1"))).is_error
