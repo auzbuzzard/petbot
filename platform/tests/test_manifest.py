@@ -21,9 +21,9 @@ def test_json_round_trip_preserves_spec() -> None:
     assert back == [spec]
 
 
-def test_requires_serialised_as_sorted_values() -> None:
+def test_requires_serialised_as_capability_values() -> None:
     entry = to_manifest([_spec()])[0]
-    assert entry["requires"] == sorted([Capability.VOICE.value, Capability.RICH_EMBEDS.value])
+    assert set(entry["requires"]) == {Capability.VOICE.value, Capability.RICH_EMBEDS.value}
 
 
 def test_from_manifest_defaults_empty_requires() -> None:

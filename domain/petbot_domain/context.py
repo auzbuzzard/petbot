@@ -1,8 +1,10 @@
 """Neutral request context and the dispatch envelope.
 
-Frozen, slotted value objects exchanged across the frontend <-> skill boundary.
-None of it mentions a platform: a frontend maps its native request onto these on
-the way in, and a worker runs a skill against them with no platform knowledge.
+Frozen, slotted dataclasses — pure data, no platform nouns and no live objects.
+A frontend maps its native request onto these; a worker runs a skill against
+them. They cross process boundaries, so they carry only serialisable data: a
+capability like voice is a *port* injected by the worker that needs it, never a
+field here.
 """
 
 from __future__ import annotations
@@ -10,10 +12,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from petbot_domain.ports import VoicePort
+from typing import Any
 
 
 class Platform(StrEnum):
@@ -51,19 +50,14 @@ class SkillContext:
     conversation_id: str
     allows_explicit: bool = False
     max_text_length: int = 2000
-    #: Present iff the frontend provides ``Capability.VOICE``; the worker that runs
-    #: a voice skill injects a concrete implementation.
-    voice: VoicePort | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class DispatchRequest:
-    """A unit of work a frontend hands to decoupled compute over a ``DispatchPort``.
+    """A unit of work a frontend hands to compute over a ``DispatchPort``.
 
-    Carries the target skill name, its validated ``args``, and the neutral
-    ``SkillContext`` — minus live ports, which never cross a process boundary. A
-    port-requiring skill (e.g. music) is served by a worker that reconstructs the
-    port locally.
+    Carries only serialisable data — the target skill, its validated ``args``,
+    and the neutral ``SkillContext``.
     """
 
     skill: str
