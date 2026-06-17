@@ -48,4 +48,3 @@ class SkillContext(Frozen):
     #: resolving per-conversation worker state (e.g. a music queue + voice port).
     conversation_id: str
     allows_explicit: bool = False
-    max_text_length: int = 2000

@@ -16,7 +16,7 @@ import logging
 import discord
 from aiohttp import web
 
-from petbot.logging import configure_logging
+from petbot.logging_setup import configure_logging
 from petbot.platform import Worker
 from petbot.skills.music import MusicSkill
 from petbot.workers.music.provider import DiscordVoiceProvider

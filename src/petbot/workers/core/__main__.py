@@ -15,7 +15,7 @@ import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from petbot.logging import configure_logging
+from petbot.logging_setup import configure_logging
 from petbot.workers.core.worker import build_worker
 
 logger = logging.getLogger(__name__)
