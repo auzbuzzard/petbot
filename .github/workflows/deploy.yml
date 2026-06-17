@@ -105,10 +105,10 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: terraform output -raw function_url
 
-      - uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
-          python-version: "3.12"
-          cache: pip
+          enable-cache: true
 
       # Register the slash commands. The bot token is read from SSM at run time
       # (never stored in GitHub) and lives only in this step's environment.
@@ -117,12 +117,12 @@ jobs:
           DISCORD_APP_ID: ${{ vars.DISCORD_APP_ID }}
           DISCORD_GUILD_ID: ${{ github.event.inputs.guild_id }}
         run: |
-          # The [interactions] extra brings pynacl: importing the interactions
-          # package (via register) loads app -> handler -> verify, which needs it.
-          pip install -e ".[interactions]"
           TOKEN="$(aws ssm get-parameter \
             --name /petbot/interactions/discord_bot_token \
             --with-decryption --query Parameter.Value --output text)"
           # Mask it in the Actions log: if anything ever echoes it, it shows as ***.
           echo "::add-mask::$TOKEN"
-          DISCORD_BOT_TOKEN="$TOKEN" python -m petbot.frontends.interactions.register
+          # The [interactions] extra brings pynacl, which register's import chain
+          # (app -> handler -> verify) needs.
+          DISCORD_BOT_TOKEN="$TOKEN" uv run --extra interactions --python 3.12 \
+            python -m petbot.frontends.interactions.register
