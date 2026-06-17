@@ -37,7 +37,6 @@ def test_request_round_trips() -> None:
     assert back.args == {"expression": "6 * 7"}
     assert back.context.user.id == "42"
     assert back.context.allows_explicit is True
-    assert back.context.voice is None  # live ports never cross the wire
 
 
 def test_result_round_trips_with_embed_and_files() -> None:

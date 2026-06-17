@@ -1,57 +1,35 @@
-"""Serialise skill specs to/from a manifest — the data an edge consumes.
-
-The edge loads this (JSON) to register commands and offer LLM tools without
-importing any skill or its dependencies.
+"""Skill manifest: the spec list an edge reads to register commands and offer LLM
+tools without importing any skill. Pydantic serialises the kernel's ``SkillSpec``
+dataclasses; no hand-rolled JSON.
 """
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable
+from typing import Any, cast
 
-from petbot_domain import Capability, SkillSpec
+from pydantic import TypeAdapter
 
+from petbot_domain import SkillSpec
 
-def _to_dict(spec: SkillSpec) -> dict[str, object]:
-    return {
-        "name": spec.name,
-        "description": spec.description,
-        "input_schema": dict(spec.input_schema),
-        # Sorted list of capability values — stable, JSON-friendly.
-        "requires": sorted(cap.value for cap in spec.requires),
-    }
+_MANIFEST: TypeAdapter[list[SkillSpec]] = TypeAdapter(list[SkillSpec])
 
 
-def _from_dict(data: dict[str, object]) -> SkillSpec:
-    requires = data.get("requires") or []
-    if not isinstance(requires, list):
-        raise ValueError("manifest 'requires' must be a list")
-    schema = data["input_schema"]
-    if not isinstance(schema, dict):
-        raise ValueError("manifest 'input_schema' must be an object")
-    return SkillSpec(
-        name=str(data["name"]),
-        description=str(data["description"]),
-        input_schema=schema,
-        requires=frozenset(Capability(str(cap)) for cap in requires),
-    )
-
-
-def to_manifest(specs: Iterable[SkillSpec]) -> list[dict[str, object]]:
+def to_manifest(specs: Iterable[SkillSpec]) -> list[dict[str, Any]]:
     """Project specs into JSON-serialisable dicts."""
-    return [_to_dict(spec) for spec in specs]
+    return cast(list[dict[str, Any]], _MANIFEST.dump_python(list(specs), mode="json"))
 
 
-def from_manifest(data: Iterable[dict[str, object]]) -> list[SkillSpec]:
+def from_manifest(data: Iterable[dict[str, Any]]) -> list[SkillSpec]:
     """Rebuild specs from manifest dicts."""
-    return [_from_dict(item) for item in data]
+    return _MANIFEST.validate_python(list(data))
 
 
 def dumps(specs: Iterable[SkillSpec]) -> str:
     """Serialise specs to a manifest JSON string."""
-    return json.dumps(to_manifest(specs), indent=2, sort_keys=True)
+    return _MANIFEST.dump_json(list(specs), indent=2).decode()
 
 
-def loads(text: str) -> list[SkillSpec]:
+def loads(text: str | bytes) -> list[SkillSpec]:
     """Parse a manifest JSON string back into specs."""
-    return from_manifest(json.loads(text))
+    return _MANIFEST.validate_json(text)
