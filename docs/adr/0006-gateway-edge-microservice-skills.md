@@ -5,7 +5,7 @@
 
 ## Context
 
-Phase B (#15) adds conversational LLM chat: a user `@mention`s PetBot and it
+Adding conversational LLM chat (#15): a user `@mention`s PetBot and it
 answers, invoking skills through a tool-calling loop. Designing that forced a
 deployment question ADR 0005 had deferred, and the answer **reverses ADR 0005's
 ingress decision** and reshapes the repo.
@@ -32,7 +32,7 @@ Hard facts that drive the design:
 
 ## Decision
 
-### 1. Topology — A3a: a minimal Gateway *edge* + dispatched microservice compute
+### 1. Topology — a minimal Gateway *edge* + dispatched microservice compute
 
 A single **Gateway edge** is the only Discord-facing transport (slash +
 `@mention` + presence + voice signalling). The edge is **dumb**: it holds the
@@ -55,7 +55,7 @@ The architecture is full microservice (clean per-skill boundaries); the **runtim
 is consolidated** until scale justifies splitting:
 
 - Skills are independently deployable **entry-point plugins**, but **deploy
-  grouped**: one "brain" worker hosts the stateless skills + the chat agent.
+  grouped**: one core worker hosts the stateless skills + the chat agent.
 - **`/music` is the one forced split** — voice needs its own Gateway + UDP
   connection, so it runs as its own worker (its own voice connection), fed via
   the same dispatch seam. It **never** folds into the edge.
@@ -103,7 +103,7 @@ petbot/
   skills/          Entry-point plugins (group "petbot.skills"); each its own deps.
     booru/ math/ music/ chat/   (chat = the LLM agent)
   deploy/          Deploy bundles (platform + a chosen skill set).
-    discord/ brain/ music/
+    edge/ core/ music/
 ```
 
 - **`domain` is the Shared Kernel** — deliberately small: domain types +
@@ -135,7 +135,7 @@ on the context (read for behaviour).
 
 `petbot/frontends/interactions/` (the HTTP-Interactions Lambda adapter) is
 **deleted**. It was a *second transport for Discord*, an artifact of ADR 0005's
-serverless experiment; under single-Gateway A3a, Discord has one frontend. Its
+serverless experiment; under the single-Gateway design, Discord has one frontend. Its
 *generic-dispatch pattern* (route by name, no per-skill code) survives as the
 edge's dispatch shape; the package does not.
 
@@ -162,7 +162,7 @@ edge's dispatch shape; the package does not.
 | `petbot/frontends/discord/` (cogs → generic dispatch + `@mention`/presence) | `frontends/discord/` (reshaped; per-skill cogs deleted) |
 | `petbot/frontends/interactions/` | **deleted** (§7) |
 | dispatch/session adapters, plugin loader, manifest tooling | `platform/` |
-| Lambda packaging, Terraform | `deploy/{brain,discord,music}/` |
+| Lambda packaging, Terraform | `deploy/{core,edge,music}/` |
 | (new) LLM agent + provider adapters | `skills/chat/` |
 
 The migration lands in staged, reviewable commits: scaffold `domain` → extract
@@ -183,7 +183,7 @@ delete `interactions` → deploy bundles → LLM agent.
   boundaries (frontends ↮ skills, both → `domain`; `domain` imports nothing).
 - **Music keeps its bus.** `/music` stays decoupled (its own voice worker), so the
   `DispatchPort` + SQS seam from ADR 0005/#33 is retained, not removed.
-- **Issues realign** to A3a: #28 (topology), #39 (inverted — gateway is blessed),
+- **Issues realign** to this design: #28 (topology), #39 (inverted — gateway is blessed),
   #31 (gateway mode, Message Content on, no endpoint URL), #33 (music worker
   retained), #35 (dispatch-deferred), #30/#42/#38 (Lambda → compute tier).
 

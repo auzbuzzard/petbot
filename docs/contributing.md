@@ -20,32 +20,31 @@ uv run pytest                                         # offline tests
 The full recipe is in [`AGENTS.md`](../AGENTS.md). In short:
 
 1. Add the skill's `*Args` model and a `Skills` Protocol method in
-   `types/petbot/types/`.
-2. Add the one-line `RemoteSkills` + `LocalSkills` methods in
-   `platform/petbot/platform/skills.py`.
-3. Create `skills/<name>/` with a `Skill[<Args>]` subclass (typed `args_model`,
+   `petbot.types`.
+2. Add the one-line `SkillsClient` method in `petbot.platform.client`.
+3. Create `petbot/skills/<name>/` with a `Skill[<Args>]` subclass (typed `args_model`,
    `async def run(self, args, ctx) -> SkillResult`). Keep it **pure**: read
    `args`/`ctx`, return a `SkillResult`, never import `discord`. Gate explicit
    content on `ctx.allows_explicit`; offload blocking work with
    `asyncio.to_thread`. Register an entry point under `petbot.skills` (or build it
    explicitly if it needs DI, like `music`/`chat`).
-4. Host it in the relevant worker (`workers/brain` or `workers/music`); expose it
-   as a `@agent.tool` in `skills/chat` if it should be conversational.
-5. Add tests in `<package>/tests/`. Mock HTTP with `respx` + saved fixtures;
+4. Host it in the relevant worker (`petbot.workers.core` or `petbot.workers.music`);
+   expose it as a `@agent.tool` in `petbot.skills.chat` if it should be conversational.
+5. Add tests under `tests/`. Mock HTTP with `respx` + saved fixtures;
    drive the LLM with pydantic-ai's `TestModel`. Never hit a live API or LLM.
 
 ## Adding a frontend
 
-Create `frontends/<platform>/` as a new `petbot.<platform>` package. Map the
-platform's events onto a neutral `SkillContext`, hold a typed `Skills` client
-(`RemoteSkills` over a `Transport`), and render `SkillResult`/`EmbedSpec`
-natively. Do **not** import a skill (`lint-imports` enforces this).
+Add a `petbot.<platform>` module. Map the platform's events onto a neutral
+`SkillContext`, hold a typed `Skills` client (`SkillsClient` over a `Transport`),
+and render `SkillResult`/`EmbedSpec` natively. Do **not** import a skill
+(`lint-imports` enforces this).
 
 ## Tests & fixtures
 
-- Skills are tested directly (no gateway), per package under `<pkg>/tests/`.
+- Skills are tested directly (no gateway), under `tests/`.
 - External APIs are mocked at the transport layer with `respx`, replaying saved
-  JSON fixtures (`skills/booru/tests/fixtures/`). Add error/empty fixtures rather
+  JSON fixtures (`tests/skills/booru/fixtures/`). Add error/empty fixtures rather
   than calling the real site.
 - The Discord gateway (edge, music worker) is smoke-tested manually against a dev
   guild, not in CI.

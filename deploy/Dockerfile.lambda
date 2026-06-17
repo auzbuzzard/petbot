@@ -1,12 +1,12 @@
-# PetBot brain-worker Lambda image — the serverless compute side of A3a.
+# PetBot core-worker Lambda image — the serverless compute target.
 #
-# The brain worker hosts math + booru search + the chat agent and is invoked by
-# the always-on edge with a SkillCall payload (transport=lambda). A container
-# image (not a zip) because the worker pulls in C-extensions (numexpr/numpy for
-# /math) and a fat dependency set (pydantic-ai); the AWS Lambda Python base image
-# gives a matching manylinux runtime with no wheel wrangling.
+# The core worker hosts math + booru search + the chat agent and is invoked by
+# the always-on edge with a dispatched-call payload (transport=lambda). A
+# container image (not a zip) because the worker pulls in C-extensions
+# (numexpr/numpy) and a fat dependency set (pydantic-ai); the AWS Lambda Python
+# base image gives a matching manylinux runtime with no wheel wrangling.
 #
-# Build from the repository root (the context must see the whole uv workspace):
+# Build from the repository root:
 #
 #   docker build -f deploy/Dockerfile.lambda -t <ecr_url>:<tag> .
 #
@@ -18,23 +18,17 @@ FROM public.ecr.aws/lambda/python:3.12
 # Pulled from the published static binary, pinned to an immutable version tag.
 COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /bin/uv
 
-# ${LAMBDA_TASK_ROOT} is /var/task, already the WORKDIR and on sys.path. The
-# brain worker is a uv workspace member, so the build needs the workspace root
-# pyproject + lockfile and every member it depends on (domain, types, platform,
-# the math/booru/chat skills, and the brain worker bundle itself).
-COPY pyproject.toml uv.lock README.md ./
-COPY domain ./domain
-COPY types ./types
-COPY platform ./platform
-COPY skills ./skills
-COPY workers/brain ./workers/brain
+# ${LAMBDA_TASK_ROOT} is /var/task, already the WORKDIR and on sys.path. PetBot is
+# one package; install only the core-worker extra so the image carries the chat +
+# booru + math deps and not discord.py.
+COPY pyproject.toml README.md ./
+COPY src ./src
 
-# Install just the brain worker (and its transitive members) into the Lambda's
-# interpreter — no venv, no edge/music/discord deps. The cache mount persists
-# wheel downloads between builds. No secrets are baked in — Terraform supplies
-# booru creds + the chat model config as environment variables.
+# `.[worker-core]` is the core-worker dependency set; no edge/music deps land.
+# The cache mount persists wheel downloads between builds. No secrets are baked
+# in — Terraform supplies booru creds + the chat model config as env vars.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --compile-bytecode ./workers/brain
+    uv pip install --system --compile-bytecode ".[worker-core]"
 
 # module.function the Lambda runtime invokes per request.
-CMD ["petbot.workers.brain.handler.handler"]
+CMD ["petbot.workers.core.handler.handler"]

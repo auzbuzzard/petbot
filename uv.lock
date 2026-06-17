@@ -7,21 +7,6 @@ resolution-markers = [
     "python_full_version < '3.13'",
 ]
 
-[manifest]
-members = [
-    "petbot",
-    "petbot-discord",
-    "petbot-domain",
-    "petbot-platform",
-    "petbot-skill-booru",
-    "petbot-skill-chat",
-    "petbot-skill-math",
-    "petbot-skill-music",
-    "petbot-types",
-    "petbot-worker-brain",
-    "petbot-worker-music",
-]
-
 [[package]]
 name = "aiohappyeyeballs"
 version = "2.6.2"
@@ -1448,248 +1433,75 @@ name = "petbot"
 version = "2.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "petbot-discord" },
-    { name = "petbot-domain" },
-    { name = "petbot-platform" },
-    { name = "petbot-skill-booru" },
-    { name = "petbot-skill-chat" },
-    { name = "petbot-skill-math" },
-    { name = "petbot-skill-music" },
-    { name = "petbot-types" },
-    { name = "petbot-worker-brain" },
-    { name = "petbot-worker-music" },
+    { name = "pydantic" },
 ]
 
 [package.optional-dependencies]
 dev = [
+    { name = "boto3" },
+    { name = "discord-py", extra = ["voice"] },
+    { name = "httpx" },
     { name = "import-linter" },
     { name = "mypy" },
+    { name = "numexpr" },
+    { name = "numpy" },
     { name = "pre-commit" },
+    { name = "pydantic-ai-slim", extra = ["bedrock", "openai"] },
+    { name = "pydantic-settings" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "respx" },
     { name = "ruff" },
+    { name = "yt-dlp" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.0" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
-    { name = "petbot-discord", editable = "frontends/discord" },
-    { name = "petbot-domain", editable = "domain" },
-    { name = "petbot-platform", editable = "platform" },
-    { name = "petbot-skill-booru", editable = "skills/booru" },
-    { name = "petbot-skill-chat", editable = "skills/chat" },
-    { name = "petbot-skill-math", editable = "skills/math" },
-    { name = "petbot-skill-music", editable = "skills/music" },
-    { name = "petbot-types", editable = "types" },
-    { name = "petbot-worker-brain", editable = "workers/brain" },
-    { name = "petbot-worker-music", editable = "workers/music" },
-    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.7" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
-    { name = "respx", marker = "extra == 'dev'", specifier = ">=0.21" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
-]
-provides-extras = ["dev"]
-
-[[package]]
-name = "petbot-discord"
-version = "2.1.0"
-source = { editable = "frontends/discord" }
-dependencies = [
+edge = [
     { name = "discord-py" },
     { name = "httpx" },
-    { name = "petbot-domain" },
-    { name = "petbot-platform" },
-    { name = "petbot-types" },
     { name = "pydantic-settings" },
 ]
-
-[package.optional-dependencies]
-lambda = [
-    { name = "petbot-platform", extra = ["lambda"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "discord-py", specifier = ">=2.7,<2.8" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "petbot-domain", editable = "domain" },
-    { name = "petbot-platform", editable = "platform" },
-    { name = "petbot-platform", extras = ["lambda"], marker = "extra == 'lambda'", editable = "platform" },
-    { name = "petbot-types", editable = "types" },
-    { name = "pydantic-settings", specifier = ">=2" },
-]
-provides-extras = ["lambda"]
-
-[[package]]
-name = "petbot-domain"
-version = "2.1.0"
-source = { editable = "domain" }
-dependencies = [
-    { name = "pydantic" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2" }]
-
-[[package]]
-name = "petbot-platform"
-version = "2.1.0"
-source = { editable = "platform" }
-dependencies = [
-    { name = "httpx" },
-    { name = "petbot-domain" },
-    { name = "petbot-types" },
-    { name = "pydantic" },
-]
-
-[package.optional-dependencies]
 lambda = [
     { name = "boto3" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "boto3", marker = "extra == 'lambda'", specifier = ">=1.34" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "petbot-domain", editable = "domain" },
-    { name = "petbot-types", editable = "types" },
-    { name = "pydantic", specifier = ">=2" },
-]
-provides-extras = ["lambda"]
-
-[[package]]
-name = "petbot-skill-booru"
-version = "2.1.0"
-source = { editable = "skills/booru" }
-dependencies = [
+worker-core = [
     { name = "httpx" },
-    { name = "petbot-domain" },
-    { name = "petbot-types" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "petbot-domain", editable = "domain" },
-    { name = "petbot-types", editable = "types" },
-    { name = "pydantic", specifier = ">=2" },
-    { name = "pydantic-settings", specifier = ">=2" },
-]
-
-[[package]]
-name = "petbot-skill-chat"
-version = "2.1.0"
-source = { editable = "skills/chat" }
-dependencies = [
-    { name = "petbot-domain" },
-    { name = "petbot-types" },
-    { name = "pydantic" },
+    { name = "numexpr" },
+    { name = "numpy" },
     { name = "pydantic-ai-slim", extra = ["bedrock", "openai"] },
     { name = "pydantic-settings" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "petbot-domain", editable = "domain" },
-    { name = "petbot-types", editable = "types" },
-    { name = "pydantic", specifier = ">=2" },
-    { name = "pydantic-ai-slim", extras = ["bedrock", "openai"], specifier = ">=0.0.30" },
-    { name = "pydantic-settings", specifier = ">=2" },
-]
-
-[[package]]
-name = "petbot-skill-math"
-version = "2.1.0"
-source = { editable = "skills/math" }
-dependencies = [
-    { name = "numexpr" },
-    { name = "numpy" },
-    { name = "petbot-domain" },
-    { name = "petbot-types" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "numexpr", specifier = ">=2.8" },
-    { name = "numpy", specifier = ">=1.26" },
-    { name = "petbot-domain", editable = "domain" },
-    { name = "petbot-types", editable = "types" },
-]
-
-[[package]]
-name = "petbot-skill-music"
-version = "2.1.0"
-source = { editable = "skills/music" }
-dependencies = [
-    { name = "petbot-domain" },
-    { name = "petbot-types" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "petbot-domain", editable = "domain" },
-    { name = "petbot-types", editable = "types" },
-]
-
-[[package]]
-name = "petbot-types"
-version = "2.1.0"
-source = { editable = "types" }
-dependencies = [
-    { name = "petbot-domain" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "petbot-domain", editable = "domain" }]
-
-[[package]]
-name = "petbot-worker-brain"
-version = "2.1.0"
-source = { editable = "workers/brain" }
-dependencies = [
-    { name = "petbot-platform" },
-    { name = "petbot-skill-booru" },
-    { name = "petbot-skill-chat" },
-    { name = "petbot-skill-math" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "petbot-platform", editable = "platform" },
-    { name = "petbot-skill-booru", editable = "skills/booru" },
-    { name = "petbot-skill-chat", editable = "skills/chat" },
-    { name = "petbot-skill-math", editable = "skills/math" },
-]
-
-[[package]]
-name = "petbot-worker-music"
-version = "2.1.0"
-source = { editable = "workers/music" }
-dependencies = [
+worker-music = [
     { name = "discord-py", extra = ["voice"] },
-    { name = "petbot-domain" },
-    { name = "petbot-platform" },
-    { name = "petbot-skill-music" },
     { name = "pydantic-settings" },
     { name = "yt-dlp" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "discord-py", extras = ["voice"], specifier = ">=2.7,<2.8" },
-    { name = "petbot-domain", editable = "domain" },
-    { name = "petbot-platform", editable = "platform" },
-    { name = "petbot-skill-music", editable = "skills/music" },
-    { name = "pydantic-settings", specifier = ">=2" },
-    { name = "yt-dlp", specifier = ">=2024.0.0" },
+    { name = "boto3", marker = "extra == 'lambda'", specifier = ">=1.34" },
+    { name = "discord-py", marker = "extra == 'edge'", specifier = ">=2.7,<2.8" },
+    { name = "discord-py", extras = ["voice"], marker = "extra == 'worker-music'", specifier = ">=2.7,<2.8" },
+    { name = "httpx", marker = "extra == 'edge'", specifier = ">=0.27" },
+    { name = "httpx", marker = "extra == 'worker-core'", specifier = ">=0.27" },
+    { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.0" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
+    { name = "numexpr", marker = "extra == 'worker-core'", specifier = ">=2.8" },
+    { name = "numpy", marker = "extra == 'worker-core'", specifier = ">=1.26" },
+    { name = "petbot", extras = ["edge", "worker-core", "worker-music", "lambda"], marker = "extra == 'dev'" },
+    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.7" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "pydantic-ai-slim", extras = ["bedrock", "openai"], marker = "extra == 'worker-core'", specifier = ">=0.0.30" },
+    { name = "pydantic-settings", marker = "extra == 'edge'", specifier = ">=2" },
+    { name = "pydantic-settings", marker = "extra == 'worker-core'", specifier = ">=2" },
+    { name = "pydantic-settings", marker = "extra == 'worker-music'", specifier = ">=2" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
+    { name = "respx", marker = "extra == 'dev'", specifier = ">=0.21" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
+    { name = "yt-dlp", marker = "extra == 'worker-music'", specifier = ">=2024.0.0" },
 ]
+provides-extras = ["edge", "worker-core", "worker-music", "lambda", "dev"]
 
 [[package]]
 name = "platformdirs"
