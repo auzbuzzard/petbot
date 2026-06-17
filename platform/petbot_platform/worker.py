@@ -1,42 +1,58 @@
-"""The worker: runs a dispatched request against its installed skills.
+"""The worker: discover installed skill plugins and run a dispatched request.
 
-This is the *inbound* end of the edge -> worker hop. A transport binding (e.g. a
-Lambda handler in the deploy bundle) deserialises the request with
-:mod:`.wire`, calls :meth:`Worker.handle`, and serialises the result back. The
-worker is the only side that runs skills — the edge never does.
+The inbound end of the A3a hop (edge -> remote DispatchPort -> worker). The
+worker is the only side that runs skills; the edge never does. A transport
+binding (a Lambda handler in the deploy bundle) deserialises the request with
+``DispatchRequest.model_validate_json``, calls :meth:`Worker.handle`, and
+serialises the result with ``result.model_dump_json`` — no separate wire layer.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable, Iterator
+from importlib.metadata import entry_points
 
-from petbot_domain import DispatchRequest, SkillResult
-from petbot_platform.loader import build_registry
-from petbot_platform.registry import SkillNotFoundError, SkillRegistry
+from petbot_domain import DispatchRequest, Skill, SkillResult
 
 logger = logging.getLogger(__name__)
 
+#: The entry-point group every skill package registers under.
+SKILLS_GROUP = "petbot.skills"
+
+
+def _discover(group: str = SKILLS_GROUP) -> Iterator[Skill]:
+    for ep in entry_points(group=group):
+        target = ep.load()
+        skill = target() if isinstance(target, type) else target
+        if not isinstance(skill, Skill):
+            raise TypeError(f"Entry point {ep.name!r} is not a Skill: {skill!r}")
+        yield skill
+
 
 class Worker:
-    """Runs a skill named in a :class:`DispatchRequest` against a local registry."""
+    """Runs the skill named in a dispatched request against its installed plugins."""
 
-    def __init__(self, registry: SkillRegistry) -> None:
-        self._registry = registry
+    def __init__(self, skills: Iterable[Skill]) -> None:
+        self._skills: dict[str, Skill] = {}
+        for skill in skills:
+            if skill.name in self._skills:
+                raise ValueError(f"Duplicate skill name: {skill.name!r}")
+            self._skills[skill.name] = skill
 
     @classmethod
     def from_installed_skills(cls) -> Worker:
         """Build a worker from the ``petbot.skills`` plugins installed here."""
-        return cls(build_registry())
+        return cls(_discover())
 
     async def handle(self, request: DispatchRequest) -> SkillResult:
         """Run ``request.skill`` and return its result.
 
         Unknown skills and skill exceptions become expected-failure results, so a
-        transport binding always has a ``SkillResult`` to serialise back.
+        transport binding always has a result to serialise back.
         """
-        try:
-            skill = self._registry.get(request.skill)
-        except SkillNotFoundError:
+        skill = self._skills.get(request.skill)
+        if skill is None:
             logger.warning("Dispatch for unknown skill: %r", request.skill)
             return SkillResult.failure(f"Unknown skill: `{request.skill}`.")
         try:
