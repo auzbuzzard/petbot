@@ -58,6 +58,12 @@ dev = [
 [project.scripts]
 petbot = "petbot.__main__:main"
 
+# uv workspace: the reimagined microservice layout (ADR 0006) lands as members
+# alongside the legacy `petbot` package during the staged migration. `domain` is
+# the Shared Kernel and depends on nothing.
+[tool.uv.workspace]
+members = ["domain"]
+
 [tool.setuptools.packages.find]
 include = ["petbot*"]
 
@@ -76,7 +82,7 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-files = ["petbot", "tests"]
+files = ["petbot", "domain", "tests"]
 # discord.py and third-party libs ship their own types or are ignored below.
 
 [[tool.mypy.overrides]]
@@ -85,7 +91,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["tests", "domain/tests"]
 addopts = "--cov=petbot --cov-report=term-missing"
 
 [tool.coverage.run]
@@ -98,8 +104,14 @@ omit = [
 
 # import-linter: enforce the one-way core -> adapter dependency rule.
 [tool.importlinter]
-root_packages = ["petbot"]
+root_packages = ["petbot", "petbot_domain"]
 include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "The domain Shared Kernel depends on nothing first-party or platform"
+type = "forbidden"
+source_modules = ["petbot_domain"]
+forbidden_modules = ["petbot", "discord"]
 
 [[tool.importlinter.contracts]]
 name = "The neutral core must not depend on any frontend/adapter"
