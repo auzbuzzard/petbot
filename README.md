@@ -1,27 +1,47 @@
 # PetBot
 
-A modern, slash-command-first Discord bot. PetBot searches imageboards
-(Derpibooru, e621), evaluates math expressions, and plays audio in voice
-channels — all behind a **platform-neutral core** so the same skills can power
-other frontends (Telegram, web, an LLM chat layer) later.
+A modern Discord bot that you **talk to**: @mention PetBot and it replies in
+natural language, calling skills — image search (Derpibooru, e621), math, music —
+as tools when the conversation calls for them. Built as **A3a**: a thin,
+always-on **edge** that holds the Discord gateway and dispatches to skill
+**workers**, so compute scales (and goes serverless) independently of the
+connection.
 
-This is the 2.0 revival of a 2018 bot. The original (built on the long-removed
-`discord.py` 0.16 "async" branch) is preserved at the git tag
-**`v0.1-legacy-2018`**.
+This is the 2.1 release — the LLM/agent layer landing on the 2.0 neutral core.
+The original 2018 bot (built on the long-removed `discord.py` 0.16 "async"
+branch) is preserved at the git tag **`v0.1-legacy-2018`**.
 
-## Features
+## What it does
 
-| Command | What it does |
+@mention PetBot and chat. The agent (pydantic-ai) decides when to call a tool:
+
+| Tool | What it does |
 | --- | --- |
-| `/ping` | Liveness check. |
-| `/math expression:<expr>` | Evaluate an arithmetic expression (`numexpr`). |
-| `/derpi tags:<tags> [sort] [file_type] [min_score]` | Search Derpibooru (comma-separated tags). |
-| `/e621 tags:<tags> [sort] [file_type] [min_score]` | Search e621 (space-separated tags, `_` within a tag). |
-| `/music play\|skip\|stop\|queue\|volume` | Voice playback with a queue and skip-votes. |
-| `/purge count:<n>` | Bulk-delete messages (requires Manage Messages). |
+| `math` | Evaluate an arithmetic expression (`numexpr`). |
+| `derpi` | Search Derpibooru (comma-separated tags). |
+| `e621` | Search e621 (space-separated tags, `_` within a tag). |
+| `music` | Voice playback with a queue and skip-votes (its own worker). |
 
 Booru results are restricted to the safe rating outside age-restricted (NSFW)
 channels; inside a NSFW channel every rating is returned.
+
+## Architecture
+
+```
+Discord ⇄ [ edge ]  --SkillCall(JSON)-->  [ brain worker ]  math · booru · chat(LLM)
+          gateway      HTTP / Lambda        \--> [ music worker ] gateway + voice
+```
+
+The edge runs no skills; it holds a typed `Skills` client and calls
+`await skills.chat(ChatArgs(message), ctx)`. The client serialises a `SkillCall`
+to a worker, which re-validates the args and runs the skill. The chat skill's LLM
+tools are its sibling skills (math/booru), called in-process. One uv workspace,
+many `petbot.*` packages — see [`AGENTS.md`](AGENTS.md) and
+[`docs/adr/0006-gateway-edge-microservice-skills.md`](docs/adr/0006-gateway-edge-microservice-skills.md).
+
+The LLM is provider-agnostic (no vendor lock-in): Amazon Bedrock in prod, an
+OpenAI-compatible endpoint (OpenRouter, with free models) in dev — chosen by
+`CHAT_PROVIDER`.
 
 ## Quickstart
 
@@ -29,63 +49,38 @@ Requirements: **[uv](https://docs.astral.sh/uv/)** (it fetches Python 3.12 for
 you) and, for voice, the **FFmpeg** system binary.
 
 ```bash
-uv sync --all-extras --all-packages   # install PetBot + workspace members + dev tooling
+uv sync --all-extras --all-packages   # install every workspace member + dev tooling
 cp .env.example .env                  # then fill in your secrets/references
+
+# In one shell: a local brain worker (math + booru + chat) on :8000
+python -m petbot.workers.brain
+# In another: the edge (talks to the worker over HTTP by default)
+python -m petbot.discord
 ```
+
+@mention the bot in a server it's in and start chatting.
 
 ### Configuration
 
 All configuration is read from the environment (see `.env.example` for the full
-list). The required variable is `DISCORD_TOKEN`; `DEV_GUILD_ID` enables instant
-slash-command sync while developing. Logging is tunable with `LOG_LEVEL`
-(default `INFO`) and `LOG_FORMAT` (`plain` for human-readable dev output, `json`
-for non-blocking structured JSON-lines in prod) — see
-[`docs/adr/0004-logging.md`](docs/adr/0004-logging.md).
+list). The edge needs `DISCORD_TOKEN` and the worker address (`TRANSPORT` +
+`WORKER_URL`/`WORKER_LAMBDA`); the brain worker needs the chat model config
+(`CHAT_*`) and optional booru creds. **1Password** is recommended (keep `op://`
+references in `.env`, launch with `op run --env-file=.env -- …`); a plaintext
+`.env` is the fallback and is gitignored.
 
-**Recommended — 1Password (no plaintext secrets on disk):** keep the `op://`
-references in `.env` and launch with:
-
-```bash
-op run --env-file=.env -- python -m petbot
-```
-
-`op run` resolves the references into the process environment at start-up.
-
-**Fallback — plaintext `.env`:** replace the `op://...` values with real secrets
-and run:
-
-```bash
-python -m petbot
-```
-
-`.env` is gitignored; never commit it with real secrets.
-
-### Discord Developer Portal setup
-
-- Enable the **Server Members**/**Voice** intents as needed. PetBot uses the
-  default intents plus **Voice States** for music.
-- The **Message Content** privileged intent is **not** required — slash commands
-  don't need it. It only becomes necessary if/when the Phase B chat/LLM layer
-  lands.
-
-## Documentation
-
-- [`docs/architecture.md`](docs/architecture.md) — how the neutral core and the
-  Discord adapter fit together (the *why*).
-- [`docs/contributing.md`](docs/contributing.md) — adding a skill or a frontend;
-  running lint/type/test.
-- [`docs/adr/`](docs/adr/) — the load-bearing architectural decisions.
-- [`AGENTS.md`](AGENTS.md) — high-signal guide for AI agents working in this repo.
+The **Message Content** privileged intent **is** required for the edge (the
+conversational entrypoint reads what you type).
 
 ## Development
 
 ```bash
-ruff check . && ruff format --check .   # lint + format
-mypy                                    # strict type-check
-lint-imports                            # enforce core/adapter boundary
-pytest                                  # tests (fully offline)
-pre-commit install                      # run the gates on every commit
+uv run ruff check . && uv run ruff format --check .   # lint + format
+uv run mypy                                           # strict type-check
+uv run lint-imports                                   # package boundaries
+uv run pytest                                         # tests (fully offline)
 ```
 
 CI runs all of the above on every push and pull request. It needs **no
-secrets** — every test is offline (mocked APIs, no Discord login).
+secrets** — every test is offline (mocked APIs, pydantic-ai `TestModel`, no
+Discord login).

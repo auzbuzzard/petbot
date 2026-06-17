@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "petbot-worker-brain"
+version = "2.1.0"
+description = "PetBot brain worker: hosts math + booru + chat behind one dispatch endpoint."
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "petbot-platform",
+    "petbot-skill-math",
+    "petbot-skill-booru",
+    "petbot-skill-chat",
+]
+
+[project.scripts]
+petbot-brain = "petbot.workers.brain.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["petbot.workers.brain*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+"petbot.workers.brain" = ["py.typed"]
+
+[tool.uv.sources]
+petbot-platform = { workspace = true }
+petbot-skill-math = { workspace = true }
+petbot-skill-booru = { workspace = true }
+petbot-skill-chat = { workspace = true }
