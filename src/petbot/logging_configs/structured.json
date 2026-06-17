@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "disable_existing_loggers": false,
+  "formatters": {
+    "json": {
+      "()": "petbot.logging.JSONFormatter",
+      "fmt_keys": {
+        "level": "levelname",
+        "logger": "name",
+        "module": "module",
+        "function": "funcName",
+        "line": "lineno",
+        "thread_name": "threadName"
+      }
+    }
+  },
+  "filters": {
+    "non_error": {
+      "()": "petbot.logging.NonErrorFilter"
+    }
+  },
+  "handlers": {
+    "stdout_json": {
+      "class": "logging.StreamHandler",
+      "level": "DEBUG",
+      "formatter": "json",
+      "filters": ["non_error"],
+      "stream": "ext://sys.stdout"
+    },
+    "stderr_json": {
+      "class": "logging.StreamHandler",
+      "level": "WARNING",
+      "formatter": "json",
+      "stream": "ext://sys.stderr"
+    },
+    "queue_handler": {
+      "class": "logging.handlers.QueueHandler",
+      "handlers": ["stdout_json", "stderr_json"],
+      "respect_handler_level": true
+    }
+  },
+  "loggers": {
+    "discord": { "level": "INFO" }
+  },
+  "root": {
+    "level": "INFO",
+    "handlers": ["queue_handler"]
+  }
+}
