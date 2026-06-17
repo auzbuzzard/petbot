@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "petbot-skill-booru"
+version = "2.1.0"
+description = "PetBot booru skills: Derpibooru and e621 image search."
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "petbot-domain",
+    "petbot-types",
+    "httpx>=0.27",
+    "pydantic>=2",
+    "pydantic-settings>=2",
+]
+
+[project.entry-points."petbot.skills"]
+derpi = "petbot.skills.booru:build_derpi"
+e621 = "petbot.skills.booru:build_e621"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["petbot.skills.booru*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+"petbot.skills.booru" = ["py.typed", "utterances.json"]
+
+[tool.uv.sources]
+petbot-domain = { workspace = true }
+petbot-types = { workspace = true }
