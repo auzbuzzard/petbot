@@ -58,9 +58,7 @@ dev = [
 [project.scripts]
 petbot = "petbot.__main__:main"
 
-# uv workspace: the reimagined microservice layout (ADR 0006) lands as members
-# alongside the legacy `petbot` package during the staged migration. `domain` is
-# the Shared Kernel and depends on nothing.
+# uv workspace members. `domain` is the Shared Kernel (depends on nothing).
 [tool.uv.workspace]
 members = ["domain"]
 

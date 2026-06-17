@@ -15,9 +15,9 @@ class Skill(ABC):
     """A neutral unit of behaviour.
 
     Subclasses declare their identity/metadata and implement :meth:`run`. The
-    metadata are plain attributes (not ``ClassVar``): hand-written skills assign
-    them at class scope, while proxy skills (a dispatching ``RemoteSkill``) set
-    them per instance from a :class:`~petbot_domain.spec.SkillSpec`.
+    metadata are plain attributes (not ``ClassVar``) so they can be set either at
+    class scope (a hand-written skill) or per instance (a proxy that forwards to a
+    remote implementation).
     """
 
     #: Stable identifier; also the slash-command name on Discord.

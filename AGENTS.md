@@ -36,12 +36,12 @@ read [`docs/architecture.md`](docs/architecture.md) for the *why*.
 ## Commands
 
 ```bash
-pip install -e ".[dev]"                 # setup
-ruff check . && ruff format --check .   # lint + format
-mypy                                    # strict typing
-lint-imports                            # core/adapter boundary
-pytest                                  # offline tests
-op run --env-file=.env -- python -m petbot   # run (1Password); or `python -m petbot`
+uv sync --all-extras --all-packages              # setup (uv workspace)
+uv run ruff check . && uv run ruff format --check .   # lint + format
+uv run mypy                                      # strict typing
+uv run lint-imports                              # core/adapter boundary
+uv run pytest                                    # offline tests
+op run --env-file=.env -- uv run python -m petbot   # run (1Password); or `uv run python -m petbot`
 ```
 
 CI runs lint/format/mypy/lint-imports/pytest and needs **no secrets**.
