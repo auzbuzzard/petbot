@@ -39,7 +39,7 @@ class ChatSkill(Skill[ChatArgs]):
         self._skills = skills
         self._settings = settings or ChatSettings()
         self._model = model
-        self._agent = build_agent()
+        self._agent = build_agent(self._settings.system_prompt)
 
     def _resolved_model(self) -> Model | str:
         if self._model is None:

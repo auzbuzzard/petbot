@@ -27,8 +27,12 @@ class EdgeSettings(BaseSettings):
     log_level: str = "INFO"
 
     transport: TransportKind = "http"
-    #: Worker HTTP endpoint (used when ``transport == "http"``).
-    worker_url: str = "http://localhost:8000/dispatch"
+    #: Worker HTTP endpoint, consulted only when ``transport == "http"``. The
+    #: default targets a local core worker (``python -m petbot.workers.core`` binds
+    #: ``127.0.0.1:8000`` — see its ``WORKER_HOST``/``WORKER_PORT``); set ``WORKER_URL``
+    #: to point at a real worker. In production the edge uses ``transport=lambda``,
+    #: so this default is never reached there.
+    worker_url: str = "http://127.0.0.1:8000/dispatch"
     #: Worker Lambda function name (used when ``transport == "lambda"``).
     worker_lambda: str | None = None
 

@@ -18,13 +18,6 @@ from pydantic_ai import Agent, RunContext
 from petbot.domain import SkillContext, SkillResult
 from petbot.types import BooruArgs, MathArgs, Skills
 
-SYSTEM_PROMPT = (
-    "You are PetBot, a friendly, slightly mischievous pet companion in a Discord "
-    "server. Keep replies short and warm. When a user wants a calculation or an "
-    "image from Derpibooru or e621, call the matching tool rather than guessing. "
-    "Never describe explicit content in text; just present what the tool returns."
-)
-
 
 @dataclass
 class ChatDeps:
@@ -51,7 +44,7 @@ def _summarise(deps: ChatDeps, result: SkillResult) -> str:
     return "\n".join(parts) or "Done."
 
 
-def build_agent() -> Agent[ChatDeps, str]:
+def build_agent(system_prompt: str) -> Agent[ChatDeps, str]:
     """Build the chat agent with the sibling-skill tools registered.
 
     The model is bound per run (``agent.run(..., model=...)``) so the same agent
@@ -60,7 +53,7 @@ def build_agent() -> Agent[ChatDeps, str]:
     agent: Agent[ChatDeps, str] = Agent(
         deps_type=ChatDeps,
         output_type=str,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
     )
 
     @agent.tool
