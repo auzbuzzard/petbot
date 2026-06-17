@@ -47,7 +47,7 @@ class SkillContext:
 
     platform: Platform
     user: User
-    #: Neutral session key (the LLM layer keys conversation history off this).
+    #: Neutral key identifying the conversation, for grouping its history.
     conversation_id: str
     allows_explicit: bool = False
     max_text_length: int = 2000
