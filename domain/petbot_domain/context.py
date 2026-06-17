@@ -11,7 +11,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from petbot_domain._model import Frozen
 
 
 class Platform(StrEnum):
@@ -24,11 +24,7 @@ class Platform(StrEnum):
     DISCORD = "discord"
 
 
-class _Frozen(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-
-class User(_Frozen):
+class User(Frozen):
     """The invoking user, platform-qualified. ``id`` stays ``str`` for neutrality."""
 
     platform: Platform
@@ -36,7 +32,7 @@ class User(_Frozen):
     display_name: str
 
 
-class SkillContext(_Frozen):
+class SkillContext(Frozen):
     """Everything a skill needs about a request, with no platform nouns.
 
     ``allows_explicit`` is a *runtime* flag (the booru skills raise their rating
@@ -53,7 +49,7 @@ class SkillContext(_Frozen):
     max_text_length: int = 2000
 
 
-class DispatchRequest(_Frozen):
+class DispatchRequest(Frozen):
     """A unit of work a frontend hands to compute over a ``DispatchPort``."""
 
     skill: str

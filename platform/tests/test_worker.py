@@ -29,6 +29,11 @@ async def test_handle_runs_a_real_plugin() -> None:
     assert "42" in result.text
 
 
+def test_manifest_lists_installed_skills() -> None:
+    manifest = Worker.from_installed_skills().manifest()
+    assert "math" in {spec.name for spec in manifest.skills}
+
+
 async def test_unknown_skill_is_expected_failure() -> None:
     worker = Worker([])
     result = await worker.handle(_request("nope"))

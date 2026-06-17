@@ -6,14 +6,10 @@ returns an ``EmbedSpec`` (a neutral card description), never a platform embed.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from petbot_domain._model import Frozen
 
 
-class _Frozen(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-
-class EmbedSpec(_Frozen):
+class EmbedSpec(Frozen):
     """A platform-neutral description of a rich card."""
 
     title: str | None = None
@@ -26,7 +22,7 @@ class EmbedSpec(_Frozen):
     author_icon_url: str | None = None
 
 
-class SkillResult(_Frozen):
+class SkillResult(Frozen):
     """A skill's neutral result: optional text, an optional card, files, an error.
 
     ``error`` carries *expected* failures (empty search, bad input) rendered as a

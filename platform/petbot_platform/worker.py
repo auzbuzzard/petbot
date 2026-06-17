@@ -13,7 +13,7 @@ import logging
 from collections.abc import Iterable, Iterator
 from importlib.metadata import entry_points
 
-from petbot_domain import DispatchRequest, Skill, SkillResult
+from petbot_domain import DispatchRequest, Manifest, Skill, SkillResult
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,10 @@ class Worker:
     def from_installed_skills(cls) -> Worker:
         """Build a worker from the ``petbot.skills`` plugins installed here."""
         return cls(_discover())
+
+    def manifest(self) -> Manifest:
+        """The spec of every skill this worker hosts — for delivery to an edge."""
+        return Manifest.of(self._skills.values())
 
     async def handle(self, request: DispatchRequest) -> SkillResult:
         """Run ``request.skill`` and return its result.
