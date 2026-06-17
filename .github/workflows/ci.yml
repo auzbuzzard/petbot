@@ -16,13 +16,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v8
-        with:
-          python-version: "3.12"
-          enable-cache: true
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Sync (workspace members + all extras)
-        run: uv sync --all-extras --all-packages
+        # uv fetches/pins Python 3.12 itself (requires-python >=3.12).
+        run: uv sync --all-extras --all-packages --python 3.12
 
       - name: Ruff (lint + format check)
         run: |
