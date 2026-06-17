@@ -60,7 +60,7 @@ petbot = "petbot.__main__:main"
 
 # uv workspace members. `domain` is the Shared Kernel (depends on nothing).
 [tool.uv.workspace]
-members = ["domain", "skills/math"]
+members = ["domain", "platform", "skills/math"]
 
 [tool.setuptools.packages.find]
 include = ["petbot*"]
@@ -79,13 +79,13 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
 # First-party = every PetBot distribution, so the kernel/skills sort apart from
 # true third-party deps (numexpr, httpx, …) in a multi-package workspace.
 [tool.ruff.lint.isort]
-known-first-party = ["petbot", "petbot_domain", "petbot_skill_math"]
+known-first-party = ["petbot", "petbot_domain", "petbot_platform", "petbot_skill_math"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-files = ["petbot", "domain", "skills", "tests"]
+files = ["petbot", "domain", "platform", "skills", "tests"]
 # discord.py and third-party libs ship their own types or are ignored below.
 
 [[tool.mypy.overrides]]
@@ -94,7 +94,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests", "domain/tests", "skills/math/tests"]
+testpaths = ["tests", "domain/tests", "platform/tests", "skills/math/tests"]
 addopts = "--cov=petbot --cov-report=term-missing"
 
 [tool.coverage.run]
@@ -107,7 +107,7 @@ omit = [
 
 # import-linter: enforce the one-way core -> adapter dependency rule.
 [tool.importlinter]
-root_packages = ["petbot", "petbot_domain", "petbot_skill_math"]
+root_packages = ["petbot", "petbot_domain", "petbot_platform", "petbot_skill_math"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
@@ -120,7 +120,13 @@ forbidden_modules = ["petbot", "discord"]
 name = "A skill depends only on the kernel — never a frontend, platform, or sibling skill"
 type = "forbidden"
 source_modules = ["petbot_skill_math"]
-forbidden_modules = ["petbot", "discord"]
+forbidden_modules = ["petbot", "petbot_platform", "discord"]
+
+[[tool.importlinter.contracts]]
+name = "The platform discovers skills at runtime — it never imports one statically"
+type = "forbidden"
+source_modules = ["petbot_platform"]
+forbidden_modules = ["petbot", "discord", "petbot_skill_math"]
 
 [[tool.importlinter.contracts]]
 name = "The neutral core must not depend on any frontend/adapter"
