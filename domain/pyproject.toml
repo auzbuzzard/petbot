@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "petbot-domain"
+version = "0.1.0"
+description = "PetBot Shared Kernel: neutral domain types and port interfaces."
+requires-python = ">=3.12"
+license = { text = "MIT" }
+# The Shared Kernel depends on NOTHING. Value objects, enums, and port
+# interfaces only — no utilities, HTTP clients, or adapters (that would make it
+# a utility library, not a shared kernel). Enforced by import-linter.
+dependencies = []
+
+[tool.setuptools.packages.find]
+include = ["petbot_domain*"]
+
+[tool.setuptools.package-data]
+"petbot_domain" = ["py.typed"]
