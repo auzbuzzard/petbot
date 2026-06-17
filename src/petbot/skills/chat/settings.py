@@ -18,6 +18,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ChatProvider = Literal["bedrock", "openrouter"]
 
+#: The default persona. It is product copy, not logic, so it ships as a default
+#: that operators can override per deployment via ``CHAT_SYSTEM_PROMPT`` (a long
+#: prompt is fine in an env var; for very long prompts, point it at a file's
+#: contents at the call site).
+DEFAULT_SYSTEM_PROMPT = (
+    "You are PetBot, a friendly, slightly mischievous pet companion in a Discord "
+    "server. Keep replies short and warm. When a user wants a calculation or an "
+    "image from Derpibooru or e621, call the matching tool rather than guessing. "
+    "Never describe explicit content in text; just present what the tool returns."
+)
+
 
 class ChatSettings(BaseSettings):
     """Which LLM the chat agent talks to, and how to reach it."""
@@ -41,3 +52,5 @@ class ChatSettings(BaseSettings):
     openrouter_model: str = "google/gemma-3-27b-it:free"
     #: OpenRouter API key; required only when ``provider == "openrouter"``.
     openrouter_api_key: str | None = None
+    #: The agent's persona; overridable via ``CHAT_SYSTEM_PROMPT``.
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT
