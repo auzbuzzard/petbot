@@ -88,9 +88,10 @@ class Worker:
         """
         try:
             raw: dict[str, Any] = json.loads(body)
-            skill = self._skills.get(raw["skill"])
+            name = raw["skill"]
+            skill = self._skills.get(name)
             if skill is None:
-                return SkillResult.failure(f"Unknown skill: `{raw['skill']}`.").model_dump_json()
+                return SkillResult.failure(f"Unknown skill: `{name}`.").model_dump_json()
             args: BaseModel = skill.args_model.model_validate(raw["args"])
             context = SkillContext.model_validate(raw["context"])
         except (ValueError, KeyError, ValidationError):
@@ -98,5 +99,5 @@ class Worker:
             # malformed payload escape the boundary; always return a result.
             logger.warning("Malformed dispatch payload", exc_info=True)
             return SkillResult.failure("That request was malformed.").model_dump_json()
-        result = await self.run(SkillCall(skill=raw["skill"], args=args, context=context))
+        result = await self.run(SkillCall(skill=name, args=args, context=context))
         return result.model_dump_json()

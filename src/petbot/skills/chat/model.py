@@ -6,6 +6,8 @@ the agent against ``TestModel`` without importing any SDK.
 
 from __future__ import annotations
 
+from typing import assert_never
+
 from pydantic_ai.models import Model
 
 from petbot.skills.chat.settings import BedrockModel, ChatSettings, OpenRouterModel
@@ -23,3 +25,5 @@ def build_model(settings: ChatSettings) -> Model:
             from pydantic_ai.models.bedrock import BedrockConverseModel
 
             return BedrockConverseModel(model)
+        case _:
+            assert_never(settings.llm)
