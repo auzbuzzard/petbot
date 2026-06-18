@@ -45,6 +45,7 @@ async def respond(channel: discord.abc.Messageable, result: SkillResult) -> None
     chunks = chunk_text(result.text or "", limit=DISCORD_MAX_TEXT)
 
     if not chunks:
+        # No text: send the embed alone, or nothing if the result is truly empty.
         if embed is not None:
             await channel.send(embed=embed)
         return

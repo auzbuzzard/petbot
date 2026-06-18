@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import assert_never
 
 import discord
 import httpx
@@ -59,6 +60,8 @@ class PetBot(commands.Bot):
             case HttpWorker(url=url):
                 self._http = httpx.AsyncClient(timeout=30.0)
                 self.skills = SkillsClient(HttpTransport(url, self._http))
+            case _:
+                assert_never(worker)
 
     async def on_ready(self) -> None:
         if self.user is not None:

@@ -3,10 +3,10 @@
 Each sibling skill is exposed to the LLM as a typed tool whose argument is the
 very same ``petbot.types`` ``*Args`` model the skill validates — so the tool
 schema, the typed client call, and the worker's validation all share one source
-of truth. Tool bodies dispatch through a :class:`petbot.types.Skills` client
-(via a ``SkillsClient`` over a local transport in the core worker — an in-process hop, no wire round
-trip). A tool that yields a rich card (a booru image) records it on the deps so
-the chat skill can surface it alongside the model's prose.
+of truth. Tool bodies dispatch through a :class:`petbot.types.Skills` client (a
+``SkillsClient`` over a local transport in the core worker — an in-process hop,
+no wire round trip). A tool that yields a rich card (a booru image) records it on
+the deps so the chat skill can surface it alongside the model's prose.
 """
 
 from __future__ import annotations
