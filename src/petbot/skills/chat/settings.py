@@ -2,14 +2,15 @@
 
 Provider-agnostic by design (no vendor lock-in): the same agent runs against
 Bedrock or an OpenAI-compatible endpoint (OpenRouter), chosen by ``CHAT_PROVIDER``.
-**No model id lives in code** — the deployment supplies it (``CHAT_BEDROCK_MODEL``
-or ``CHAT_OPENROUTER_MODEL``), and a missing one fails fast in :func:`build_model`.
+The model id is a **required** setting (``CHAT_MODEL``) — there is no model name in
+code, and a missing or provider-inconsistent config fails fast at construction.
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Self
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ChatProvider = Literal["bedrock", "openrouter"]
@@ -36,13 +37,17 @@ class ChatSettings(BaseSettings):
     )
 
     provider: ChatProvider = "bedrock"
-    #: Bedrock model id (required when ``provider == "bedrock"``) — set via
-    #: ``CHAT_BEDROCK_MODEL``; never defaulted in code.
-    bedrock_model: str | None = None
-    #: OpenRouter model id (required when ``provider == "openrouter"``) — set via
-    #: ``CHAT_OPENROUTER_MODEL``; never defaulted in code.
-    openrouter_model: str | None = None
-    #: OpenRouter API key (required when ``provider == "openrouter"``).
+    #: The model id for the chosen provider (``CHAT_MODEL``). Required — no default,
+    #: no ``None``: a worker without a model id can't run, so it fails fast.
+    model: str
+    #: OpenRouter API key — genuinely optional (Bedrock never uses it), but required
+    #: when ``provider == "openrouter"`` (enforced below).
     openrouter_api_key: str | None = None
     #: The agent's persona; overridable via ``CHAT_SYSTEM_PROMPT``.
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
+
+    @model_validator(mode="after")
+    def _require_openrouter_key(self) -> Self:
+        if self.provider == "openrouter" and not self.openrouter_api_key:
+            raise ValueError("CHAT_PROVIDER=openrouter requires CHAT_OPENROUTER_API_KEY.")
+        return self

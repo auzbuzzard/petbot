@@ -4,19 +4,25 @@ any rich card — all without a live LLM (``TestModel``) or live skills (a fake)
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 from pydantic_ai.models.test import TestModel
 
 from petbot.domain import EmbedSpec, Platform, SkillContext, SkillResult, User
 from petbot.skills.chat import ChatSkill
-from petbot.skills.chat.model import build_model
 from petbot.skills.chat.settings import ChatSettings
 from petbot.types import BooruArgs, ChatArgs, MathArgs, MusicArgs
 
 
-def test_build_model_requires_openrouter_key() -> None:
-    settings = ChatSettings(provider="openrouter", openrouter_api_key=None)
-    with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY"):
-        build_model(settings)
+def test_model_id_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    # No default, no None — a missing CHAT_MODEL fails fast at construction.
+    monkeypatch.delenv("CHAT_MODEL", raising=False)
+    with pytest.raises(ValidationError):
+        ChatSettings(_env_file=None)
+
+
+def test_openrouter_requires_api_key() -> None:
+    with pytest.raises(ValidationError, match="OPENROUTER_API_KEY"):
+        ChatSettings(provider="openrouter", model="x", openrouter_api_key=None)
 
 
 class FakeSkills:
