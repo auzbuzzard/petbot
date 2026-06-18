@@ -1,28 +1,45 @@
 """The chat worker's model configuration.
 
-Provider-agnostic by design (no vendor lock-in): the same agent runs against
-Bedrock or an OpenAI-compatible endpoint (OpenRouter), chosen by ``CHAT_PROVIDER``.
-The model id is a **required** setting (``CHAT_MODEL``) — there is no model name in
-code, and a missing or provider-inconsistent config fails fast at construction.
+Provider-agnostic (no vendor lock-in): the LLM is a **discriminated union**
+(``CHAT_LLM__KIND`` selects the variant), so only the chosen provider's fields
+exist — no model name in code, no ``str | None`` for conditionally-required
+values. Set via nested env, e.g. ``CHAT_LLM__KIND=openrouter`` +
+``CHAT_LLM__MODEL=…`` + ``CHAT_LLM__API_KEY=…``.
 """
 
 from __future__ import annotations
 
-from typing import Literal, Self
+from typing import Annotated, Literal
 
-from pydantic import model_validator
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-ChatProvider = Literal["bedrock", "openrouter"]
-
-#: The default persona — product copy, not logic, so it ships as a default that a
-#: deployment can override via ``CHAT_SYSTEM_PROMPT``.
+#: The default persona — product copy, not logic, overridable via ``CHAT_SYSTEM_PROMPT``.
 DEFAULT_SYSTEM_PROMPT = (
     "You are PetBot, a friendly, slightly mischievous pet companion in a Discord "
     "server. Keep replies short and warm. When a user wants a calculation or an "
     "image from Derpibooru or e621, call the matching tool rather than guessing. "
     "Never describe explicit content in text; just present what the tool returns."
 )
+
+
+class BedrockModel(BaseModel):
+    """An Amazon Bedrock model."""
+
+    kind: Literal["bedrock"] = "bedrock"
+    model: str
+
+
+class OpenRouterModel(BaseModel):
+    """An OpenRouter (OpenAI-compatible) model."""
+
+    kind: Literal["openrouter"] = "openrouter"
+    model: str
+    api_key: str
+
+
+#: Exactly one provider config, with only its own fields. Tagged by ``kind``.
+LLMConfig = Annotated[BedrockModel | OpenRouterModel, Field(discriminator="kind")]
 
 
 class ChatSettings(BaseSettings):
@@ -32,22 +49,12 @@ class ChatSettings(BaseSettings):
         env_prefix="chat_",
         env_file=".env",
         env_file_encoding="utf-8",
+        env_nested_delimiter="__",
         extra="ignore",
         frozen=True,
     )
 
-    provider: ChatProvider = "bedrock"
-    #: The model id for the chosen provider (``CHAT_MODEL``). Required — no default,
-    #: no ``None``: a worker without a model id can't run, so it fails fast.
-    model: str
-    #: OpenRouter API key — genuinely optional (Bedrock never uses it), but required
-    #: when ``provider == "openrouter"`` (enforced below).
-    openrouter_api_key: str | None = None
+    #: The LLM to use (required; see ``CHAT_LLM__*``).
+    llm: LLMConfig
     #: The agent's persona; overridable via ``CHAT_SYSTEM_PROMPT``.
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
-
-    @model_validator(mode="after")
-    def _require_openrouter_key(self) -> Self:
-        if self.provider == "openrouter" and not self.openrouter_api_key:
-            raise ValueError("CHAT_PROVIDER=openrouter requires CHAT_OPENROUTER_API_KEY.")
-        return self
