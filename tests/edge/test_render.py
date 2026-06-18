@@ -11,7 +11,7 @@ from petbot.domain import EmbedSpec, Platform, SkillResult
 from petbot.edge.bot import PetBot, _without_mention
 from petbot.edge.context import build_context
 from petbot.edge.render import respond, to_embed
-from petbot.edge.settings import EdgeSettings
+from petbot.edge.settings import EdgeSettings, HttpWorker
 from petbot.edge.text import chunk_text
 
 
@@ -104,7 +104,7 @@ class _RaisingSkills:
 
 
 async def test_chat_maps_transport_error_to_friendly_failure() -> None:
-    bot = PetBot(EdgeSettings(discord_token="x", worker_url="http://worker/dispatch"))
+    bot = PetBot(EdgeSettings(discord_token="x", worker=HttpWorker(url="http://worker/dispatch")))
     bot.skills = _RaisingSkills()
     result = await bot._chat("hello", FakeMessage(FakeChannel()))  # type: ignore[arg-type]
     assert result.is_error  # the transport failure became a friendly result, not a crash

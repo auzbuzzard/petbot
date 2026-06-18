@@ -20,7 +20,7 @@ from discord.ext import commands
 from petbot.domain import SkillResult
 from petbot.edge.context import build_context
 from petbot.edge.render import respond
-from petbot.edge.settings import EdgeSettings
+from petbot.edge.settings import EdgeSettings, HttpWorker, LambdaWorker
 from petbot.logging_setup import configure_logging
 from petbot.platform import HttpTransport, LambdaTransport, SkillsClient
 from petbot.types import ChatArgs, Skills
@@ -52,16 +52,13 @@ class PetBot(commands.Bot):
         self.skills: Skills | None = None
 
     async def setup_hook(self) -> None:
-        # EdgeSettings' validator guarantees the chosen transport's target is set.
-        if self.settings.transport == "lambda":
-            assert self.settings.worker_lambda is not None
-            self.skills = SkillsClient(
-                LambdaTransport.from_function_name(self.settings.worker_lambda)
-            )
-        else:
-            assert self.settings.worker_url is not None
-            self._http = httpx.AsyncClient(timeout=30.0)
-            self.skills = SkillsClient(HttpTransport(self.settings.worker_url, self._http))
+        worker = self.settings.worker
+        match worker:
+            case LambdaWorker(function_name=fn):
+                self.skills = SkillsClient(LambdaTransport.from_function_name(fn))
+            case HttpWorker(url=url):
+                self._http = httpx.AsyncClient(timeout=30.0)
+                self.skills = SkillsClient(HttpTransport(url, self._http))
 
     async def on_ready(self) -> None:
         if self.user is not None:
@@ -96,5 +93,5 @@ class PetBot(commands.Bot):
 def run(settings: EdgeSettings) -> None:
     """Start the edge (blocking)."""
     configure_logging(settings.log_level)
-    logger.info("Starting PetBot edge (transport=%s).", settings.transport)
+    logger.info("Starting PetBot edge (worker=%s).", settings.worker.kind)
     PetBot(settings).run(settings.discord_token, log_handler=None)
