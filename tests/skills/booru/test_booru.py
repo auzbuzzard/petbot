@@ -9,8 +9,8 @@ from __future__ import annotations
 import httpx
 import pytest
 import respx
-from conftest import load_fixture, make_context
 
+from conftest import load_fixture, make_context
 from petbot.skills.booru import derpibooru, e621, tags
 from petbot.skills.booru.engine import run_search
 from petbot.skills.booru.errors import SiteFailureStatusError
