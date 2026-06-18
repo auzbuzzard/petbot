@@ -90,6 +90,9 @@ strict = true
 plugins = ["pydantic.mypy"]
 mypy_path = "src"
 files = ["src", "tests"]
+# The root tests/conftest.py shares a module name with the package-local booru
+# conftest; it is trivial env setup, so keep it out of the type graph.
+exclude = ["tests/conftest\\.py$"]
 
 [[tool.mypy.overrides]]
 module = ["numexpr.*", "yt_dlp.*", "nacl.*", "boto3.*", "conftest"]

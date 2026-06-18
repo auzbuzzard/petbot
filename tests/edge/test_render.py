@@ -104,7 +104,7 @@ class _RaisingSkills:
 
 
 async def test_chat_maps_transport_error_to_friendly_failure() -> None:
-    bot = PetBot(EdgeSettings(discord_token="x"))
+    bot = PetBot(EdgeSettings(discord_token="x", worker_url="http://worker/dispatch"))
     bot.skills = _RaisingSkills()
     result = await bot._chat("hello", FakeMessage(FakeChannel()))  # type: ignore[arg-type]
     assert result.is_error  # the transport failure became a friendly result, not a crash

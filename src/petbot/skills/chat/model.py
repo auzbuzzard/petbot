@@ -12,21 +12,16 @@ from petbot.skills.chat.settings import ChatSettings
 
 
 def build_model(settings: ChatSettings) -> Model:
-    """Construct the configured LLM model, failing fast on missing deployment config."""
+    """Construct the configured LLM model. Settings validation already guaranteed a
+    model id and (for OpenRouter) an API key, so no defensive guards are needed here."""
     if settings.provider == "openrouter":
-        if not settings.openrouter_api_key:
-            raise RuntimeError("CHAT_PROVIDER=openrouter requires CHAT_OPENROUTER_API_KEY.")
-        if not settings.openrouter_model:
-            raise RuntimeError("CHAT_PROVIDER=openrouter requires CHAT_OPENROUTER_MODEL.")
         from pydantic_ai.models.openai import OpenAIChatModel
         from pydantic_ai.providers.openrouter import OpenRouterProvider
 
+        assert settings.openrouter_api_key is not None  # guaranteed by ChatSettings validator
         provider = OpenRouterProvider(api_key=settings.openrouter_api_key)
-        return OpenAIChatModel(settings.openrouter_model, provider=provider)
-
-    if not settings.bedrock_model:
-        raise RuntimeError("CHAT_PROVIDER=bedrock requires CHAT_BEDROCK_MODEL.")
+        return OpenAIChatModel(settings.model, provider=provider)
 
     from pydantic_ai.models.bedrock import BedrockConverseModel
 
-    return BedrockConverseModel(settings.bedrock_model)
+    return BedrockConverseModel(settings.model)

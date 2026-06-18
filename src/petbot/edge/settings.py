@@ -7,9 +7,9 @@ same edge runs against a local HTTP worker in dev and a Lambda worker in prod.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 TransportKind = Literal["http", "lambda"]
@@ -27,10 +27,9 @@ class EdgeSettings(BaseSettings):
     log_level: str = "INFO"
 
     transport: TransportKind = "http"
-    #: Worker HTTP endpoint (required when ``transport == "http"``) — set via
-    #: ``WORKER_URL``; never defaulted, so a misconfigured process fails fast.
+    #: Worker HTTP endpoint — present iff ``transport == "http"`` (``WORKER_URL``).
     worker_url: str | None = None
-    #: Worker Lambda function name (required when ``transport == "lambda"``).
+    #: Worker Lambda function name — present iff ``transport == "lambda"`` (``WORKER_LAMBDA``).
     worker_lambda: str | None = None
 
     @field_validator("dev_guild_id", mode="before")
@@ -39,3 +38,13 @@ class EdgeSettings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @model_validator(mode="after")
+    def _require_transport_target(self) -> Self:
+        # The chosen transport's target is required; fail fast at construction
+        # rather than scattering None-checks at the call site.
+        if self.transport == "http" and not self.worker_url:
+            raise ValueError("transport=http requires WORKER_URL.")
+        if self.transport == "lambda" and not self.worker_lambda:
+            raise ValueError("transport=lambda requires WORKER_LAMBDA.")
+        return self
