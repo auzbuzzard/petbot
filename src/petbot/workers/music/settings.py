@@ -17,9 +17,10 @@ class MusicSettings(BaseSettings):
     )
 
     discord_token: str
-    #: Bind address for the dispatch endpoint; default binds all interfaces so the
-    #: edge can reach it across the network. Override with ``MUSIC_DISPATCH_HOST``.
-    dispatch_host: str = "0.0.0.0"
-    #: Port for the dispatch endpoint; override with ``MUSIC_DISPATCH_PORT``.
-    dispatch_port: int = 8100
+    #: Bind address for the dispatch endpoint (required) — set via
+    #: ``MUSIC_DISPATCH_HOST`` (e.g. ``0.0.0.0`` to accept the edge across the
+    #: network). Never defaulted, so the bind is always an explicit choice.
+    dispatch_host: str
+    #: Port for the dispatch endpoint (required) — set via ``MUSIC_DISPATCH_PORT``.
+    dispatch_port: int
     log_level: str = "INFO"
