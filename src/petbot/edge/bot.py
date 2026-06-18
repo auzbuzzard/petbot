@@ -52,15 +52,14 @@ class PetBot(commands.Bot):
         self.skills: Skills | None = None
 
     async def setup_hook(self) -> None:
+        # EdgeSettings' validator guarantees the chosen transport's target is set.
         if self.settings.transport == "lambda":
-            if self.settings.worker_lambda is None:
-                raise RuntimeError("transport=lambda requires WORKER_LAMBDA to be set.")
+            assert self.settings.worker_lambda is not None
             self.skills = SkillsClient(
                 LambdaTransport.from_function_name(self.settings.worker_lambda)
             )
         else:
-            if self.settings.worker_url is None:
-                raise RuntimeError("transport=http requires WORKER_URL to be set.")
+            assert self.settings.worker_url is not None
             self._http = httpx.AsyncClient(timeout=30.0)
             self.skills = SkillsClient(HttpTransport(self.settings.worker_url, self._http))
 
