@@ -9,20 +9,22 @@ from pydantic_ai.models.test import TestModel
 
 from petbot.domain import EmbedSpec, Platform, SkillContext, SkillResult, User
 from petbot.skills.chat import ChatSkill
-from petbot.skills.chat.settings import ChatSettings
+from petbot.skills.chat.settings import ChatSettings, OpenRouterModel
 from petbot.types import BooruArgs, ChatArgs, MathArgs, MusicArgs
 
 
-def test_model_id_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
-    # No default, no None — a missing CHAT_MODEL fails fast at construction.
-    monkeypatch.delenv("CHAT_MODEL", raising=False)
+def test_llm_config_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The provider config is required — a missing CHAT_LLM__* fails at construction.
+    monkeypatch.delenv("CHAT_LLM__KIND", raising=False)
+    monkeypatch.delenv("CHAT_LLM__MODEL", raising=False)
     with pytest.raises(ValidationError):
         ChatSettings(_env_file=None)
 
 
-def test_openrouter_requires_api_key() -> None:
-    with pytest.raises(ValidationError, match="OPENROUTER_API_KEY"):
-        ChatSettings(provider="openrouter", model="x", openrouter_api_key=None)
+def test_openrouter_variant_requires_api_key() -> None:
+    # The OpenRouter variant has api_key as a required field — no conditional None.
+    with pytest.raises(ValidationError):
+        OpenRouterModel(model="x")  # type: ignore[call-arg]  # missing api_key is the point
 
 
 class FakeSkills:
