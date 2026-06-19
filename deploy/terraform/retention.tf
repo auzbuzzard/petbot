@@ -35,6 +35,6 @@ resource "aws_ecr_lifecycle_policy" "this" {
 resource "aws_cloudwatch_log_group" "lambda" {
   # Lambda writes to /aws/lambda/<function-name>; creating it explicitly lets us
   # set retention (and own its lifecycle) instead of the never-expire default.
-  name              = "/aws/lambda/${var.name_prefix}"
+  name              = "/aws/lambda/${local.core_name}"
   retention_in_days = var.log_retention_days
 }
