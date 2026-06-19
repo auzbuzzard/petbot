@@ -8,27 +8,69 @@
 # container still runs, reachable only on the private `<name>.service.local`
 # domain (which the edge never needs), and no health-check port is required.
 #
-# Image must be linux/amd64 (Lightsail container services are amd64-only; an
+# Image delivery is ECR-pull: the edge image lives in its own ECR repo (the same
+# registry the worker uses), and the service pulls it via an "image puller" IAM
+# role (the declarative equivalent of what the Lightsail console wires up). The
+# image must be linux/amd64 (Lightsail container services are amd64-only; an
 # arm64 image fails with "exec format error") — see Dockerfile.edge. Measured edge
-# footprint ~76 MB RSS (discord.py + httpx + boto3), so `nano` (512 MB) is ample;
-# bump var.edge_power to `micro` if it ever OOMs.
+# footprint ~76 MB RSS, so `nano` (512 MB) is ample; bump var.edge_power to
+# `micro` if it ever OOMs.
 
 resource "aws_lightsail_container_service" "edge" {
   name  = local.edge_name
   power = var.edge_power
   scale = var.edge_scale
+
+  # Activating this creates an AWS-managed ECR "image puller" principal for the
+  # service; we grant it read on the edge repo below. (Same-Region requirement:
+  # the repo and the service are both in var.aws_region.)
+  private_registry_access {
+    ecr_image_puller_role {
+      is_active = true
+    }
+  }
 }
 
-# The container deployment. Skipped until an image has been pushed (var.edge_image
-# empty), so the service can be created first, then the image pushed, then this
-# set — mirroring the ECR-first two-step for the worker.
+# The edge's own ECR repository.
+resource "aws_ecr_repository" "edge" {
+  name                 = local.edge_name
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
+# Grant the service's puller principal read access on the edge repo — exactly the
+# statement the Lightsail console would add for you, here as code. The principal
+# ARN is populated once the puller role is active; Terraform orders this after the
+# service create because it references that attribute.
+resource "aws_ecr_repository_policy" "edge" {
+  repository = aws_ecr_repository.edge.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "AllowLightsailPull"
+      Effect    = "Allow"
+      Principal = { AWS = aws_lightsail_container_service.edge.private_registry_access[0].ecr_image_puller_role[0].principal_arn }
+      Action    = ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
+    }]
+  })
+}
+
+# The container deployment. Skipped until an image tag is supplied (CI pushes the
+# image to ECR, then passes its tag), so the service + puller can be created
+# first. Lightsail pulls from ECR using the puller role, so the repo policy must
+# exist before the deployment is created.
 resource "aws_lightsail_container_service_deployment_version" "edge" {
-  count        = var.edge_image != "" ? 1 : 0
+  count        = var.edge_image_tag != "" ? 1 : 0
   service_name = aws_lightsail_container_service.edge.name
 
   container {
     container_name = "edge"
-    image          = var.edge_image
+    image          = "${aws_ecr_repository.edge.repository_url}:${var.edge_image_tag}"
 
     environment = {
       LOG_LEVEL             = var.log_level
@@ -43,6 +85,8 @@ resource "aws_lightsail_container_service_deployment_version" "edge" {
       DISCORD_TOKEN         = data.aws_ssm_parameter.discord_token.value
     }
   }
+
+  depends_on = [aws_ecr_repository_policy.edge]
 }
 
 data "aws_ssm_parameter" "discord_token" {
