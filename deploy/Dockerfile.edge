@@ -1,0 +1,38 @@
+# PetBot edge image — the always-on Discord gateway holder.
+#
+# The edge holds the gateway WebSocket and dispatches each @mention to the core
+# worker Lambda (transport=lambda, via boto3). It carries no skill code: just
+# discord.py, httpx, and boto3 (the `lambda` extra). Runs on a Lightsail
+# container service (linux/amd64), so build amd64 — unlike the worker Lambda,
+# which is arm64.
+#
+# Build from the repository root:
+#
+#   docker build --platform linux/amd64 -f deploy/Dockerfile.edge -t <ref> .
+#
+# Keep the runtime in lockstep with what CI tests (pyproject requires-python,
+# mypy, ruff all target 3.12).
+FROM --platform=linux/amd64 python:3.12-slim
+
+# uv resolves + installs far faster than pip. Pinned to an immutable version tag.
+COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /bin/uv
+
+WORKDIR /app
+
+# PetBot is one package; install only the edge + lambda extras so the image
+# carries discord.py + boto3 and not pydantic-ai / numpy.
+COPY pyproject.toml README.md ./
+COPY src ./src
+
+# `.[edge,lambda]` = the gateway edge plus the boto3 dispatch transport. No
+# secrets are baked in — the runner supplies the Discord token, the worker target,
+# and the scoped AWS key as environment variables.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system --compile-bytecode ".[edge,lambda]"
+
+# Run as a non-root user.
+RUN useradd --create-home --uid 10001 petbot
+USER petbot
+
+# The console script defined in pyproject ([project.scripts] petbot-edge).
+CMD ["petbot-edge"]

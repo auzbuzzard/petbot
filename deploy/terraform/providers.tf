@@ -4,7 +4,7 @@ provider "aws" {
   default_tags {
     tags = {
       Project   = "petbot"
-      Component = "interactions-lambda"
+      Component = "edge-and-core-worker"
       ManagedBy = "terraform"
     }
   }
