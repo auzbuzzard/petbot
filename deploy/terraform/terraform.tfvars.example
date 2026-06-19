@@ -28,7 +28,7 @@ chat_llm_model = "" # REQUIRED — set to a Bedrock model/inference-profile id, 
 discord_token_ssm_parameter = "/petbot/edge/discord_token"
 edge_power                  = "nano" # 0.25 vCPU / 512 MB; bump to "micro" (1 GB) if it OOMs
 edge_scale                  = 1
-# edge_image is supplied by CI after `aws lightsail push-container-image`.
+# edge_image_tag is supplied by CI (the git SHA) after pushing the edge image to ECR.
 
 # --- Retention / cost (sensible defaults; override to taste) ---
 # log_retention_days       = 30

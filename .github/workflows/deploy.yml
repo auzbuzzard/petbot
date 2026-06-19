@@ -1,10 +1,10 @@
 name: Deploy
 
-# Build + push the core worker Lambda image (arm64) and the edge container image
-# (amd64), then terraform apply — entirely from CI via GitHub OIDC (no static AWS
-# keys). See deploy/terraform/README.md. The one-time trust bootstrap (OIDC
-# provider + deploy role + state bucket + SSM secrets) is run once from AWS
-# CloudShell.
+# Build + push the core worker image (arm64) and the edge image (amd64) to ECR,
+# then terraform apply — entirely from CI via GitHub OIDC (no static AWS keys).
+# The Lightsail edge pulls its image from ECR (private-registry access). See
+# deploy/terraform/README.md. The one-time trust bootstrap (OIDC provider +
+# deploy role + state bucket + SSM secrets) is run once from AWS CloudShell.
 on:
   workflow_dispatch:
   push:
@@ -21,11 +21,18 @@ concurrency:
 
 env:
   TF_DIR: deploy/terraform
+  # Non-secret deploy config, supplied as GitHub Actions Variables and read by
+  # Terraform as TF_VAR_* (secret *values* stay in SSM, referenced by name).
+  TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+  TF_VAR_chat_llm_kind: ${{ vars.CHAT_LLM_KIND }}
+  TF_VAR_chat_llm_model: ${{ vars.CHAT_LLM_MODEL }}
+  TF_VAR_chat_llm_api_key_ssm_parameter: ${{ vars.CHAT_LLM_API_KEY_SSM_PARAMETER }}
 
 jobs:
   deploy:
     # arm64 runner matches the worker Lambda's Graviton architecture, so that
-    # image builds natively; the edge image is built for amd64 via buildx.
+    # image builds natively; the smaller edge image cross-builds for amd64 via
+    # QEMU (cheaper to emulate than the heavy worker image).
     runs-on: ubuntu-24.04-arm
     # Optional manual-approval gate; configure required reviewers on the
     # `production` GitHub Environment to require sign-off before a deploy runs.
@@ -39,7 +46,7 @@ jobs:
           role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      # buildx for the gha layer cache and the amd64 edge build on an arm64 runner.
+      # buildx for the gha layer cache; QEMU for the amd64 edge build on arm.
       - uses: docker/setup-buildx-action@v3
       - uses: docker/setup-qemu-action@v3
 
@@ -60,25 +67,24 @@ jobs:
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
 
-      # The worker function is pinned to the image digest and the edge needs its
-      # Lightsail service to exist before an image can be pushed, so create just
-      # those two containers first (idempotent on re-runs).
-      - name: Ensure ECR repo + edge container service exist
+      # The function is pinned to its image digest, and the edge service must grant
+      # ECR-pull access before the deployment is created — so stand up the two ECR
+      # repos, the Lightsail service, and the edge repo policy first (idempotent).
+      - name: Ensure registries + edge service exist
         working-directory: ${{ env.TF_DIR }}
         run: |
           terraform apply -auto-approve \
             -target=aws_ecr_repository.this \
-            -target=aws_lightsail_container_service.edge
-          # Names derive from var.name_prefix; read them back rather than hardcode.
-          echo "EDGE_SVC=$(terraform output -raw edge_container_service_name)" >> "$GITHUB_ENV"
+            -target=aws_ecr_repository.edge \
+            -target=aws_lightsail_container_service.edge \
+            -target=aws_ecr_repository_policy.edge
+          echo "ECR_REPO=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_ENV"
+          echo "EDGE_ECR_REPO=$(terraform output -raw edge_ecr_repository_url)" >> "$GITHUB_ENV"
 
       - name: ECR login
-        working-directory: ${{ env.TF_DIR }}
         run: |
-          REPO=$(terraform output -raw ecr_repository_url)
-          echo "ECR_REPO=$REPO" >> "$GITHUB_ENV"
           aws ecr get-login-password --region "${{ vars.AWS_REGION }}" \
-            | docker login --username AWS --password-stdin "${REPO%%/*}"
+            | docker login --username AWS --password-stdin "${ECR_REPO%%/*}"
 
       - name: Build & push core worker image (arm64)
         uses: docker/build-push-action@v6
@@ -91,44 +97,27 @@ jobs:
           # provenance=false: buildx otherwise pushes an OCI image *index*, which
           # Lambda rejects; this pushes a single image manifest Lambda accepts.
           provenance: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker
 
-      # The edge image goes to Lightsail's own registry (not ECR). Build amd64
-      # locally, then `lightsail push-container-image` returns a ref like
-      # ":petbot-edge.edge.N" that the deployment is pinned to.
-      - name: Build edge image (amd64)
+      - name: Build & push edge image (amd64)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: deploy/Dockerfile.edge
           platforms: linux/amd64
-          tags: petbot-edge:${{ env.IMAGE_TAG }}
-          load: true
+          tags: ${{ env.EDGE_ECR_REPO }}:${{ env.IMAGE_TAG }}
+          push: true
           provenance: false
-
-      - name: Push edge image to Lightsail
-        run: |
-          OUT=$(aws lightsail push-container-image \
-            --region "${{ vars.AWS_REGION }}" \
-            --service-name "$EDGE_SVC" \
-            --label edge \
-            --image "petbot-edge:${IMAGE_TAG}")
-          echo "$OUT"
-          # The CLI prints: Refer to this image as ":<service>.edge.N" ...
-          REF=$(echo "$OUT" | grep -oE "\":${EDGE_SVC}\.edge\.[0-9]+\"" | tr -d '"' | head -n1)
-          if [ -z "$REF" ]; then
-            echo "::error::could not parse the pushed image ref from lightsail output"
-            exit 1
-          fi
-          echo "EDGE_IMAGE=$REF" >> "$GITHUB_ENV"
+          cache-from: type=gha,scope=edge
+          cache-to: type=gha,mode=max,scope=edge
 
       - name: Terraform apply
         working-directory: ${{ env.TF_DIR }}
         run: |
           terraform apply -auto-approve \
             -var "image_tag=$IMAGE_TAG" \
-            -var "edge_image=$EDGE_IMAGE"
+            -var "edge_image_tag=$IMAGE_TAG"
 
       - name: Show outputs
         working-directory: ${{ env.TF_DIR }}

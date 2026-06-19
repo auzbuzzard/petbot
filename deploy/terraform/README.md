@@ -31,6 +31,12 @@ The edge carries a **scoped IAM user** whose only permission is
 container's environment (Lightsail container services have no IAM instance roles).
 No public, unauthenticated surface exists, so there is no LLM cost-abuse vector.
 
+Both images live in **ECR**. The worker Lambda runs its image directly; the edge
+**pulls** its image from ECR via Lightsail's private-registry access (an
+auto-created "image puller" principal that `edge.tf` grants read on the edge
+repo). One registry, one push mechanism — no `lightsailctl`, no image-ref
+scraping.
+
 ## Prerequisites
 
 - An AWS account with credentials in your shell (e.g. `aws sso login`).
@@ -69,54 +75,60 @@ cp backend.hcl.example backend.hcl   # fill in the bucket name
 
 The bootstrap stack also creates the **GitHub Actions OIDC provider** and the
 **`petbot-github-deploy` IAM role** the CI pipeline assumes (no static AWS keys).
-Wire its outputs as repo **variables** (Settings → Secrets and variables →
-Actions → Variables):
+Set the following repo **Variables** (Settings → Secrets and variables → Actions
+→ Variables — these are non-secret; the actual secret *values* live in SSM,
+referenced here only by parameter name). The deploy reads them as `TF_VAR_*`:
 
-| GitHub Actions variable | Value |
-| --- | --- |
-| `DEPLOY_ROLE_ARN` | `deploy_role_arn` bootstrap output |
-| `AWS_REGION` | e.g. `us-east-1` (match `backend.hcl` / your SSM region) |
-| `TF_STATE_BUCKET` | the `state_bucket` you chose above |
+| GitHub Actions variable | Value | Where it comes from |
+| --- | --- | --- |
+| `DEPLOY_ROLE_ARN` | the deploy role ARN | `terraform -chdir=bootstrap output deploy_role_arn` |
+| `AWS_REGION` | e.g. `us-east-1` | your choice (match `backend.hcl` / SSM region) |
+| `TF_STATE_BUCKET` | the state bucket name | the `state_bucket` you chose above |
+| `CHAT_LLM_KIND` | `bedrock` or `openrouter` | your choice of provider |
+| `CHAT_LLM_MODEL` | the model id | a Bedrock model/inference-profile id, or an OpenRouter model id |
+| `CHAT_LLM_API_KEY_SSM_PARAMETER` | e.g. `/petbot/core/openrouter_api_key` | **only** for `openrouter`; leave unset for `bedrock` |
+
+That's the complete list — once these Variables and the SSM secrets above exist,
+a push to `master` runs a green deploy. (Merging the PR alone does **not** create
+them; this one-time setup is yours to do.)
 
 ## CI deploy (the steady-state path)
 
-`.github/workflows/deploy.yml` does the whole rollout via OIDC: build + push the
-arm64 worker image (ECR) and the amd64 edge image (Lightsail registry), then
-`terraform apply`. A push to `master` (or a manual *Actions → Deploy → Run
-workflow*) ships it. **No deploy is run from a developer machine.**
+`.github/workflows/deploy.yml` does the whole rollout via OIDC: build + push both
+images to ECR (arm64 worker, amd64 edge), then `terraform apply` (the Lightsail
+edge pulls its image from ECR). A push to `master` (or a manual *Actions → Deploy
+→ Run workflow*) ships it. **No deploy is run from a developer machine.**
 
 ## Deploy (manual / break-glass)
 
-Because the worker is pinned to the image digest and the edge image needs its
-Lightsail service to exist first, the first apply is staged:
+Because the function is pinned to its image digest and the edge service must grant
+ECR-pull access before the edge deployment is created, the first apply is staged:
 
 ```sh
 cp terraform.tfvars.example terraform.tfvars   # set region, chat_llm_*, SSM names
 terraform init -backend-config=backend.hcl
 
-# 1. Create the ECR repo + the (empty) Lightsail container service.
-terraform apply -target=aws_ecr_repository.this -target=aws_lightsail_container_service.edge
+# 1. Create both ECR repos, the Lightsail service, and the edge repo policy.
+terraform apply \
+  -target=aws_ecr_repository.this -target=aws_ecr_repository.edge \
+  -target=aws_lightsail_container_service.edge -target=aws_ecr_repository_policy.edge
 
-# 2. Build + push the worker image (arm64) to ECR.
-REPO=$(terraform output -raw ecr_repository_url)
-aws ecr get-login-password | docker login --username AWS --password-stdin "${REPO%/*}"
-docker build --platform linux/arm64 -f ../Dockerfile.lambda -t "$REPO:latest" ../..
-docker push "$REPO:latest"
+# 2. Push both images to ECR (one login covers both repos).
+CORE=$(terraform output -raw ecr_repository_url)
+EDGE=$(terraform output -raw edge_ecr_repository_url)
+aws ecr get-login-password | docker login --username AWS --password-stdin "${CORE%/*}"
+docker build --platform linux/arm64 -f ../Dockerfile.lambda -t "$CORE:latest" ../.. && docker push "$CORE:latest"
+docker build --platform linux/amd64 -f ../Dockerfile.edge   -t "$EDGE:latest" ../.. && docker push "$EDGE:latest"
 
-# 3. Build + push the edge image (amd64) to Lightsail; note the returned ref.
-docker build --platform linux/amd64 -f ../Dockerfile.edge -t petbot-edge:latest ../..
-aws lightsail push-container-image --service-name petbot-edge --label edge --image petbot-edge:latest
-#   -> "Refer to this image as ":petbot-edge.edge.1" ..."
-
-# 4. Stand up the worker + edge deployment.
-terraform apply -var 'edge_image=:petbot-edge.edge.1'
+# 3. Stand up the worker + edge deployment (the edge pulls its image from ECR).
+terraform apply -var 'image_tag=latest' -var 'edge_image_tag=latest'
 
 terraform output core_function_arn          # the edge's WORKER__FUNCTION_NAME target
 terraform output edge_container_service_name
 ```
 
 For subsequent deploys, push new images (prefer a unique tag, e.g. the git SHA)
-and re-`apply` with the new `image_tag` / `edge_image`.
+and re-`apply` with the new `image_tag` / `edge_image_tag`.
 
 ## Migrating from the old interactions stack (one-time)
 
@@ -132,7 +144,7 @@ role in the console). Nothing imports from the old state.
 - **Edge:** Lightsail `nano` ~$7/mo flat (public IPv4 + 500 GB transfer bundled).
 - **Worker:** Lambda — ~$0 at this scale (scale-to-zero); chat inference is the
   only real variable (cents–low-$/mo).
-- **ECR lifecycle** (`retention.tf`) expires old/untagged worker images.
+- **ECR lifecycle** (`retention.tf`) expires old/untagged images in both repos.
 - **CloudWatch Logs** retain `log_retention_days`; the group is owned here so
   `terraform destroy` removes it.
 - **Cost alerts** are opt-in: set `monthly_budget_usd` + `budget_alert_emails`.
