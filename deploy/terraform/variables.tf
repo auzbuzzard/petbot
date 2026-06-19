@@ -15,8 +15,8 @@ variable "aws_region" {
 
 variable "name_prefix" {
   type        = string
-  description = "Name applied to the Lambda, ECR repo, and IAM role."
-  default     = "petbot-interactions"
+  description = "Base name for the stack; resources derive <name_prefix>-core / -edge (see locals.tf)."
+  default     = "petbot"
 }
 
 variable "image_tag" {
@@ -55,18 +55,41 @@ variable "memory_size" {
 
 variable "timeout" {
   type        = number
-  description = "Lambda timeout (seconds). The handler caps skills well under Discord's 3s."
-  default     = 10
+  description = <<-EOT
+    Lambda timeout (seconds). The edge invokes the worker synchronously and the
+    chat agent runs an LLM tool-loop, so this is generous — not the old 3s
+    Discord-interaction bound (the edge holds the gateway, not this function).
+  EOT
+  default     = 60
 }
 
-variable "public_key_ssm_parameter" {
+# --- Chat LLM (the worker's agent) --------------------------------------------
+
+variable "chat_llm_kind" {
   type        = string
-  description = <<-EOT
-    Name of the SSM SecureString parameter holding DISCORD_PUBLIC_KEY. Created
-    out-of-band (see README) so its value is never committed; Terraform reads it
-    to populate the Lambda's environment.
-  EOT
-  default     = "/petbot/interactions/discord_public_key"
+  description = "Chat provider discriminator: \"bedrock\" (IAM-auth) or \"openrouter\" (API key)."
+  default     = "bedrock"
+
+  validation {
+    condition     = contains(["bedrock", "openrouter"], var.chat_llm_kind)
+    error_message = "chat_llm_kind must be \"bedrock\" or \"openrouter\"."
+  }
+}
+
+variable "chat_llm_model" {
+  type        = string
+  description = "Model id for the chosen provider (e.g. a Bedrock model/inference-profile id, or an OpenRouter model)."
+
+  validation {
+    condition     = trimspace(var.chat_llm_model) != ""
+    error_message = "chat_llm_model must be set to the chosen provider's model id."
+  }
+}
+
+variable "chat_llm_api_key_ssm_parameter" {
+  type        = string
+  description = "SSM SecureString holding the OpenRouter API key. Required only when chat_llm_kind=openrouter; ignored for bedrock."
+  default     = ""
 }
 
 variable "booru_ssm_parameters" {
@@ -109,4 +132,35 @@ variable "budget_alert_emails" {
   type        = list(string)
   description = "Emails notified at 80% and 100% of monthly_budget_usd; required to enable the budget."
   default     = []
+}
+
+# --- Edge (Lightsail container service) ---------------------------------------
+
+variable "discord_token_ssm_parameter" {
+  type        = string
+  description = "SSM SecureString holding the edge's Discord bot token; injected into the container's environment."
+  default     = "/petbot/edge/discord_token"
+}
+
+variable "edge_power" {
+  type        = string
+  description = "Lightsail container service power. nano (0.25 vCPU/512MB) fits the edge; bump to micro if it OOMs."
+  default     = "nano"
+}
+
+variable "edge_scale" {
+  type        = number
+  description = "Number of container nodes (replicas). 1 always-on holder."
+  default     = 1
+}
+
+variable "edge_image" {
+  type        = string
+  description = <<-EOT
+    Image ref for the edge container, as returned by `aws lightsail
+    push-container-image` (e.g. ":petbot-edge.edge.1"). CI pushes the image and
+    passes this in; empty leaves the service with no deployment (apply the
+    service first, then push + set this — see README).
+  EOT
+  default     = ""
 }
