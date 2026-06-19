@@ -40,8 +40,8 @@ variable "github_repo" {
 
 variable "name_prefix" {
   type        = string
-  description = "Must match var.name_prefix in the root stack; used to scope the deploy role's permissions to exactly that stack's resources."
-  default     = "petbot-interactions"
+  description = "Must match var.name_prefix in the root stack; used to scope the deploy role's permissions to exactly that stack's resources (<name_prefix>-core / -edge)."
+  default     = "petbot"
 }
 
 resource "aws_s3_bucket" "state" {
@@ -125,14 +125,17 @@ resource "aws_iam_role" "github_deploy" {
 
 locals {
   account_id = data.aws_caller_identity.current.account_id
+  core_name  = "${var.name_prefix}-core"
+  edge_name  = "${var.name_prefix}-edge"
 
   # Every resource the deploy role may touch is one of the named stack resources
   # below; scoping to these ARNs means a stolen CI token can't reach anything
   # else in the account.
-  lambda_arn    = "arn:aws:lambda:${var.aws_region}:${local.account_id}:function:${var.name_prefix}"
-  ecr_repo_arn  = "arn:aws:ecr:${var.aws_region}:${local.account_id}:repository/${var.name_prefix}"
-  log_group_arn = "arn:aws:logs:${var.aws_region}:${local.account_id}:log-group:/aws/lambda/${var.name_prefix}"
-  exec_role_arn = "arn:aws:iam::${local.account_id}:role/${var.name_prefix}-role"
+  lambda_arn    = "arn:aws:lambda:${var.aws_region}:${local.account_id}:function:${local.core_name}"
+  ecr_repo_arn  = "arn:aws:ecr:${var.aws_region}:${local.account_id}:repository/${local.core_name}"
+  log_group_arn = "arn:aws:logs:${var.aws_region}:${local.account_id}:log-group:/aws/lambda/${local.core_name}"
+  exec_role_arn = "arn:aws:iam::${local.account_id}:role/${local.core_name}-role"
+  edge_user_arn = "arn:aws:iam::${local.account_id}:user/${local.edge_name}"
 }
 
 # Least-privilege permissions for the deploy workflow. Service-level action
@@ -149,7 +152,7 @@ data "aws_iam_policy_document" "deploy_permissions" {
   statement {
     sid       = "ReadRuntimeSecrets"
     actions   = ["ssm:GetParameter", "ssm:GetParameters"]
-    resources = ["arn:aws:ssm:${var.aws_region}:${local.account_id}:parameter/petbot/interactions/*"]
+    resources = ["arn:aws:ssm:${var.aws_region}:${local.account_id}:parameter/petbot/*"]
   }
 
   # SecureString parameters are KMS-encrypted; reading them with decryption needs
@@ -239,6 +242,38 @@ data "aws_iam_policy_document" "deploy_permissions" {
       variable = "iam:PassedToService"
       values   = ["lambda.amazonaws.com"]
     }
+  }
+
+  # The edge runs on Lightsail's container service. Lightsail resources are
+  # identified by random-GUID ARNs, so there is no name-based ARN to scope to —
+  # the same reason ecr:* / lambda:* above are kept as service-level wildcards.
+  # The blast radius is the account's Lightsail, which holds only this edge.
+  statement {
+    sid       = "ManageEdgeContainerService"
+    actions   = ["lightsail:*"]
+    resources = ["*"]
+  }
+
+  # Create/manage only the scoped edge IAM user + its access key and inline policy
+  # (the edge's identity for invoking the worker Lambda — see edge.tf).
+  statement {
+    sid = "ManageEdgeUser"
+    actions = [
+      "iam:GetUser",
+      "iam:CreateUser",
+      "iam:DeleteUser",
+      "iam:TagUser",
+      "iam:UntagUser",
+      "iam:CreateAccessKey",
+      "iam:DeleteAccessKey",
+      "iam:ListAccessKeys",
+      "iam:GetUserPolicy",
+      "iam:PutUserPolicy",
+      "iam:DeleteUserPolicy",
+      "iam:ListUserPolicies",
+      "iam:ListAttachedUserPolicies",
+    ]
+    resources = [local.edge_user_arn]
   }
 }
 

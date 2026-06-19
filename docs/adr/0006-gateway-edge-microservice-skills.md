@@ -187,6 +187,45 @@ delete `interactions` → deploy bundles → LLM agent.
   #31 (gateway mode, Message Content on, no endpoint URL), #33 (music worker
   retained), #35 (dispatch-deferred), #30/#42/#38 (Lambda → compute tier).
 
+## Amendment (2026-06-18): edge host = Lightsail Container Service; cost-exit contingency
+
+§3 named "a small always-on box (Lightsail $5 instance)" as the holder. Refining
+that for the actual deploy:
+
+- **Holder = AWS Lightsail *Container Service* (`nano`), not a Lightsail
+  *instance*.** Same Lightsail cost class (~$7/mo flat, public IPv4 + data
+  bundled) but the **container service** is an immutable push-an-image target with
+  no box to patch and auto-restart on crash — the "dumb like a Lambda" property we
+  want. (A Lightsail instance is a pet VM: SSH, OS patching, manual restart.)
+  Measured edge footprint ≈ 76 MB RSS (discord.py + httpx + boto3), so `nano`
+  (512 MB) is ample; `micro` is the fallback.
+- **Edge → worker transport = boto3 `invoke` + IAM** (private; no public Function
+  URL, so no unauthenticated LLM-cost surface). Lightsail container services have
+  no IAM instance role, so the edge carries a **scoped IAM user** (`petbot-edge`,
+  `lambda:InvokeFunction` on the core worker only); its key is injected as env and
+  consumed by boto3's default credential chain (zero app code).
+- **Worker brain stays AWS Lambda** (arm64 image), with Bedrock access via the
+  exec role (or OpenRouter via an env key).
+
+**Cost-exit contingency (keep this open; no app change required).** The edge is a
+12-factor, outbound-only container; its sole external dependency is invoking one
+Lambda via boto3's default credential chain. So moving it is a provisioning swap,
+not a rewrite. If cost or control later warrant it:
+
+- The compute can move to a homelab Kubernetes cluster or a cheaper VPS, while
+  **AWS stays the public identity Discord sees** (the gateway is outbound, so the
+  edge's Discord traffic egresses through a small AWS node — Elastic IP +
+  WireGuard/forward-proxy — exactly this ADR's "homelab behind WireGuard; Discord
+  only ever sees the AWS holder's IP"). Only the Discord connection traverses AWS;
+  the worker-invoke and AWS-API calls go direct.
+- Keeping it **AWS-managed via hybrid** is possible: **IAM Roles Anywhere**
+  (X.509, no static key) gives an on-prem pod a real IAM role; **SSM hybrid
+  activations** register the box as an AWS-managed node. EKS Hybrid Nodes / ECS
+  Anywhere exist but are cost-disproportionate at this scale.
+- Guardrails preserved to keep the option free: env-only config, boto3 **default
+  credential chain** (env key today → instance/Roles-Anywhere role later, zero
+  code), and a registry-neutral OCI edge image.
+
 ## References
 
 - Builds on / supersedes: ADR 0005 (serverless deployment), ADR 0002 (deferred

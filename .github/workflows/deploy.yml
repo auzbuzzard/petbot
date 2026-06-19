@@ -1,18 +1,12 @@
 name: Deploy
 
-# Build + push the arm64 Lambda image, terraform apply, and register the slash
-# commands — entirely from CI via GitHub OIDC (no static AWS keys). See issue #42
-# and deploy/terraform/README.md. The one-time trust bootstrap (OIDC provider +
-# deploy role + state bucket + SSM secrets) is run once from AWS CloudShell.
+# Build + push the core worker Lambda image (arm64) and the edge container image
+# (amd64), then terraform apply — entirely from CI via GitHub OIDC (no static AWS
+# keys). See deploy/terraform/README.md. The one-time trust bootstrap (OIDC
+# provider + deploy role + state bucket + SSM secrets) is run once from AWS
+# CloudShell.
 on:
-  # Manual run: lets you target a single guild for instant, guild-scoped command
-  # registration (the dev-guild rollout) before going global.
   workflow_dispatch:
-    inputs:
-      guild_id:
-        description: "Guild ID for instant guild-scoped command registration (blank = global)."
-        required: false
-        default: ""
   push:
     branches: [master]
 
@@ -30,8 +24,8 @@ env:
 
 jobs:
   deploy:
-    # arm64 runner matches the Lambda's Graviton architecture, so the image
-    # builds natively without QEMU emulation.
+    # arm64 runner matches the worker Lambda's Graviton architecture, so that
+    # image builds natively; the edge image is built for amd64 via buildx.
     runs-on: ubuntu-24.04-arm
     # Optional manual-approval gate; configure required reviewers on the
     # `production` GitHub Environment to require sign-off before a deploy runs.
@@ -45,9 +39,9 @@ jobs:
           role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      # buildx for the build-push step's gha layer cache; no QEMU needed on an
-      # arm64 runner building an arm64 image.
+      # buildx for the gha layer cache and the amd64 edge build on an arm64 runner.
       - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@v3
 
       - uses: hashicorp/setup-terraform@v3
         with:
@@ -61,16 +55,22 @@ jobs:
         run: |
           terraform init \
             -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
-            -backend-config="key=interactions/terraform.tfstate" \
+            -backend-config="key=petbot/terraform.tfstate" \
             -backend-config="region=${{ vars.AWS_REGION }}" \
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
 
-      # The function is pinned to the image digest, so the image must exist before
-      # the full apply. Create just the ECR repo first (idempotent on re-runs).
-      - name: Ensure ECR repository exists
+      # The worker function is pinned to the image digest and the edge needs its
+      # Lightsail service to exist before an image can be pushed, so create just
+      # those two containers first (idempotent on re-runs).
+      - name: Ensure ECR repo + edge container service exist
         working-directory: ${{ env.TF_DIR }}
-        run: terraform apply -auto-approve -target=aws_ecr_repository.this
+        run: |
+          terraform apply -auto-approve \
+            -target=aws_ecr_repository.this \
+            -target=aws_lightsail_container_service.edge
+          # Names derive from var.name_prefix; read them back rather than hardcode.
+          echo "EDGE_SVC=$(terraform output -raw edge_container_service_name)" >> "$GITHUB_ENV"
 
       - name: ECR login
         working-directory: ${{ env.TF_DIR }}
@@ -80,49 +80,58 @@ jobs:
           aws ecr get-login-password --region "${{ vars.AWS_REGION }}" \
             | docker login --username AWS --password-stdin "${REPO%%/*}"
 
-      - name: Build & push arm64 image
+      - name: Build & push core worker image (arm64)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: deploy/Dockerfile.lambda
+          platforms: linux/arm64
           tags: ${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
           push: true
-          # provenance=false: buildx otherwise attaches a provenance attestation
-          # and pushes an OCI image *index*, which Lambda rejects ("image
-          # manifest ... media type ... is not supported"). This pushes a single
-          # image manifest Lambda accepts.
+          # provenance=false: buildx otherwise pushes an OCI image *index*, which
+          # Lambda rejects; this pushes a single image manifest Lambda accepts.
           provenance: false
-          # Reuse layers across runs: when pyproject/deps are unchanged the
-          # install layer is restored instead of rebuilt.
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # The edge image goes to Lightsail's own registry (not ECR). Build amd64
+      # locally, then `lightsail push-container-image` returns a ref like
+      # ":petbot-edge.edge.N" that the deployment is pinned to.
+      - name: Build edge image (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.edge
+          platforms: linux/amd64
+          tags: petbot-edge:${{ env.IMAGE_TAG }}
+          load: true
+          provenance: false
+
+      - name: Push edge image to Lightsail
+        run: |
+          OUT=$(aws lightsail push-container-image \
+            --region "${{ vars.AWS_REGION }}" \
+            --service-name "$EDGE_SVC" \
+            --label edge \
+            --image "petbot-edge:${IMAGE_TAG}")
+          echo "$OUT"
+          # The CLI prints: Refer to this image as ":<service>.edge.N" ...
+          REF=$(echo "$OUT" | grep -oE "\":${EDGE_SVC}\.edge\.[0-9]+\"" | tr -d '"' | head -n1)
+          if [ -z "$REF" ]; then
+            echo "::error::could not parse the pushed image ref from lightsail output"
+            exit 1
+          fi
+          echo "EDGE_IMAGE=$REF" >> "$GITHUB_ENV"
+
       - name: Terraform apply
         working-directory: ${{ env.TF_DIR }}
-        run: terraform apply -auto-approve -var "image_tag=$IMAGE_TAG"
-
-      - name: Show Function URL
-        working-directory: ${{ env.TF_DIR }}
-        run: terraform output -raw function_url
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-        with:
-          enable-cache: true
-
-      # Register the slash commands. The bot token is read from SSM at run time
-      # (never stored in GitHub) and lives only in this step's environment.
-      - name: Register slash commands
-        env:
-          DISCORD_APP_ID: ${{ vars.DISCORD_APP_ID }}
-          DISCORD_GUILD_ID: ${{ github.event.inputs.guild_id }}
         run: |
-          TOKEN="$(aws ssm get-parameter \
-            --name /petbot/interactions/discord_bot_token \
-            --with-decryption --query Parameter.Value --output text)"
-          # Mask it in the Actions log: if anything ever echoes it, it shows as ***.
-          echo "::add-mask::$TOKEN"
-          # The [interactions] extra brings pynacl, which register's import chain
-          # (app -> handler -> verify) needs.
-          DISCORD_BOT_TOKEN="$TOKEN" uv run --extra interactions --python 3.12 \
-            python -m petbot.frontends.interactions.register
+          terraform apply -auto-approve \
+            -var "image_tag=$IMAGE_TAG" \
+            -var "edge_image=$EDGE_IMAGE"
+
+      - name: Show outputs
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform output -raw core_function_arn; echo
+          terraform output -raw edge_container_service_name; echo
