@@ -2,10 +2,10 @@
 # forever. Managing the log group here also means `terraform destroy` removes it
 # (otherwise Lambda auto-creates a never-expiring group that TF wouldn't own).
 
-resource "aws_ecr_lifecycle_policy" "this" {
-  repository = aws_ecr_repository.this.name
-
-  policy = jsonencode({
+locals {
+  # Shared lifecycle for both ECR repos (worker + edge): expire untagged images,
+  # and keep only the most recent tagged ones.
+  ecr_lifecycle_policy = jsonencode({
     rules = [
       {
         rulePriority = 1
@@ -30,6 +30,16 @@ resource "aws_ecr_lifecycle_policy" "this" {
       },
     ]
   })
+}
+
+resource "aws_ecr_lifecycle_policy" "this" {
+  repository = aws_ecr_repository.this.name
+  policy     = local.ecr_lifecycle_policy
+}
+
+resource "aws_ecr_lifecycle_policy" "edge" {
+  repository = aws_ecr_repository.edge.name
+  policy     = local.ecr_lifecycle_policy
 }
 
 resource "aws_cloudwatch_log_group" "lambda" {

@@ -154,13 +154,12 @@ variable "edge_scale" {
   default     = 1
 }
 
-variable "edge_image" {
+variable "edge_image_tag" {
   type        = string
   description = <<-EOT
-    Image ref for the edge container, as returned by `aws lightsail
-    push-container-image` (e.g. ":petbot-edge.edge.1"). CI pushes the image and
-    passes this in; empty leaves the service with no deployment (apply the
-    service first, then push + set this — see README).
+    Tag of the edge image in its ECR repo (CI sets this to the git SHA). The
+    Lightsail service pulls `<edge-ecr-repo>:<tag>`. Empty leaves the service
+    with no deployment (apply the service first, then push + set this).
   EOT
   default     = ""
 }

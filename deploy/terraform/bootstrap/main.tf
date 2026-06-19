@@ -131,11 +131,12 @@ locals {
   # Every resource the deploy role may touch is one of the named stack resources
   # below; scoping to these ARNs means a stolen CI token can't reach anything
   # else in the account.
-  lambda_arn    = "arn:aws:lambda:${var.aws_region}:${local.account_id}:function:${local.core_name}"
-  ecr_repo_arn  = "arn:aws:ecr:${var.aws_region}:${local.account_id}:repository/${local.core_name}"
-  log_group_arn = "arn:aws:logs:${var.aws_region}:${local.account_id}:log-group:/aws/lambda/${local.core_name}"
-  exec_role_arn = "arn:aws:iam::${local.account_id}:role/${local.core_name}-role"
-  edge_user_arn = "arn:aws:iam::${local.account_id}:user/${local.edge_name}"
+  lambda_arn        = "arn:aws:lambda:${var.aws_region}:${local.account_id}:function:${local.core_name}"
+  ecr_repo_arn      = "arn:aws:ecr:${var.aws_region}:${local.account_id}:repository/${local.core_name}"
+  edge_ecr_repo_arn = "arn:aws:ecr:${var.aws_region}:${local.account_id}:repository/${local.edge_name}"
+  log_group_arn     = "arn:aws:logs:${var.aws_region}:${local.account_id}:log-group:/aws/lambda/${local.core_name}"
+  exec_role_arn     = "arn:aws:iam::${local.account_id}:role/${local.core_name}-role"
+  edge_user_arn     = "arn:aws:iam::${local.account_id}:user/${local.edge_name}"
 }
 
 # Least-privilege permissions for the deploy workflow. Service-level action
@@ -176,10 +177,12 @@ data "aws_iam_policy_document" "deploy_permissions" {
     resources = ["*"]
   }
 
+  # Manage both ECR repos (worker + edge), including their lifecycle and the
+  # edge repo's policy (set so the Lightsail puller principal can read it).
   statement {
-    sid       = "ManageEcrRepo"
+    sid       = "ManageEcrRepos"
     actions   = ["ecr:*"]
-    resources = [local.ecr_repo_arn]
+    resources = [local.ecr_repo_arn, local.edge_ecr_repo_arn]
   }
 
   statement {
