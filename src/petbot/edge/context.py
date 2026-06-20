@@ -12,9 +12,12 @@ import discord
 from petbot.domain import Platform, SkillContext, User
 
 
-def _channel_is_nsfw(channel: object) -> bool:
-    """True if ``channel`` is an age-gated Discord channel. Typed ``object`` so it
-    serves both a message channel and an interaction channel (DMs lack the flag)."""
+def _channel_is_nsfw(
+    channel: discord.abc.MessageableChannel | discord.abc.GuildChannel | None,
+) -> bool:
+    """True if ``channel`` is an age-gated Discord channel. The union covers a
+    message's channel and a slash interaction's channel alike; ``is_nsfw`` is read
+    defensively because some channel kinds (a DM) don't carry the flag."""
     is_nsfw = getattr(channel, "is_nsfw", None)
     return bool(is_nsfw()) if callable(is_nsfw) else False
 
