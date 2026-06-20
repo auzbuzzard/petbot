@@ -15,7 +15,8 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Awaitable
-from typing import assert_never
+from inspect import Parameter, Signature
+from typing import Any, assert_never
 
 import discord
 import httpx
@@ -28,7 +29,7 @@ from petbot.edge.render import respond, respond_interaction
 from petbot.edge.settings import EdgeSettings, HttpWorker, LambdaWorker
 from petbot.logging_setup import configure_logging
 from petbot.platform import HttpTransport, LambdaTransport, SkillsClient
-from petbot.types import BooruArgs, ChatArgs, MathArgs, Skills
+from petbot.types import COMMANDS, ChatArgs, CommandSpec, Skills
 
 logger = logging.getLogger(__name__)
 
@@ -78,28 +79,43 @@ class PetBot(commands.Bot):
         return self.skills
 
     def _register_slash_commands(self) -> None:
-        """One slash command per dispatched skill, defined from the typed ``*Args``
-        surface and the ``Skills`` client — so the edge still never imports a skill."""
+        """One slash command per manifest entry, its options generated from the
+        skill's ``args_model`` — so the edge hand-lists neither skills nor args."""
+        for spec in COMMANDS:
+            self.tree.add_command(self._build_command(spec))
 
-        @self.tree.command(name="math", description="Evaluate an arithmetic expression.")
-        @app_commands.describe(expression="e.g. 2 + 2 * 10")
-        async def math(interaction: discord.Interaction, expression: str) -> None:
+    def _build_command(self, spec: CommandSpec) -> app_commands.Command[Any, ..., None]:
+        """Turn a manifest entry into a slash command: one option per ``args_model``
+        field (its name, type, and required/optional read straight off the model),
+        dispatched through the Skills client by the shared :meth:`_run_slash`."""
+
+        async def callback(interaction: discord.Interaction, **values: Any) -> None:
+            args = spec.args_model(**values)
             ctx = build_interaction_context(interaction)
-            await self._run_slash(
-                interaction, self._client.math(MathArgs(expression=expression), ctx)
+            await self._run_slash(interaction, spec.invoke(self._client, args, ctx))
+
+        params = [
+            Parameter(
+                "interaction", Parameter.POSITIONAL_OR_KEYWORD, annotation=discord.Interaction
             )
-
-        @self.tree.command(name="derpi", description="Search Derpibooru for an image.")
-        @app_commands.describe(tags="Space-separated tags")
-        async def derpi(interaction: discord.Interaction, tags: str) -> None:
-            ctx = build_interaction_context(interaction)
-            await self._run_slash(interaction, self._client.derpi(BooruArgs(tags=tags), ctx))
-
-        @self.tree.command(name="e621", description="Search e621 (furry imageboard) for an image.")
-        @app_commands.describe(tags="Space-separated tags")
-        async def e621(interaction: discord.Interaction, tags: str) -> None:
-            ctx = build_interaction_context(interaction)
-            await self._run_slash(interaction, self._client.e621(BooruArgs(tags=tags), ctx))
+        ]
+        for name, field_info in spec.args_model.model_fields.items():
+            default = Parameter.empty if field_info.is_required() else field_info.default
+            params.append(
+                Parameter(
+                    name,
+                    Parameter.POSITIONAL_OR_KEYWORD,
+                    annotation=field_info.annotation,
+                    default=default,
+                )
+            )
+        # discord.py reads the callback's signature to build the options; the real
+        # callback takes **values, so attach the schema-bearing signature explicitly.
+        callback.__signature__ = Signature(params)  # type: ignore[attr-defined]
+        callback.__discord_app_commands_param_description__ = {  # type: ignore[attr-defined]
+            name: name.replace("_", " ") for name in spec.args_model.model_fields
+        }
+        return app_commands.Command(name=spec.name, description=spec.description, callback=callback)
 
     async def _sync_commands(self) -> None:
         """Register the app commands with Discord. ``dev_guild_id`` syncs to that
