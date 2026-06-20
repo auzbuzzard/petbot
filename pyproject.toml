@@ -22,12 +22,12 @@ dependencies = [
 edge = [
     "discord.py>=2.7,<2.8",
     "httpx>=0.27",
-    "pydantic-settings>=2",
+    "pydantic-settings>=2.14.2",
 ]
 # The core worker: math + booru search + the chat agent.
 worker-core = [
     "httpx>=0.27",
-    "pydantic-settings>=2",
+    "pydantic-settings>=2.14.2",
     "numexpr>=2.8",
     "numpy>=1.26",
     "pydantic-ai-slim[bedrock,openai]>=0.0.30",
@@ -36,7 +36,7 @@ worker-core = [
 worker-music = [
     "discord.py[voice]>=2.7,<2.8",
     "yt-dlp>=2024.0.0",
-    "pydantic-settings>=2",
+    "pydantic-settings>=2.14.2",
 ]
 # Dispatch to a Lambda worker (boto3) — used by the edge in production.
 lambda = ["boto3>=1.34"]
