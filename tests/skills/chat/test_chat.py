@@ -9,7 +9,8 @@ from pydantic_ai.models.test import TestModel
 
 from petbot.domain import EmbedSpec, Platform, SkillContext, SkillResult, User
 from petbot.skills.chat import ChatSkill
-from petbot.skills.chat.settings import ChatSettings, OpenRouterModel
+from petbot.skills.chat.model import build_model
+from petbot.skills.chat.settings import ChatSettings, OpenAICompatibleModel, OpenRouterModel
 from petbot.types import BooruArgs, ChatArgs, MathArgs, MusicArgs
 
 
@@ -25,6 +26,28 @@ def test_openrouter_variant_requires_api_key() -> None:
     # The OpenRouter variant has api_key as a required field — no conditional None.
     with pytest.raises(ValidationError):
         OpenRouterModel(model="x")  # type: ignore[call-arg]  # missing api_key is the point
+
+
+def test_openai_compatible_variant_requires_base_url_and_key() -> None:
+    # base_url + api_key are required fields of this variant (no conditional None).
+    with pytest.raises(ValidationError):
+        OpenAICompatibleModel(model="x")  # type: ignore[call-arg]
+
+
+def test_openai_compatible_builds_an_openai_model() -> None:
+    # The Bedrock-mantle / Ollama path: build_model wires an OpenAI-compatible
+    # client to the given base URL. Construction is offline (no network).
+    from pydantic_ai.models.openai import OpenAIChatModel
+
+    settings = ChatSettings(
+        llm=OpenAICompatibleModel(
+            model="google.gemma-4-26b-a4b",
+            base_url="https://bedrock-mantle.us-east-1.api.aws/openai/v1",
+            api_key="test-key",
+        ),
+        _env_file=None,
+    )
+    assert isinstance(build_model(settings), OpenAIChatModel)
 
 
 class FakeSkills:

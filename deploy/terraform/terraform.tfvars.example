@@ -11,11 +11,16 @@ lambda_environment = "prod"
 log_level          = "INFO"
 
 # --- Chat LLM (the core worker's agent) ---
-# bedrock authenticates via the exec role's IAM (no secret); openrouter needs a key.
-chat_llm_kind  = "bedrock"
-chat_llm_model = "" # REQUIRED — set to a Bedrock model/inference-profile id, or an OpenRouter model id
-# Only for openrouter: SSM SecureString holding the API key.
-# chat_llm_api_key_ssm_parameter = "/petbot/core/openrouter_api_key"
+# bedrock: Converse API + IAM (no key), e.g. Nova / Claude.
+# openai_compatible: any OpenAI-compatible endpoint + key — incl. Bedrock's
+#   Gemma 4 "mantle" endpoint, or a self-hosted Ollama/vLLM.
+# openrouter: OpenRouter + key.
+chat_llm_kind  = "openai_compatible"
+chat_llm_model = "" # REQUIRED — e.g. google.gemma-4-26b-a4b
+# Required for openai_compatible (the endpoint URL):
+# chat_llm_base_url = "https://bedrock-mantle.us-east-1.api.aws/openai/v1"
+# Required for openai_compatible + openrouter (SSM SecureString holding the key):
+# chat_llm_api_key_ssm_parameter = "/petbot/core/bedrock_api_key"
 
 # Optional booru auth: ENV-VAR-NAME => SSM-parameter-name.
 # booru_ssm_parameters = {

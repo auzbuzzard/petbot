@@ -84,6 +84,12 @@ is consolidated** until scale justifies splitting:
   native tool calling, in-boundary for privacy, ~cents–low-$/mo at this scale.
   **OpenRouter (free Gemma 4)** is the dev/low-volume adapter. The model is the
   same across both, so the provider is a config flip.
+- Implementation note (2026-06): on Bedrock, **Gemma 4 is served only via the
+  OpenAI-compatible `bedrock-mantle` endpoint** (`https://bedrock-mantle.<region>.api.aws/openai/v1`,
+  Bedrock API key), *not* the Converse API. So the config has three `CHAT_LLM__KIND`
+  variants: `bedrock` (Converse + IAM: Nova/Claude), `openai_compatible` (base URL
+  + key: Gemma 4 mantle today, a self-hosted Ollama/vLLM later), and `openrouter`.
+  Gemma 4 prod uses `openai_compatible`.
 
 ### 5. Repository structure — uv workspace, hexagonal
 

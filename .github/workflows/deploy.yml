@@ -26,6 +26,7 @@ env:
   TF_VAR_aws_region: ${{ vars.AWS_REGION }}
   TF_VAR_chat_llm_kind: ${{ vars.CHAT_LLM_KIND }}
   TF_VAR_chat_llm_model: ${{ vars.CHAT_LLM_MODEL }}
+  TF_VAR_chat_llm_base_url: ${{ vars.CHAT_LLM_BASE_URL }}
   TF_VAR_chat_llm_api_key_ssm_parameter: ${{ vars.CHAT_LLM_API_KEY_SSM_PARAMETER }}
 
 jobs:

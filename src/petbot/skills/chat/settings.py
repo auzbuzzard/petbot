@@ -38,8 +38,25 @@ class OpenRouterModel(BaseModel):
     api_key: str
 
 
+class OpenAICompatibleModel(BaseModel):
+    """Any OpenAI-compatible chat endpoint, reached by base URL + API key.
+
+    Covers AWS Bedrock's OpenAI-compatible ``bedrock-mantle`` endpoint (how Gemma 4
+    is served — ``base_url=https://bedrock-mantle.<region>.api.aws/openai/v1``,
+    ``api_key`` = a Bedrock API key), and equally a self-hosted Ollama/vLLM. The
+    provider is just a URL + key, so new backends are config, not code.
+    """
+
+    kind: Literal["openai_compatible"] = "openai_compatible"
+    model: str
+    base_url: str
+    api_key: str
+
+
 #: Exactly one provider config, with only its own fields. Tagged by ``kind``.
-LLMConfig = Annotated[BedrockModel | OpenRouterModel, Field(discriminator="kind")]
+LLMConfig = Annotated[
+    BedrockModel | OpenRouterModel | OpenAICompatibleModel, Field(discriminator="kind")
+]
 
 
 class ChatSettings(BaseSettings):
