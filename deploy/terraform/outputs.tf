@@ -14,11 +14,20 @@ output "ecr_repository_url" {
 }
 
 output "edge_ecr_repository_url" {
-  description = "Push the edge image here; the Lightsail service pulls it from this repo."
+  description = "Push the edge image here; the host (Lightsail or Fargate) pulls it from this repo."
   value       = aws_ecr_repository.edge.repository_url
 }
 
-output "edge_container_service_name" {
-  description = "Lightsail container service hosting the edge."
-  value       = aws_lightsail_container_service.edge.name
+output "edge_host" {
+  description = "Where the edge runs: lightsail or fargate."
+  value       = var.edge_host
+}
+
+output "edge_service_name" {
+  description = "Name of the edge service on whichever host is active (empty until an image is deployed)."
+  value = (
+    var.edge_host == "lightsail"
+    ? try(aws_lightsail_container_service.edge[0].name, "")
+    : try(aws_ecs_service.edge[0].name, "")
+  )
 }
