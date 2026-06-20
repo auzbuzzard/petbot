@@ -53,7 +53,10 @@ def build_agent(system_prompt: str) -> Agent[ChatDeps, str]:
     agent: Agent[ChatDeps, str] = Agent(
         deps_type=ChatDeps,
         output_type=str,
-        system_prompt=system_prompt,
+        # pydantic-ai 'instructions' (not 'system_prompt'): for a single agent it is
+        # excluded from message history, and static instructions sort first so a
+        # caching provider (Bedrock) can cache the stable prefix.
+        instructions=system_prompt,
     )
 
     @agent.tool

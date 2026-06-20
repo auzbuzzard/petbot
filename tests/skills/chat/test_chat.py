@@ -50,6 +50,28 @@ def test_openai_compatible_builds_an_openai_model() -> None:
     assert isinstance(build_model(settings), OpenAIChatModel)
 
 
+def test_system_prompt_loads_from_package_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The default persona ships as prompts/system.md (package data), not an inline
+    # constant: loaded by default, with the no-result relay rule baked into the file.
+    monkeypatch.delenv("CHAT_SYSTEM_PROMPT", raising=False)
+    settings = ChatSettings(
+        llm=OpenAICompatibleModel(model="m", base_url="https://x/v1", api_key="k"),
+        _env_file=None,
+    )
+    assert "PetBot" in settings.system_prompt
+    assert "age-gated" in settings.system_prompt
+
+
+def test_system_prompt_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    # CHAT_SYSTEM_PROMPT still wins over the shipped default.
+    monkeypatch.setenv("CHAT_SYSTEM_PROMPT", "Be terse.")
+    settings = ChatSettings(
+        llm=OpenAICompatibleModel(model="m", base_url="https://x/v1", api_key="k"),
+        _env_file=None,
+    )
+    assert settings.system_prompt == "Be terse."
+
+
 class FakeSkills:
     """Records the sibling calls the agent's tools make; returns canned results."""
 

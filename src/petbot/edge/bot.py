@@ -28,6 +28,9 @@ from petbot.types import ChatArgs, Skills
 
 logger = logging.getLogger(__name__)
 
+#: Shown when the edge can't reach the worker (any transport error).
+_WORKER_UNREACHABLE = "uwu I couldn't reach my brain right now — please try again soon."
+
 
 def _without_mention(content: str, user_id: int) -> str:
     """Remove only this bot's mention (``<@id>`` / ``<@!id>``), leaving others intact."""
@@ -83,9 +86,7 @@ class PetBot(commands.Bot):
                 return await self.skills.chat(ChatArgs(message=text), build_context(message))
         except Exception:
             logger.exception("dispatch failed")
-            return SkillResult.failure(
-                "uwu I couldn't reach my brain right now — please try again soon."
-            )
+            return SkillResult.failure(_WORKER_UNREACHABLE)
 
     async def close(self) -> None:
         if self._http is not None:

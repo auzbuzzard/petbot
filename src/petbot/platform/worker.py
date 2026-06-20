@@ -25,6 +25,14 @@ logger = logging.getLogger(__name__)
 #: The entry-point group every skill package registers under.
 SKILLS_GROUP = "petbot.skills"
 
+#: User-facing copy the worker surfaces at the dispatch boundary.
+_SKILL_CRASHED = "Something went wrong running that skill."
+_MALFORMED_REQUEST = "That request was malformed."
+
+
+def _unknown_skill(name: str) -> str:
+    return f"Unknown skill: `{name}`."
+
 
 def _discover(group: str = SKILLS_GROUP) -> Iterator[Skill[Any]]:
     for ep in entry_points(group=group):
@@ -72,12 +80,12 @@ class Worker:
         skill = self._skills.get(call.skill)
         if skill is None:
             logger.warning("Call for unknown skill: %r", call.skill)
-            return SkillResult.failure(f"Unknown skill: `{call.skill}`.")
+            return SkillResult.failure(_unknown_skill(call.skill))
         try:
             return await skill.run(call.args, call.context)
         except Exception:
             logger.exception("Skill %r raised", call.skill)
-            return SkillResult.failure("Something went wrong running that skill.")
+            return SkillResult.failure(_SKILL_CRASHED)
 
     async def serve(self, body: str | bytes) -> str:
         """Remote boundary: decode a wire payload, run it, encode the result.
@@ -91,13 +99,13 @@ class Worker:
             name = raw["skill"]
             skill = self._skills.get(name)
             if skill is None:
-                return SkillResult.failure(f"Unknown skill: `{name}`.").model_dump_json()
+                return SkillResult.failure(_unknown_skill(name)).model_dump_json()
             args: BaseModel = skill.args_model.model_validate(raw["args"])
             context = SkillContext.model_validate(raw["context"])
         except (ValueError, KeyError, ValidationError):
             # Bad JSON, missing fields, or args that fail validation — never let a
             # malformed payload escape the boundary; always return a result.
             logger.warning("Malformed dispatch payload", exc_info=True)
-            return SkillResult.failure("That request was malformed.").model_dump_json()
+            return SkillResult.failure(_MALFORMED_REQUEST).model_dump_json()
         result = await self.run(SkillCall(skill=name, args=args, context=context))
         return result.model_dump_json()

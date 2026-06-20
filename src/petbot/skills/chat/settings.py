@@ -9,18 +9,23 @@ values. Set via nested env, e.g. ``CHAT_LLM__KIND=openrouter`` +
 
 from __future__ import annotations
 
+from importlib import resources
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-#: The default persona — product copy, not logic, overridable via ``CHAT_SYSTEM_PROMPT``.
-DEFAULT_SYSTEM_PROMPT = (
-    "You are PetBot, a friendly, slightly mischievous pet companion in a Discord "
-    "server. Keep replies short and warm. When a user wants a calculation or an "
-    "image from Derpibooru or e621, call the matching tool rather than guessing. "
-    "Never describe explicit content in text; just present what the tool returns."
-)
+
+def _load_default_system_prompt() -> str:
+    """The default persona, shipped as package data (``prompts/system.md``) so it
+    edits as prose — clean diffs, no Python escaping — and overrides via
+    ``CHAT_SYSTEM_PROMPT``. Mirrors how the booru skill ships ``utterances.json``."""
+    return (
+        resources.files(__package__)
+        .joinpath("prompts/system.md")
+        .read_text(encoding="utf-8")
+        .strip()
+    )
 
 
 class BedrockModel(BaseModel):
@@ -73,5 +78,5 @@ class ChatSettings(BaseSettings):
 
     #: The LLM to use (required; see ``CHAT_LLM__*``).
     llm: LLMConfig
-    #: The agent's persona; overridable via ``CHAT_SYSTEM_PROMPT``.
-    system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    #: The agent's persona (``prompts/system.md``); override via ``CHAT_SYSTEM_PROMPT``.
+    system_prompt: str = Field(default_factory=_load_default_system_prompt)
