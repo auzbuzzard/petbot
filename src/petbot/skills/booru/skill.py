@@ -1,19 +1,23 @@
-"""Booru search skills: ``derpi`` and ``e621``.
+"""Booru search skills: ``derpi``, ``furbooru``, and ``e621``.
 
-Both wrap a provider in this package's engine. There is no explicit *option*: the
-channel decides the safety floor (``safe_only`` comes from ``ctx.allows_explicit``,
-which the edge fills from ``channel.is_nsfw()``). The other options — ``sort``,
-``file_type``, ``min_score`` — map onto each provider's full native vocabulary.
+Derpibooru and Furbooru both run Philomena; they share a ``_PhilomenaSkill``
+base whose only variable is the factory function that builds the provider.
+e621 uses a completely different API and keeps its own concrete class.
+
+There is no explicit safety option: the channel decides the safety floor
+(``safe_only`` comes from ``ctx.allows_explicit``, which the edge fills from
+``channel.is_nsfw()``).
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 import httpx
 
 from petbot.domain import Skill, SkillContext, SkillResult
-from petbot.skills.booru import derpibooru, e621
+from petbot.skills.booru import derpibooru, e621, furbooru
 from petbot.skills.booru.base import BooruProvider
 from petbot.skills.booru.engine import run_search
 from petbot.skills.booru.errors import SiteFailureStatusError
@@ -69,19 +73,36 @@ async def _run(
         return SkillResult.failure(_NETWORK_FAILURE)
 
 
-class DerpiSkill(Skill[BooruArgs]):
+# Philomena sites (Derpibooru, Furbooru) share the same skill shape; only the
+# provider factory differs.
+class _PhilomenaSkill(Skill[BooruArgs]):
+    """Shared base for every Philomena-backed search skill."""
+
+    args_model = BooruArgs
+    _provider_factory: Callable[..., BooruProvider]
+
+    def __init__(self, *, client: httpx.AsyncClient, api_key: str | None = None) -> None:
+        self._client = client
+        self._provider: BooruProvider = type(self)._provider_factory(api_key=api_key)
+
+    async def run(self, args: BooruArgs, ctx: SkillContext) -> SkillResult:
+        return await _run(self._provider, self._client, args, ctx)
+
+
+class DerpiSkill(_PhilomenaSkill):
     """Search Derpibooru for an image matching the given tags."""
 
     name = "derpi"
     description = "Search Derpibooru for an image matching the given tags."
-    args_model = BooruArgs
+    _provider_factory = derpibooru.DerpibooruProvider
 
-    def __init__(self, *, client: httpx.AsyncClient, api_key: str | None = None) -> None:
-        self._client = client
-        self._provider = derpibooru.DerpibooruProvider(api_key=api_key)
 
-    async def run(self, args: BooruArgs, ctx: SkillContext) -> SkillResult:
-        return await _run(self._provider, self._client, args, ctx)
+class FurbooruSkill(_PhilomenaSkill):
+    """Search Furbooru for an image matching the given tags."""
+
+    name = "furbooru"
+    description = "Search Furbooru for an image matching the given tags."
+    _provider_factory = furbooru.FurbooruProvider
 
 
 class E621Skill(Skill[BooruArgs]):
@@ -106,3 +127,4 @@ class E621Skill(Skill[BooruArgs]):
 
     async def run(self, args: BooruArgs, ctx: SkillContext) -> SkillResult:
         return await _run(self._provider, self._client, args, ctx)
+

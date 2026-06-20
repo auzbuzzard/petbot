@@ -11,10 +11,10 @@ import pytest
 import respx
 
 from conftest import load_fixture, make_context
-from petbot.skills.booru import derpibooru, e621, tags
+from petbot.skills.booru import derpibooru, e621, furbooru, philomena, tags
 from petbot.skills.booru.engine import run_search
 from petbot.skills.booru.errors import SiteFailureStatusError
-from petbot.skills.booru.skill import DerpiSkill, E621Skill, _build_search
+from petbot.skills.booru.skill import DerpiSkill, E621Skill, FurbooruSkill, _build_search
 from petbot.skills.booru.types import SearchRequest
 from petbot.types import BooruArgs
 
@@ -33,6 +33,17 @@ def test_vocabulary_is_per_site_and_full_native() -> None:
     assert "hot" in {s.value for s in e621.Sort}
     assert "suggestive" in {r.value for r in derpibooru.Rating}  # Derpi-only
     assert "suggestive" not in {r.value for r in e621.Rating}
+    # Derpibooru has MLP-specific tiers; Furbooru does not
+    assert "grimdark" in {r.value for r in derpibooru.Rating}
+    assert "grimdark" not in {r.value for r in furbooru.Rating}
+    assert "suggestive" in {r.value for r in furbooru.Rating}
+
+
+def test_philomena_sort_and_filetype_shared_across_sites() -> None:
+    assert derpibooru.Sort is philomena.Sort
+    assert furbooru.Sort is philomena.Sort
+    assert derpibooru.FileType is philomena.FileType
+    assert furbooru.FileType is philomena.FileType
 
 
 def test_range_serialization_dialects() -> None:
@@ -66,6 +77,7 @@ def test_parse_tags_follows_site_convention() -> None:
         "twilight sparkle",
         "safe",
     )
+    assert furbooru.FurbooruProvider().parse_tags("wolf, canine") == ("wolf", "canine")
 
 
 # --- request shaping (inspect the built httpx.Request) ------------------------
@@ -139,6 +151,40 @@ async def test_derpi_sort_direction_is_caller_controlled() -> None:
     assert asc.url.params["sd"] == "asc"
 
 
+async def test_furbooru_build_request_uses_filter_id_2() -> None:
+    provider = furbooru.FurbooruProvider(api_key="k")
+    search = SearchRequest(
+        tags=("wolf",),
+        safe_only=True,
+        sort=philomena.Sort.favorites,
+        score=tags.NumericFilter(at_least=10),
+    )
+    async with httpx.AsyncClient() as client:
+        req = provider.build_request(client, search)
+    assert req.url.params["q"] == "wolf,safe,score.gte:10"
+    assert req.url.params["sf"] == "faves"
+    assert req.url.params["filter_id"] == "2"
+    assert req.url.params["key"] == "k"
+    assert "furbooru.org" in req.url.host
+
+
+async def test_furbooru_sort_direction_is_caller_controlled() -> None:
+    provider = furbooru.FurbooruProvider()
+    async with httpx.AsyncClient() as client:
+        desc = provider.build_request(client, SearchRequest(tags=("a",), descending=True))
+        asc = provider.build_request(client, SearchRequest(tags=("a",), descending=False))
+    assert desc.url.params["sd"] == "desc"
+    assert asc.url.params["sd"] == "asc"
+
+
+async def test_furbooru_nsfw_no_tags_uses_wildcard() -> None:
+    provider = furbooru.FurbooruProvider()
+    async with httpx.AsyncClient() as client:
+        req = provider.build_request(client, SearchRequest(tags=(), safe_only=False))
+    assert req.url.params["q"] == "*"
+    assert "key" not in req.url.params
+
+
 # --- response decoding --------------------------------------------------------
 
 
@@ -160,6 +206,27 @@ def test_derpi_parse() -> None:
     assert post.color == 0x00FF00
 
 
+def test_furbooru_parse() -> None:
+    post = furbooru.FurbooruProvider().parse(load_fixture("furbooru_success"))
+    assert post is not None
+    assert post.post_id == 654321
+    assert post.total == 17
+    assert post.is_safe is True
+    assert post.color == 0x00FF00
+    assert post.page_url == "https://furbooru.org/654321"
+    assert post.site_name == "Furbooru"
+
+
+def test_furbooru_absolutizes_protocol_relative_url() -> None:
+    body = {
+        "total": 1,
+        "images": [{"id": 9, "representations": {"large": "//furbooru.org/img/large.png"}}],
+    }
+    post = furbooru.FurbooruProvider().parse(body)
+    assert post is not None
+    assert post.image_url == "https://furbooru.org/img/large.png"
+
+
 def test_parse_none_on_empty_or_blocked() -> None:
     e = e621.E621Provider(user_agent="x")
     assert e.parse(load_fixture("e621_empty")) is None
@@ -176,6 +243,9 @@ def test_error_extraction() -> None:
     d = derpibooru.DerpibooruProvider()
     assert d.error(load_fixture("derpibooru_error")) == "Imbalanced parentheses."
     assert d.error(load_fixture("derpibooru_success")) is None
+    f = furbooru.FurbooruProvider()
+    assert f.error(load_fixture("derpibooru_error")) == "Imbalanced parentheses."  # same schema
+    assert f.error(load_fixture("furbooru_success")) is None
 
 
 # --- engine (respx transport mock) -------------------------------------------
@@ -232,6 +302,30 @@ async def test_skill_nsfw_does_not_inject_safe() -> None:
         skill = DerpiSkill(client=client)
         await skill.run(BooruArgs(tags="pony"), make_context(allows_explicit=True))
     assert route.calls.last.request.url.params["q"] == "pony"
+
+
+@respx.mock
+async def test_furbooru_skill_sfw_constrains_to_safe() -> None:
+    route = respx.get("https://furbooru.org/api/v1/json/search/images").mock(
+        return_value=httpx.Response(200, json=load_fixture("furbooru_success"))
+    )
+    async with httpx.AsyncClient() as client:
+        skill = FurbooruSkill(client=client)
+        result = await skill.run(BooruArgs(tags="wolf"), make_context(allows_explicit=False))
+    assert not result.is_error and result.embed is not None
+    assert "safe" in route.calls.last.request.url.params["q"]
+    assert route.calls.last.request.url.params["filter_id"] == "2"
+
+
+@respx.mock
+async def test_furbooru_skill_nsfw_does_not_inject_safe() -> None:
+    route = respx.get("https://furbooru.org/api/v1/json/search/images").mock(
+        return_value=httpx.Response(200, json=load_fixture("furbooru_success"))
+    )
+    async with httpx.AsyncClient() as client:
+        skill = FurbooruSkill(client=client)
+        await skill.run(BooruArgs(tags="wolf"), make_context(allows_explicit=True))
+    assert route.calls.last.request.url.params["q"] == "wolf"
 
 
 @respx.mock
