@@ -127,4 +127,3 @@ class E621Skill(Skill[BooruArgs]):
 
     async def run(self, args: BooruArgs, ctx: SkillContext) -> SkillResult:
         return await _run(self._provider, self._client, args, ctx)
-
