@@ -22,6 +22,18 @@ from petbot.skills.booru.types import SearchRequest
 logger = logging.getLogger(__name__)
 
 
+def _site_rejected(site: str, reason: str) -> str:
+    return f"uwu I couldn't do that. {site} says: {reason}"
+
+
+def _site_http_error(site: str, status: int) -> str:
+    return f"uwu {site} returned an error (HTTP {status})."
+
+
+def _site_unreadable(site: str) -> str:
+    return f"uwu {site} sent a response I couldn't read."
+
+
 async def run_search(
     provider: BooruProvider,
     client: httpx.AsyncClient,
@@ -52,19 +64,19 @@ async def run_search(
     if body is not None and (reason := provider.error(body)) is not None:
         raise SiteFailureStatusError(
             site_message=reason,
-            print_message=f"uwu I couldn't do that. {provider.name} says: {reason}",
+            print_message=_site_rejected(provider.name, reason),
         )
     # 2. Any other non-2xx is still an error, even with no recognizable error body.
     if response.status_code >= 400:
         raise SiteFailureStatusError(
             site_message=f"HTTP {response.status_code}",
-            print_message=f"uwu {provider.name} returned an error (HTTP {response.status_code}).",
+            print_message=_site_http_error(provider.name, response.status_code),
         )
     # 3. A 2xx we couldn't decode is an anomaly — surface it, don't fake "no results".
     if body is None:
         raise SiteFailureStatusError(
             site_message="non-JSON response",
-            print_message=f"uwu {provider.name} sent a response I couldn't read.",
+            print_message=_site_unreadable(provider.name),
         )
 
     return render(provider.parse(body), request=search, author=author)

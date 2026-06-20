@@ -254,3 +254,31 @@ async def test_e621_skill_empty_is_friendly() -> None:
         skill = E621Skill(client=client, user_agent="PetBot/2.1 (test)")
         result = await skill.run(BooruArgs(tags="asdfqwer"), make_context())
     assert not result.is_error and result.embed is None and result.text
+
+
+@respx.mock
+async def test_e621_skill_empty_sfw_explains_rating_floor() -> None:
+    # An empty search in a SFW channel must state *why* (the safe-rating floor), so
+    # the chat model relays the real reason instead of inventing one (a typo, etc.).
+    respx.get("https://e621.net/posts.json").mock(
+        return_value=httpx.Response(200, json=load_fixture("e621_empty"))
+    )
+    async with httpx.AsyncClient() as client:
+        skill = E621Skill(client=client, user_agent="PetBot/2.1 (test)")
+        result = await skill.run(BooruArgs(tags="auzbuzzard"), make_context(allows_explicit=False))
+    assert not result.is_error and result.embed is None
+    assert "age-gated" in (result.text or "")
+
+
+@respx.mock
+async def test_e621_skill_empty_nsfw_omits_rating_floor_note() -> None:
+    # In an NSFW channel the search really did look at everything, so the safe-rating
+    # note must NOT appear — an empty result there is genuinely empty.
+    respx.get("https://e621.net/posts.json").mock(
+        return_value=httpx.Response(200, json=load_fixture("e621_empty"))
+    )
+    async with httpx.AsyncClient() as client:
+        skill = E621Skill(client=client, user_agent="PetBot/2.1 (test)")
+        result = await skill.run(BooruArgs(tags="auzbuzzard"), make_context(allows_explicit=True))
+    assert not result.is_error and result.embed is None
+    assert "age-gated" not in (result.text or "")
