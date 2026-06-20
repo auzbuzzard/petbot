@@ -1,37 +1,13 @@
-# --- The always-on edge: a Lightsail container service ------------------------
+# --- The edge's ECR repository (shared by both host options) -------------------
 #
 # The edge holds the Discord gateway (an outbound WebSocket) and dispatches each
-# @mention to the core worker Lambda. Lightsail container service is the host:
-# flat-rate, public IPv4 + data bundled, immutable container push (no box to
-# patch). It serves no HTTP — it only dials out to Discord and to the worker — so
-# the deployment configures NO public endpoint. Lightsail supports this: the
-# container still runs, reachable only on the private `<name>.service.local`
-# domain (which the edge never needs), and no health-check port is required.
-#
-# Image delivery is ECR-pull: the edge image lives in its own ECR repo (the same
-# registry the worker uses), and the service pulls it via an "image puller" IAM
-# role (the declarative equivalent of what the Lightsail console wires up). The
-# image must be linux/amd64 (Lightsail container services are amd64-only; an
-# arm64 image fails with "exec format error") — see Dockerfile.edge. Measured edge
-# footprint ~76 MB RSS, so `nano` (512 MB) is ample; bump var.edge_power to
-# `micro` if it ever OOMs.
+# @mention to the core worker Lambda. Where it RUNS is var.edge_host:
+#   lightsail - a Lightsail container service (this file). Flat-rate, IPv4
+#               bundled, immutable push; but new accounts can have a 0 quota.
+#   fargate   - an ECS Fargate service (edge_fargate.tf). No Lightsail quota; the
+#               task gets an IAM role (no static key).
+# Both pull the same amd64 edge image from this ECR repo.
 
-resource "aws_lightsail_container_service" "edge" {
-  name  = local.edge_name
-  power = var.edge_power
-  scale = var.edge_scale
-
-  # Activating this creates an AWS-managed ECR "image puller" principal for the
-  # service; we grant it read on the edge repo below. (Same-Region requirement:
-  # the repo and the service are both in var.aws_region.)
-  private_registry_access {
-    ecr_image_puller_role {
-      is_active = true
-    }
-  }
-}
-
-# The edge's own ECR repository.
 resource "aws_ecr_repository" "edge" {
   name                 = local.edge_name
   image_tag_mutability = "MUTABLE"
@@ -42,11 +18,36 @@ resource "aws_ecr_repository" "edge" {
   }
 }
 
-# Grant the service's puller principal read access on the edge repo — exactly the
-# statement the Lightsail console would add for you, here as code. The principal
-# ARN is populated once the puller role is active; Terraform orders this after the
-# service create because it references that attribute.
+# The Discord token's SSM parameter ARN — both hosts reference it (Lightsail reads
+# the value into env; Fargate hands the ARN to ECS to fetch at task launch).
+locals {
+  discord_token_arn = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.discord_token_ssm_parameter}"
+}
+
+# --- Lightsail host (var.edge_host == "lightsail") ----------------------------
+# Serves no HTTP (no public_endpoint); the container runs reachable only on the
+# private domain it never needs. Image is linux/amd64 (Lightsail is amd64-only).
+# Pulls from ECR via an "image puller" principal granted read on the repo.
+
+locals {
+  on_lightsail = var.edge_host == "lightsail"
+}
+
+resource "aws_lightsail_container_service" "edge" {
+  count = local.on_lightsail ? 1 : 0
+  name  = local.edge_name
+  power = var.edge_power
+  scale = var.edge_scale
+
+  private_registry_access {
+    ecr_image_puller_role {
+      is_active = true
+    }
+  }
+}
+
 resource "aws_ecr_repository_policy" "edge" {
+  count      = local.on_lightsail ? 1 : 0
   repository = aws_ecr_repository.edge.name
 
   policy = jsonencode({
@@ -54,19 +55,16 @@ resource "aws_ecr_repository_policy" "edge" {
     Statement = [{
       Sid       = "AllowLightsailPull"
       Effect    = "Allow"
-      Principal = { AWS = aws_lightsail_container_service.edge.private_registry_access[0].ecr_image_puller_role[0].principal_arn }
+      Principal = { AWS = aws_lightsail_container_service.edge[0].private_registry_access[0].ecr_image_puller_role[0].principal_arn }
       Action    = ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
     }]
   })
 }
 
-# The container deployment. Skipped until an image tag is supplied (CI pushes the
-# image to ECR, then passes its tag), so the service + puller can be created
-# first. Lightsail pulls from ECR using the puller role, so the repo policy must
-# exist before the deployment is created.
+# The deployment — only once an image tag is supplied (CI pushes, then passes it).
 resource "aws_lightsail_container_service_deployment_version" "edge" {
-  count        = var.edge_image_tag != "" ? 1 : 0
-  service_name = aws_lightsail_container_service.edge.name
+  count        = local.on_lightsail && var.edge_image_tag != "" ? 1 : 0
+  service_name = aws_lightsail_container_service.edge[0].name
 
   container {
     container_name = "edge"
@@ -78,11 +76,11 @@ resource "aws_lightsail_container_service_deployment_version" "edge" {
       WORKER__KIND          = "lambda"
       WORKER__FUNCTION_NAME = aws_lambda_function.this.function_name
       AWS_REGION            = var.aws_region
-      # Scoped identity for boto3's default credential chain (Lightsail container
-      # services have no IAM instance roles, so a static key is the mechanism).
-      AWS_ACCESS_KEY_ID     = aws_iam_access_key.edge.id
-      AWS_SECRET_ACCESS_KEY = aws_iam_access_key.edge.secret
-      DISCORD_TOKEN         = data.aws_ssm_parameter.discord_token.value
+      # Lightsail has no IAM instance role, so a scoped static key is the
+      # mechanism; boto3's default credential chain reads it.
+      AWS_ACCESS_KEY_ID     = aws_iam_access_key.edge[0].id
+      AWS_SECRET_ACCESS_KEY = aws_iam_access_key.edge[0].secret
+      DISCORD_TOKEN         = data.aws_ssm_parameter.discord_token[0].value
     }
   }
 
@@ -90,24 +88,26 @@ resource "aws_lightsail_container_service_deployment_version" "edge" {
 }
 
 data "aws_ssm_parameter" "discord_token" {
+  count           = local.on_lightsail ? 1 : 0
   name            = var.discord_token_ssm_parameter
   with_decryption = true
 }
 
-# --- The edge's scoped AWS identity -------------------------------------------
-# Least privilege: invoke exactly the core worker Lambda, nothing else.
-
+# The Lightsail edge's scoped AWS identity (Fargate uses a task role instead).
 resource "aws_iam_user" "edge" {
-  name = local.edge_name
+  count = local.on_lightsail ? 1 : 0
+  name  = local.edge_name
 }
 
 resource "aws_iam_access_key" "edge" {
-  user = aws_iam_user.edge.name
+  count = local.on_lightsail ? 1 : 0
+  user  = aws_iam_user.edge[0].name
 }
 
 resource "aws_iam_user_policy" "edge_invoke" {
-  name = "${local.edge_name}-invoke-core"
-  user = aws_iam_user.edge.name
+  count = local.on_lightsail ? 1 : 0
+  name  = "${local.edge_name}-invoke-core"
+  user  = aws_iam_user.edge[0].name
 
   policy = jsonencode({
     Version = "2012-10-17"

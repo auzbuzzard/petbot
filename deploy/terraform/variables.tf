@@ -146,7 +146,18 @@ variable "budget_alert_emails" {
   default     = []
 }
 
-# --- Edge (Lightsail container service) ---------------------------------------
+# --- Edge (host-agnostic + per-host knobs) ------------------------------------
+
+variable "edge_host" {
+  type        = string
+  description = "Where the always-on edge runs: \"lightsail\" (container service) or \"fargate\" (ECS). Swappable at any time."
+  default     = "lightsail"
+
+  validation {
+    condition     = contains(["lightsail", "fargate"], var.edge_host)
+    error_message = "edge_host must be \"lightsail\" or \"fargate\"."
+  }
+}
 
 variable "discord_token_ssm_parameter" {
   type        = string
@@ -162,8 +173,20 @@ variable "edge_power" {
 
 variable "edge_scale" {
   type        = number
-  description = "Number of container nodes (replicas). 1 always-on holder."
+  description = "Number of Lightsail container nodes (replicas). 1 always-on holder."
   default     = 1
+}
+
+variable "edge_cpu" {
+  type        = number
+  description = "Fargate task CPU units (256 = 0.25 vCPU). Must pair with a valid edge_memory."
+  default     = 256
+}
+
+variable "edge_memory" {
+  type        = number
+  description = "Fargate task memory (MB). 512 is ample for the ~76MB edge; 256 CPU allows 512/1024/2048."
+  default     = 512
 }
 
 variable "edge_image_tag" {

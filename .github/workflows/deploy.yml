@@ -24,6 +24,8 @@ env:
   # Non-secret deploy config, supplied as GitHub Actions Variables and read by
   # Terraform as TF_VAR_* (secret *values* stay in SSM, referenced by name).
   TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+  # Edge host: "lightsail" (default) or "fargate". Unset => lightsail.
+  TF_VAR_edge_host: ${{ vars.EDGE_HOST || 'lightsail' }}
   TF_VAR_chat_llm_kind: ${{ vars.CHAT_LLM_KIND }}
   TF_VAR_chat_llm_model: ${{ vars.CHAT_LLM_MODEL }}
   TF_VAR_chat_llm_base_url: ${{ vars.CHAT_LLM_BASE_URL }}
@@ -124,4 +126,5 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: |
           terraform output -raw core_function_arn; echo
-          terraform output -raw edge_container_service_name; echo
+          terraform output -raw edge_host; echo
+          terraform output -raw edge_service_name; echo
