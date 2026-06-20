@@ -101,14 +101,14 @@ endpoint**, so for Gemma 4 use `CHAT_LLM_KIND=openai_compatible` with the
 different base URL.
 
 That's the complete list — once these Variables and the SSM secrets above exist,
-a push to `master` runs a green deploy. (Merging the PR alone does **not** create
+a push to `main` runs a green deploy. (Merging the PR alone does **not** create
 them; this one-time setup is yours to do.)
 
 ## CI deploy (the steady-state path)
 
 `.github/workflows/deploy.yml` does the whole rollout via OIDC: build + push both
 images to ECR (arm64 worker, amd64 edge), then `terraform apply` (the Lightsail
-edge pulls its image from ECR). A push to `master` (or a manual *Actions → Deploy
+edge pulls its image from ECR). A push to `main` (or a manual *Actions → Deploy
 → Run workflow*) ships it. **No deploy is run from a developer machine.**
 
 ## Deploy (manual / break-glass)

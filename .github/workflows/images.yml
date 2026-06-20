@@ -1,7 +1,7 @@
 name: Images
 
 # Build (do NOT push) both deploy images on every PR/branch that touches them, so
-# a broken Dockerfile or dependency surfaces at review time — not at a master
+# a broken Dockerfile or dependency surfaces at review time — not at a main
 # deploy. No AWS credentials or registry access needed. Each image builds on its
 # native runner arch (worker arm64, edge amd64) so there's no slow emulation.
 on:

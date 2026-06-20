@@ -8,7 +8,7 @@ name: Deploy
 on:
   workflow_dispatch:
   push:
-    branches: [master]
+    branches: [main]
 
 # OIDC: request a short-lived token to assume the AWS deploy role.
 permissions:
