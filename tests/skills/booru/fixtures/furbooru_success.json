@@ -1,0 +1,16 @@
+{
+  "total": 17,
+  "images": [
+    {
+      "id": 654321,
+      "score": 42,
+      "faves": 10,
+      "format": "png",
+      "tags": ["safe", "canine", "wolf"],
+      "representations": {
+        "large": "//furbooru.org/img/2021/1/1/654321/large.png"
+      },
+      "view_url": "https://furbooru.org/img/2021/1/1/654321/full.png"
+    }
+  ]
+}

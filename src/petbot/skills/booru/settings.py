@@ -29,9 +29,12 @@ class BooruSettings(BaseSettings):
     e621_username: str | None = None
     e621_api_key: str | None = None
     derpibooru_api_key: str | None = None
+    furbooru_api_key: str | None = None
     user_agent: str = DEFAULT_USER_AGENT
 
-    @field_validator("e621_username", "e621_api_key", "derpibooru_api_key", mode="before")
+    @field_validator(
+        "e621_username", "e621_api_key", "derpibooru_api_key", "furbooru_api_key", mode="before"
+    )
     @classmethod
     def _blank_to_none(cls, value: object) -> object:
         if isinstance(value, str) and not value.strip():
