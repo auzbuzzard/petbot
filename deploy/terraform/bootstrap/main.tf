@@ -137,6 +137,13 @@ locals {
   log_group_arn     = "arn:aws:logs:${var.aws_region}:${local.account_id}:log-group:/aws/lambda/${local.core_name}"
   exec_role_arn     = "arn:aws:iam::${local.account_id}:role/${local.core_name}-role"
   edge_user_arn     = "arn:aws:iam::${local.account_id}:user/${local.edge_name}"
+
+  # Fargate host option (edge_host = "fargate"): the ECS log group and the two
+  # task roles this stack owns.
+  edge_log_group_arn  = "arn:aws:logs:${var.aws_region}:${local.account_id}:log-group:/ecs/${local.edge_name}"
+  edge_exec_role_arn  = "arn:aws:iam::${local.account_id}:role/${local.edge_name}-exec"
+  edge_task_role_arn  = "arn:aws:iam::${local.account_id}:role/${local.edge_name}-task"
+  edge_task_role_arns = [local.edge_exec_role_arn, local.edge_task_role_arn]
 }
 
 # Least-privilege permissions for the deploy workflow. Service-level action
@@ -192,9 +199,12 @@ data "aws_iam_policy_document" "deploy_permissions" {
   }
 
   statement {
-    sid       = "ManageLogs"
-    actions   = ["logs:*"]
-    resources = [local.log_group_arn, "${local.log_group_arn}:*"]
+    sid     = "ManageLogs"
+    actions = ["logs:*"]
+    resources = [
+      local.log_group_arn, "${local.log_group_arn}:*",
+      local.edge_log_group_arn, "${local.edge_log_group_arn}:*",
+    ]
   }
 
   # logs:DescribeLogGroups is a list operation that AWS only authorizes on "*"
@@ -277,6 +287,71 @@ data "aws_iam_policy_document" "deploy_permissions" {
       "iam:ListAttachedUserPolicies",
     ]
     resources = [local.edge_user_arn]
+  }
+
+  # --- Fargate host option (edge_host = "fargate") ----------------------------
+
+  # ECS cluster/service/task-definition management. Many ECS actions (Register/
+  # DescribeTaskDefinition, list/describe) are not resource-scopable, so this is a
+  # service-level grant — same rationale as lightsail:* above; the account's ECS
+  # holds only this edge.
+  statement {
+    sid       = "ManageEcs"
+    actions   = ["ecs:*"]
+    resources = ["*"]
+  }
+
+  # Read the default VPC/subnets and manage the edge's egress security group.
+  # Describe* and SG creation have no scopable resource ARN at plan time.
+  statement {
+    sid = "EdgeNetworking"
+    actions = [
+      "ec2:DescribeVpcs",
+      "ec2:DescribeSubnets",
+      "ec2:DescribeSecurityGroups",
+      "ec2:DescribeSecurityGroupRules",
+      "ec2:DescribeNetworkInterfaces",
+      "ec2:CreateSecurityGroup",
+      "ec2:DeleteSecurityGroup",
+      "ec2:AuthorizeSecurityGroupEgress",
+      "ec2:RevokeSecurityGroupEgress",
+      "ec2:CreateTags",
+      "ec2:DeleteTags",
+    ]
+    resources = ["*"]
+  }
+
+  # Create/manage only the two Fargate task roles this stack owns (exec + task).
+  statement {
+    sid = "ManageEdgeTaskRoles"
+    actions = [
+      "iam:GetRole",
+      "iam:CreateRole",
+      "iam:DeleteRole",
+      "iam:AttachRolePolicy",
+      "iam:DetachRolePolicy",
+      "iam:PutRolePolicy",
+      "iam:DeleteRolePolicy",
+      "iam:GetRolePolicy",
+      "iam:ListRolePolicies",
+      "iam:ListAttachedRolePolicies",
+      "iam:ListInstanceProfilesForRole",
+      "iam:TagRole",
+      "iam:UntagRole",
+    ]
+    resources = local.edge_task_role_arns
+  }
+
+  # Pass the task roles only to ECS tasks (fenced like the Lambda exec role).
+  statement {
+    sid       = "PassEdgeTaskRolesToEcs"
+    actions   = ["iam:PassRole"]
+    resources = local.edge_task_role_arns
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["ecs-tasks.amazonaws.com"]
+    }
   }
 }
 

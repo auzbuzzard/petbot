@@ -37,6 +37,21 @@ auto-created "image puller" principal that `edge.tf` grants read on the edge
 repo). One registry, one push mechanism — no `lightsailctl`, no image-ref
 scraping.
 
+### Edge host: `lightsail` or `fargate`
+
+`EDGE_HOST` selects where the edge runs, **swappable at any time** (flip the
+Variable, re-run Deploy):
+
+- **`lightsail`** (default) — a Lightsail container service. Flat ~$7/mo, IPv4
+  bundled, immutable push. *Caveat:* new accounts can have a **0 quota** for
+  container services (needs an AWS Support case to raise).
+- **`fargate`** — an ECS Fargate service in the default VPC (`edge_fargate.tf`).
+  No Lightsail quota; the task uses an **IAM task role** (no static key) and ECS
+  fetches the token from SSM at launch. ~$11/mo (compute + a public IPv4).
+
+Both run the same amd64 edge image from the same ECR repo. The unused host's
+resources simply aren't created (`count = 0`).
+
 ## Prerequisites
 
 - An AWS account with credentials in your shell (e.g. `aws sso login`).
@@ -88,6 +103,7 @@ referenced here only by parameter name). The deploy reads them as `TF_VAR_*`:
 | `DEPLOY_ROLE_ARN` | the deploy role ARN | `terraform -chdir=bootstrap output deploy_role_arn` |
 | `AWS_REGION` | e.g. `us-east-1` | your choice (match `backend.hcl` / SSM region) |
 | `TF_STATE_BUCKET` | the state bucket name | the `state_bucket` you chose above |
+| `EDGE_HOST` | `lightsail` (default) \| `fargate` | where the edge runs — swappable any time |
 | `CHAT_LLM_KIND` | `bedrock` \| `openai_compatible` \| `openrouter` | your choice of provider |
 | `CHAT_LLM_MODEL` | the model id | e.g. `google.gemma-4-26b-a4b` (Gemma 4 via mantle), a Bedrock Converse model, or an OpenRouter model |
 | `CHAT_LLM_BASE_URL` | endpoint URL | **only** for `openai_compatible`, e.g. `https://bedrock-mantle.us-east-1.api.aws/openai/v1`; unset otherwise |
