@@ -9,8 +9,8 @@ import discord
 
 from petbot.domain import EmbedSpec, Platform, SkillResult
 from petbot.edge.bot import PetBot, _without_mention
-from petbot.edge.context import build_context
-from petbot.edge.render import respond, to_embed
+from petbot.edge.context import build_context, build_interaction_context
+from petbot.edge.render import respond, respond_interaction, to_embed
 from petbot.edge.settings import EdgeSettings, HttpWorker
 from petbot.edge.text import chunk_text
 
@@ -108,3 +108,76 @@ async def test_chat_maps_transport_error_to_friendly_failure() -> None:
     bot.skills = _RaisingSkills()
     result = await bot._chat("hello", FakeMessage(FakeChannel()))  # type: ignore[arg-type]
     assert result.is_error  # the transport failure became a friendly result, not a crash
+
+
+# --- slash commands ----------------------------------------------------------
+
+
+class FakeResponse:
+    def __init__(self) -> None:
+        self.deferred = False
+
+    async def defer(self) -> None:
+        self.deferred = True
+
+
+class FakeFollowup:
+    def __init__(self) -> None:
+        self.sent: list[dict[str, object]] = []
+
+    async def send(self, content: str | None = None, embed: discord.Embed | None = None) -> None:
+        self.sent.append({"content": content, "embed": embed})
+
+
+class FakeInteraction:
+    """Captures defer + followups for a slash command, without a gateway."""
+
+    def __init__(self, *, nsfw: bool = False, channel_id: int = 99) -> None:
+        self.user = FakeAuthor()
+        self.channel = FakeChannel(nsfw=nsfw, channel_id=channel_id)
+        self.channel_id = channel_id
+        self.response = FakeResponse()
+        self.followup = FakeFollowup()
+
+
+def test_build_interaction_context_reads_nsfw_and_ids() -> None:
+    ctx = build_interaction_context(FakeInteraction(nsfw=True, channel_id=8))  # type: ignore[arg-type]
+    assert ctx.platform is Platform.DISCORD
+    assert ctx.allows_explicit is True
+    assert ctx.conversation_id == "discord:8"
+    assert ctx.user.display_name == "Rex"
+    sfw = build_interaction_context(FakeInteraction(nsfw=False))  # type: ignore[arg-type]
+    assert sfw.allows_explicit is False
+
+
+async def test_respond_interaction_sends_card_as_followup() -> None:
+    interaction = FakeInteraction()
+    result = SkillResult.message("here", embed=EmbedSpec(title="c", image_url="http://i/x"))
+    await respond_interaction(interaction, result)  # type: ignore[arg-type]
+    assert interaction.followup.sent[0]["content"] == "here"
+    assert interaction.followup.sent[0]["embed"] is not None
+
+
+async def test_run_slash_defers_then_followups_the_result() -> None:
+    bot = PetBot(EdgeSettings(discord_token="x", worker=HttpWorker(url="http://worker/dispatch")))
+    interaction = FakeInteraction()
+
+    async def ok() -> SkillResult:
+        return SkillResult.message("done")
+
+    await bot._run_slash(interaction, ok())  # type: ignore[arg-type]
+    assert interaction.response.deferred is True
+    assert interaction.followup.sent[0]["content"] == "done"
+
+
+async def test_run_slash_maps_transport_error_to_friendly_followup() -> None:
+    bot = PetBot(EdgeSettings(discord_token="x", worker=HttpWorker(url="http://worker/dispatch")))
+    interaction = FakeInteraction()
+
+    async def boom() -> SkillResult:
+        raise RuntimeError("worker unreachable")
+
+    await bot._run_slash(interaction, boom())  # type: ignore[arg-type]
+    assert interaction.response.deferred is True
+    # the failure became a friendly followup, not a crash
+    assert interaction.followup.sent[0]["content"]

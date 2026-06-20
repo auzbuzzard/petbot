@@ -1,30 +1,34 @@
-"""The Discord edge: hold the gateway, turn an @mention into a chat call, render.
+"""The Discord edge: hold the gateway, turn an @mention or slash command into a
+dispatched call, render the result.
 
-The thin, always-on process. It runs no skills: every mention is dispatched to a
-worker through the typed :class:`petbot.types.Skills` client (a
-:class:`~petbot.platform.SkillsClient` over an HTTP or Lambda transport), and the
-worker's neutral :class:`~petbot.domain.result.SkillResult` is rendered back to
-the channel. It owns a live connection, so it is smoke-tested manually against a
-dev guild rather than in CI.
+The thin, always-on process. It runs no skills: every @mention (chat) and every
+slash command is dispatched to a worker through the typed :class:`petbot.types.Skills`
+client (a :class:`~petbot.platform.SkillsClient` over an HTTP or Lambda transport),
+and the worker's neutral :class:`~petbot.domain.result.SkillResult` is rendered back.
+Slash commands are defined from the typed ``*Args`` surface, so the edge still never
+imports a skill. It owns a live connection, so the gateway wiring is smoke-tested
+manually against a dev guild; the dispatch/render helpers are unit-tested with fakes.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Awaitable
 from typing import assert_never
 
 import discord
 import httpx
+from discord import app_commands
 from discord.ext import commands
 
 from petbot.domain import SkillResult
-from petbot.edge.context import build_context
-from petbot.edge.render import respond
+from petbot.edge.context import build_context, build_interaction_context
+from petbot.edge.render import respond, respond_interaction
 from petbot.edge.settings import EdgeSettings, HttpWorker, LambdaWorker
 from petbot.logging_setup import configure_logging
 from petbot.platform import HttpTransport, LambdaTransport, SkillsClient
-from petbot.types import ChatArgs, Skills
+from petbot.types import BooruArgs, ChatArgs, MathArgs, Skills
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +69,64 @@ class PetBot(commands.Bot):
                 self.skills = SkillsClient(HttpTransport(url, self._http))
             case _:
                 assert_never(worker)
+        self._register_slash_commands()
+        await self._sync_commands()
+
+    @property
+    def _client(self) -> Skills:
+        assert self.skills is not None  # set above in setup_hook, before any interaction
+        return self.skills
+
+    def _register_slash_commands(self) -> None:
+        """One slash command per dispatched skill, defined from the typed ``*Args``
+        surface and the ``Skills`` client — so the edge still never imports a skill."""
+
+        @self.tree.command(name="math", description="Evaluate an arithmetic expression.")
+        @app_commands.describe(expression="e.g. 2 + 2 * 10")
+        async def math(interaction: discord.Interaction, expression: str) -> None:
+            ctx = build_interaction_context(interaction)
+            await self._run_slash(
+                interaction, self._client.math(MathArgs(expression=expression), ctx)
+            )
+
+        @self.tree.command(name="derpi", description="Search Derpibooru for an image.")
+        @app_commands.describe(tags="Space-separated tags")
+        async def derpi(interaction: discord.Interaction, tags: str) -> None:
+            ctx = build_interaction_context(interaction)
+            await self._run_slash(interaction, self._client.derpi(BooruArgs(tags=tags), ctx))
+
+        @self.tree.command(name="e621", description="Search e621 (furry imageboard) for an image.")
+        @app_commands.describe(tags="Space-separated tags")
+        async def e621(interaction: discord.Interaction, tags: str) -> None:
+            ctx = build_interaction_context(interaction)
+            await self._run_slash(interaction, self._client.e621(BooruArgs(tags=tags), ctx))
+
+    async def _sync_commands(self) -> None:
+        """Register the app commands with Discord. ``dev_guild_id`` syncs to that
+        guild (instant, for iteration); otherwise a global sync (which Discord can
+        take up to an hour to propagate the first time)."""
+        if self.settings.dev_guild_id is not None:
+            guild = discord.Object(id=self.settings.dev_guild_id)
+            self.tree.copy_global_to(guild=guild)
+            await self.tree.sync(guild=guild)
+        else:
+            await self.tree.sync()
+
+    async def _run_slash(
+        self, interaction: discord.Interaction, call: Awaitable[SkillResult]
+    ) -> None:
+        """Defer, run the dispatched ``call``, send the result as a followup.
+
+        Defer first: a dispatch can exceed Discord's 3s interaction window on a
+        Lambda cold start. A transport failure maps to a friendly result, not a crash.
+        """
+        await interaction.response.defer()
+        try:
+            result = await call
+        except Exception:
+            logger.exception("slash dispatch failed")
+            result = SkillResult.failure(_WORKER_UNREACHABLE)
+        await respond_interaction(interaction, result)
 
     async def on_ready(self) -> None:
         if self.user is not None:
