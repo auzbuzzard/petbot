@@ -14,7 +14,14 @@ import httpx
 from petbot.skills.booru.settings import BooruSettings
 from petbot.skills.booru.skill import DerpiSkill, E621Skill, FurbooruSkill
 
-__all__ = ["DerpiSkill", "E621Skill", "FurbooruSkill", "build_derpi", "build_e621", "build_furbooru"]
+__all__ = [
+    "DerpiSkill",
+    "E621Skill",
+    "FurbooruSkill",
+    "build_derpi",
+    "build_e621",
+    "build_furbooru",
+]
 
 #: One client shared by the worker's booru skills (connection reuse).
 _client: httpx.AsyncClient | None = None
