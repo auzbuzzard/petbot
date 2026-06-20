@@ -10,7 +10,12 @@ from typing import assert_never
 
 from pydantic_ai.models import Model
 
-from petbot.skills.chat.settings import BedrockModel, ChatSettings, OpenRouterModel
+from petbot.skills.chat.settings import (
+    BedrockModel,
+    ChatSettings,
+    OpenAICompatibleModel,
+    OpenRouterModel,
+)
 
 
 def build_model(settings: ChatSettings) -> Model:
@@ -21,6 +26,13 @@ def build_model(settings: ChatSettings) -> Model:
             from pydantic_ai.providers.openrouter import OpenRouterProvider
 
             return OpenAIChatModel(model, provider=OpenRouterProvider(api_key=api_key))
+        case OpenAICompatibleModel(model=model, base_url=base_url, api_key=api_key):
+            from pydantic_ai.models.openai import OpenAIChatModel
+            from pydantic_ai.providers.openai import OpenAIProvider
+
+            return OpenAIChatModel(
+                model, provider=OpenAIProvider(base_url=base_url, api_key=api_key)
+            )
         case BedrockModel(model=model):
             from pydantic_ai.models.bedrock import BedrockConverseModel
 
