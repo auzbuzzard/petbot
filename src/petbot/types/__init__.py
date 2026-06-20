@@ -8,10 +8,13 @@ from __future__ import annotations
 
 from petbot.types.args import BooruArgs, ChatArgs, MathArgs, MusicAction, MusicArgs
 from petbot.types.client import Skills
+from petbot.types.manifest import COMMANDS, CommandSpec
 
 __all__ = [
+    "COMMANDS",
     "BooruArgs",
     "ChatArgs",
+    "CommandSpec",
     "MathArgs",
     "MusicAction",
     "MusicArgs",

@@ -13,6 +13,7 @@ from petbot.edge.context import build_context, build_interaction_context
 from petbot.edge.render import respond, respond_interaction, to_embed
 from petbot.edge.settings import EdgeSettings, HttpWorker
 from petbot.edge.text import chunk_text
+from petbot.types import COMMANDS
 
 
 class FakeChannel:
@@ -181,3 +182,16 @@ async def test_run_slash_maps_transport_error_to_friendly_followup() -> None:
     assert interaction.response.deferred is True
     # the failure became a friendly followup, not a crash
     assert interaction.followup.sent[0]["content"]
+
+
+def test_slash_command_options_are_generated_from_args_model() -> None:
+    # The edge hand-lists no options: each command's parameters are read straight
+    # off the skill's args_model, required/optional preserved.
+    bot = PetBot(EdgeSettings(discord_token="x", worker=HttpWorker(url="http://worker/dispatch")))
+    spec = next(s for s in COMMANDS if s.name == "e621")
+    command = bot._build_command(spec)
+    assert command.name == "e621"
+    params = command._params
+    assert set(params) == set(spec.args_model.model_fields)
+    assert params["tags"].required is True  # BooruArgs.tags is required
+    assert params["sort"].required is False  # BooruArgs.sort is optional

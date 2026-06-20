@@ -11,7 +11,7 @@ from petbot.domain import EmbedSpec, Platform, SkillContext, SkillResult, User
 from petbot.skills.chat import ChatSkill
 from petbot.skills.chat.model import build_model
 from petbot.skills.chat.settings import ChatSettings, OpenAICompatibleModel, OpenRouterModel
-from petbot.types import BooruArgs, ChatArgs, MathArgs, MusicArgs
+from petbot.types import COMMANDS, BooruArgs, ChatArgs, MathArgs, MusicArgs
 
 
 def test_llm_config_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -136,3 +136,12 @@ async def test_skill_error_does_not_crash_the_agent() -> None:
     result = await skill.run(ChatArgs(message="find a fox"), _ctx())
     assert "e621" in fake.called
     assert not result.is_error  # the failure is reported to the model, not raised
+
+
+async def test_manifest_invoke_dispatches_to_its_skill() -> None:
+    # Each manifest entry dispatches through the Skills client to its named skill —
+    # the one wiring the agent's tools and the edge's slash commands both ride on.
+    fake = FakeSkills({"e621": SkillResult.message("ok")})
+    spec = next(s for s in COMMANDS if s.name == "e621")
+    await spec.invoke(fake, BooruArgs(tags="fox"), _ctx())
+    assert fake.called == ["e621"]
