@@ -49,8 +49,12 @@ scraping.
   aws ssm put-parameter --type SecureString \
     --name /petbot/edge/discord_token --value "<bot token>"
 
-  # Chat LLM: bedrock authenticates via the worker's IAM role (no secret).
-  # For openrouter instead, store the API key and set chat_llm_kind=openrouter:
+  # Chat LLM key — only for the key-based providers:
+  #   openai_compatible (e.g. Bedrock's Gemma 4 "mantle" endpoint): a Bedrock API
+  #   key (Bedrock console -> API keys). bedrock (Converse + IAM) needs no key.
+  # aws ssm put-parameter --type SecureString \
+  #   --name /petbot/core/bedrock_api_key --value "<bedrock api key>"
+  # openrouter instead:
   # aws ssm put-parameter --type SecureString \
   #   --name /petbot/core/openrouter_api_key --value "<key>"
 
@@ -84,9 +88,17 @@ referenced here only by parameter name). The deploy reads them as `TF_VAR_*`:
 | `DEPLOY_ROLE_ARN` | the deploy role ARN | `terraform -chdir=bootstrap output deploy_role_arn` |
 | `AWS_REGION` | e.g. `us-east-1` | your choice (match `backend.hcl` / SSM region) |
 | `TF_STATE_BUCKET` | the state bucket name | the `state_bucket` you chose above |
-| `CHAT_LLM_KIND` | `bedrock` or `openrouter` | your choice of provider |
-| `CHAT_LLM_MODEL` | the model id | a Bedrock model/inference-profile id, or an OpenRouter model id |
-| `CHAT_LLM_API_KEY_SSM_PARAMETER` | e.g. `/petbot/core/openrouter_api_key` | **only** for `openrouter`; leave unset for `bedrock` |
+| `CHAT_LLM_KIND` | `bedrock` \| `openai_compatible` \| `openrouter` | your choice of provider |
+| `CHAT_LLM_MODEL` | the model id | e.g. `google.gemma-4-26b-a4b` (Gemma 4 via mantle), a Bedrock Converse model, or an OpenRouter model |
+| `CHAT_LLM_BASE_URL` | endpoint URL | **only** for `openai_compatible`, e.g. `https://bedrock-mantle.us-east-1.api.aws/openai/v1`; unset otherwise |
+| `CHAT_LLM_API_KEY_SSM_PARAMETER` | e.g. `/petbot/core/bedrock_api_key` | for `openai_compatible` + `openrouter`; **unset** for `bedrock` |
+
+**Provider notes.** `bedrock` = the Converse API with IAM auth (no key) — Nova /
+Claude. **Gemma 4 is served only via Bedrock's OpenAI-compatible "mantle"
+endpoint**, so for Gemma 4 use `CHAT_LLM_KIND=openai_compatible` with the
+`CHAT_LLM_BASE_URL` above and a **Bedrock API key** in SSM. The same
+`openai_compatible` kind also points at a self-hosted Ollama/vLLM later — just a
+different base URL.
 
 That's the complete list — once these Variables and the SSM secrets above exist,
 a push to `master` runs a green deploy. (Merging the PR alone does **not** create

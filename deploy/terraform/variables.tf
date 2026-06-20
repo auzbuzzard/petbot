@@ -67,13 +67,25 @@ variable "timeout" {
 
 variable "chat_llm_kind" {
   type        = string
-  description = "Chat provider discriminator: \"bedrock\" (IAM-auth) or \"openrouter\" (API key)."
+  description = <<-EOT
+    Chat provider discriminator:
+      bedrock           - Converse API, IAM-auth, no key (Nova / Claude).
+      openai_compatible - any OpenAI-compatible endpoint by base URL + key
+                          (Bedrock's Gemma 4 "mantle" endpoint, or Ollama/vLLM).
+      openrouter        - OpenRouter (API key).
+  EOT
   default     = "bedrock"
 
   validation {
-    condition     = contains(["bedrock", "openrouter"], var.chat_llm_kind)
-    error_message = "chat_llm_kind must be \"bedrock\" or \"openrouter\"."
+    condition     = contains(["bedrock", "openai_compatible", "openrouter"], var.chat_llm_kind)
+    error_message = "chat_llm_kind must be one of: bedrock, openai_compatible, openrouter."
   }
+}
+
+variable "chat_llm_base_url" {
+  type        = string
+  description = "Base URL for the openai_compatible provider, e.g. https://bedrock-mantle.<region>.api.aws/openai/v1. Required for that kind; ignored otherwise."
+  default     = ""
 }
 
 variable "chat_llm_model" {
@@ -88,7 +100,7 @@ variable "chat_llm_model" {
 
 variable "chat_llm_api_key_ssm_parameter" {
   type        = string
-  description = "SSM SecureString holding the OpenRouter API key. Required only when chat_llm_kind=openrouter; ignored for bedrock."
+  description = "SSM SecureString holding the chat API key (OpenRouter key, or a Bedrock API key for openai_compatible). Required for openrouter + openai_compatible; ignored for bedrock."
   default     = ""
 }
 
