@@ -301,6 +301,19 @@ data "aws_iam_policy_document" "deploy_permissions" {
     resources = ["*"]
   }
 
+  # First ECS use in an account needs the AWSServiceRoleForECS service-linked
+  # role; ECS auto-creates it iff the caller can. Fenced to the ECS service.
+  statement {
+    sid       = "EcsServiceLinkedRole"
+    actions   = ["iam:CreateServiceLinkedRole"]
+    resources = ["arn:aws:iam::${local.account_id}:role/aws-service-role/ecs.amazonaws.com/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:AWSServiceName"
+      values   = ["ecs.amazonaws.com"]
+    }
+  }
+
   # Read the default VPC/subnets and manage the edge's egress security group.
   # Describe* and SG creation have no scopable resource ARN at plan time.
   statement {
