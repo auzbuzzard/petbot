@@ -1,0 +1,46 @@
+# Randomized, in-character greeter copy for booru search results — read by
+# petbot.skills.booru.render. Content, not code: edit freely, no redeploy logic
+# depends on the wording. Buckets are picked by (has_image, is_explicit); "{author}"
+# is filled with the requester's display name.
+
+[image_result_greeter.success]
+universal = ["I found this image."]
+safe = [
+  "Yes {author}!",
+  "Here's the image.",
+  "Meep, here's your image.",
+  "Here's your image, {author}.",
+  "Mmm, nice choice.",
+  "Hehe ^v^ Here's your image.",
+  "Sure thing {author}~",
+  "Sure thing~",
+  "One image coming up!",
+  "^v^ Here you go~",
+  "I have found this for you.",
+]
+explicit = [
+  "*blushes*",
+  "Eeep, >//< what's on there— o-oh my~",
+  "O-oh dear, h-here you go.",
+  "H-here's your image, {author}…",
+  "H-here's your image…",
+  "o-oh my… how lewd…",
+  "Y-yes {author}…",
+  ".///. oh my…",
+  "Eeep, it's nsfw…",
+  ">///< Here you go",
+]
+
+[image_result_greeter.no_image]
+universal = ["Sorry… but I couldn't find anything with those search terms"]
+safe = [
+  ":< those tags returned empty",
+  "uwu I can't find anything with those tags",
+]
+explicit = [
+  "S-sorry {author}, I couldn't find anything. P-please don't punish me…",
+  ">.< s-sorry {author}, I tried really hard, but I couldn't find anything…",
+]
+# Appended to an empty *SFW* search so the reply states the real reason (the
+# safe-rating floor) instead of leaving the chat model to invent one.
+safe_floor_note = "This channel isn't age-gated, so I only searched safe-rated posts — there may be more in an NSFW channel."
