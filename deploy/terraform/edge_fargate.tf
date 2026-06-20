@@ -79,11 +79,24 @@ resource "aws_iam_role_policy" "edge_exec_secrets" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["ssm:GetParameters"]
-      Resource = [local.discord_token_arn]
-    }]
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameters"]
+        Resource = [local.discord_token_arn]
+      },
+      # The token is a SecureString, so ECS must kms:Decrypt it. Scoped via
+      # kms:ViaService so this role can only decrypt through SSM (incl. the
+      # AWS-managed aws/ssm key, whose policy defers to IAM).
+      {
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = "*"
+        Condition = {
+          StringEquals = { "kms:ViaService" = "ssm.${var.aws_region}.amazonaws.com" }
+        }
+      },
+    ]
   })
 }
 
