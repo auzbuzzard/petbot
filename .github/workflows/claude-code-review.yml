@@ -12,11 +12,10 @@ on:
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+    # Skip Dependabot PRs: they're mechanical dependency bumps where AI review
+    # adds little, and Dependabot runs can't read Actions secrets anyway (they
+    # use a separate Dependabot secret store), so the review would fail at auth.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
 
     runs-on: ubuntu-latest
     permissions:
@@ -36,13 +35,6 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Allow Dependabot-authored PRs to be reviewed. claude-code-action blocks
-          # bot actors by default; scope this to dependabot rather than '*' to avoid
-          # letting arbitrary bots trigger Claude. NOTE: Dependabot pull_request runs
-          # read secrets from the *Dependabot* secrets store, not Actions secrets, so
-          # CLAUDE_CODE_OAUTH_TOKEN must also be added under
-          # Settings -> Secrets and variables -> Dependabot.
-          allowed_bots: 'dependabot[bot]'
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
