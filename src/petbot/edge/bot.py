@@ -1,11 +1,13 @@
-"""The Discord edge: hold the gateway, turn an @mention into a chat call, render.
+"""The Discord edge: hold the gateway, turn an @mention or slash command into a
+dispatched call, render the result.
 
-The thin, always-on process. It runs no skills: every mention is dispatched to a
-worker through the typed :class:`petbot.types.Skills` client (a
-:class:`~petbot.platform.SkillsClient` over an HTTP or Lambda transport), and the
-worker's neutral :class:`~petbot.domain.result.SkillResult` is rendered back to
-the channel. It owns a live connection, so it is smoke-tested manually against a
-dev guild rather than in CI.
+The thin, always-on process. It runs no skills: every @mention (chat) and every
+slash command is dispatched to a worker through the typed :class:`petbot.types.Skills`
+client (a :class:`~petbot.platform.SkillsClient` over an HTTP or Lambda transport),
+and the worker's neutral :class:`~petbot.domain.result.SkillResult` is rendered back.
+Slash commands are defined from the typed ``*Args`` surface, so the edge still never
+imports a skill. It owns a live connection, so the gateway wiring is smoke-tested
+manually against a dev guild; the dispatch/render helpers are unit-tested with fakes.
 """
 
 from __future__ import annotations
@@ -20,8 +22,9 @@ from discord.ext import commands
 
 from petbot.domain import SkillResult
 from petbot.edge.context import build_context
-from petbot.edge.render import respond
+from petbot.edge.render import WORKER_UNREACHABLE, respond
 from petbot.edge.settings import EdgeSettings, HttpWorker, LambdaWorker
+from petbot.edge.slash import build_commands
 from petbot.logging_setup import configure_logging
 from petbot.platform import HttpTransport, LambdaTransport, SkillsClient
 from petbot.types import ChatArgs, Skills
@@ -62,6 +65,22 @@ class PetBot(commands.Bot):
                 self.skills = SkillsClient(HttpTransport(url, self._http))
             case _:
                 assert_never(worker)
+        # Build the slash commands once the Skills client is wired; the closure
+        # captures it. Each command rides the shared command_handler pipeline.
+        for command in build_commands(self.skills):
+            self.tree.add_command(command)
+        await self._sync_commands()
+
+    async def _sync_commands(self) -> None:
+        """Register the app commands with Discord. ``dev_guild_id`` syncs to that
+        guild (instant, for iteration); otherwise a global sync (which Discord can
+        take up to an hour to propagate the first time)."""
+        if self.settings.dev_guild_id is not None:
+            guild = discord.Object(id=self.settings.dev_guild_id)
+            self.tree.copy_global_to(guild=guild)
+            await self.tree.sync(guild=guild)
+        else:
+            await self.tree.sync()
 
     async def on_ready(self) -> None:
         if self.user is not None:
@@ -83,9 +102,7 @@ class PetBot(commands.Bot):
                 return await self.skills.chat(ChatArgs(message=text), build_context(message))
         except Exception:
             logger.exception("dispatch failed")
-            return SkillResult.failure(
-                "uwu I couldn't reach my brain right now — please try again soon."
-            )
+            return SkillResult.failure(WORKER_UNREACHABLE)
 
     async def close(self) -> None:
         if self._http is not None:
