@@ -86,6 +86,8 @@ def test_build_context_reads_nsfw_and_ids() -> None:
     assert nsfw.allows_explicit is True
     assert nsfw.conversation_id == "discord:5"
     assert nsfw.user.display_name == "Rex"
+    # The @mention path is voiced by the chat agent, so the worker must not re-style.
+    assert nsfw.style_results is False
     sfw = build_context(FakeMessage(FakeChannel(nsfw=False)))  # type: ignore[arg-type]
     assert sfw.allows_explicit is False
 
@@ -148,6 +150,8 @@ def test_build_interaction_context_reads_nsfw_and_ids() -> None:
     assert ctx.allows_explicit is True
     assert ctx.conversation_id == "discord:8"
     assert ctx.user.display_name == "Rex"
+    # A slash command has no chat agent to voice the reply, so it asks the worker to.
+    assert ctx.style_results is True
     sfw = build_interaction_context(FakeInteraction(nsfw=False))  # type: ignore[arg-type]
     assert sfw.allows_explicit is False
 
@@ -193,8 +197,9 @@ async def test_with_defer_acks_before_delegating() -> None:
 
 
 async def test_slash_command_dispatches_and_followups() -> None:
-    # A built command rides the shared pipeline: defer, dispatch the validated args
-    # to its skill, send the result as a followup.
+    # A built command rides the shared pipeline: defer, dispatch the validated args to
+    # its skill, send the result as a followup. Styling is the worker's job (gated on
+    # ctx.style_results), so the edge sends whatever the dispatch returned, untouched.
     skills = _StubSkills()
     math = next(c for c in build_commands(skills) if c.name == "math")
     interaction = FakeInteraction()

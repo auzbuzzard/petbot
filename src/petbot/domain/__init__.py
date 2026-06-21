@@ -12,7 +12,13 @@ from petbot.domain._model import Frozen
 from petbot.domain.call import SkillCall, Transport
 from petbot.domain.capability import Capability
 from petbot.domain.context import Platform, SkillContext, User
-from petbot.domain.ports import TrackFinishedCallback, VoicePort, VoiceProvider
+from petbot.domain.ports import (
+    StylePort,
+    StyleProvider,
+    TrackFinishedCallback,
+    VoicePort,
+    VoiceProvider,
+)
 from petbot.domain.result import EmbedSpec, SkillResult
 from petbot.domain.skill import Skill
 
@@ -25,6 +31,8 @@ __all__ = [
     "SkillCall",
     "SkillContext",
     "SkillResult",
+    "StylePort",
+    "StyleProvider",
     "TrackFinishedCallback",
     "Transport",
     "User",
