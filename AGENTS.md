@@ -14,7 +14,7 @@ dispatches every request to a **worker** that does. One installable package
 | `petbot.domain` | Kernel: frozen pydantic models (`SkillResult`, `SkillContext`, `EmbedSpec`), the generic `Skill[ArgsT]` ABC, ports (`VoicePort`, `VoiceProvider`), and the dispatch primitives (`SkillCall`, `Transport`). Depends on nothing else first-party. |
 | `petbot.types` | The typed surface the edge imports without skills: per-skill `*Args` models + the `Skills` client Protocol. |
 | `petbot.platform` | `Worker` (runs a dispatched call), `SkillsClient` (the one `Skills` impl), and the transports (`LocalTransport`, `HttpTransport`, `LambdaTransport`). |
-| `petbot.skills.{math,booru,music,chat}` | One skill each. `chat` is a pydantic-ai agent whose tools are its sibling skills. |
+| `petbot.skills.{math,booru,music,chat}` | One skill each. `chat` is a pydantic-ai agent whose tools are its sibling skills; it also exports `LLMStyleProvider` (a `StyleProvider` port), the small LLM that restyles a result in PetBot's voice for the LLM-free slash path. |
 | `petbot.edge` | The edge: `@mention` → `skills.chat(...)` → render. |
 | `petbot.workers.{core,music}` | Deployable bundles: core = math+booru+chat (Lambda/HTTP); music = gateway + voice host. |
 

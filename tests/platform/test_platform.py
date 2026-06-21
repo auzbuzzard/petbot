@@ -84,6 +84,62 @@ async def test_local_transport_runs_in_process_without_json() -> None:
     assert result.text == "got 42"
 
 
+class _Stylist:
+    """A fake StylePort: wraps the result text so styling is observable."""
+
+    async def stylize(self, result: SkillResult, ctx: SkillContext) -> SkillResult:
+        return result.model_copy(update={"text": f"~{result.text}~"})
+
+
+class _StyleProvider:
+    """Resolves the stylist only when the request asked to be styled."""
+
+    def for_context(self, ctx: SkillContext) -> _Stylist | None:
+        return _Stylist() if ctx.style_results else None
+
+
+class _BoomStyleProvider:
+    """Its stylist always raises — to prove styling failure is non-fatal."""
+
+    def for_context(self, ctx: SkillContext) -> _Stylist:
+        class _Boom:
+            async def stylize(self, result: SkillResult, ctx: SkillContext) -> SkillResult:
+                raise RuntimeError("stylist down")
+
+        return _Boom()  # type: ignore[return-value]
+
+
+def _styled_call(expression: str) -> SkillCall:
+    ctx = SkillContext(
+        platform=Platform.DISCORD,
+        user=User(platform=Platform.DISCORD, id="1", display_name="tester"),
+        conversation_id="discord:1",
+        style_results=True,
+    )
+    return SkillCall(skill="math", args=MathArgs(expression=expression), context=ctx)
+
+
+async def test_worker_styles_result_when_request_asks() -> None:
+    # A frontend with no LLM (style_results=True) gets the result restyled worker-side.
+    worker = Worker([_EchoSkill()], style_provider=_StyleProvider())
+    result = await worker.run(_styled_call("6 * 7"))
+    assert result.text == "~got 6 * 7~"
+
+
+async def test_worker_leaves_result_unstyled_by_default() -> None:
+    # The @mention path (style_results=False) is untouched — the chat agent styles it.
+    worker = Worker([_EchoSkill()], style_provider=_StyleProvider())
+    result = await worker.run(_call("math", "6 * 7"))
+    assert result.text == "got 6 * 7"
+
+
+async def test_worker_styling_failure_degrades_to_unstyled() -> None:
+    # A stylist that raises must not sink the answer — the unstyled result still ships.
+    worker = Worker([_EchoSkill()], style_provider=_BoomStyleProvider())
+    result = await worker.run(_styled_call("6 * 7"))
+    assert result.text == "got 6 * 7"
+
+
 async def test_http_transport_round_trip() -> None:
     worker = Worker([_EchoSkill()])
 

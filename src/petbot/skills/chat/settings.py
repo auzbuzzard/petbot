@@ -5,6 +5,11 @@ Provider-agnostic (no vendor lock-in): the LLM is a **discriminated union**
 exist — no model name in code, no ``str | None`` for conditionally-required
 values. Set via nested env, e.g. ``CHAT_LLM__KIND=openrouter`` +
 ``CHAT_LLM__MODEL=…`` + ``CHAT_LLM__API_KEY=…``.
+
+Two **roles**, both the same config union: ``llm`` is the tool-calling agent;
+``stylizer`` is an optional cheaper model that restyles a finished result in PetBot's
+voice for the LLM-free slash path (``CHAT_STYLIZER__KIND=…`` etc.). Unset ⇒ the
+stylizer reuses ``llm``, so picking a cheaper tier is a config flip, not code.
 """
 
 from __future__ import annotations
@@ -16,16 +21,30 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def _load_default_system_prompt() -> str:
-    """The default persona, shipped as package data (``prompts/system.md``) so it
-    edits as prose — clean diffs, no Python escaping — and overrides via
-    ``CHAT_SYSTEM_PROMPT``. Mirrors how the booru skill ships ``utterances.json``."""
-    return (
-        resources.files(__package__)
-        .joinpath("prompts/system.md")
-        .read_text(encoding="utf-8")
-        .strip()
+def _prompt(*names: str) -> str:
+    """Join one or more prompt fragments shipped as package data (``prompts/*.md``).
+
+    The persona is prose, not a Python constant — clean diffs, no escaping — and the
+    shared ``persona.md`` fragment is composed into each role's prompt so the voice
+    is defined once.
+    """
+    parts = (
+        resources.files(__package__).joinpath("prompts", name).read_text(encoding="utf-8").strip()
+        for name in names
     )
+    return "\n\n".join(parts)
+
+
+def _load_agent_prompt() -> str:
+    """The conversational agent's prompt: shared persona + its tool-use and
+    no-invented-reason rules. Overridable via ``CHAT_SYSTEM_PROMPT``."""
+    return _prompt("persona.md", "agent.md")
+
+
+def _load_stylizer_prompt() -> str:
+    """The slash-path stylizer's prompt: the same persona + a faithful-rewrite
+    instruction. Overridable via ``CHAT_STYLIZER_PROMPT``."""
+    return _prompt("persona.md", "stylizer.md")
 
 
 class BedrockModel(BaseModel):
@@ -65,7 +84,7 @@ LLMConfig = Annotated[
 
 
 class ChatSettings(BaseSettings):
-    """Which LLM the chat agent talks to, and how to reach it."""
+    """Which LLM(s) the chat skill talks to, and how to reach them."""
 
     model_config = SettingsConfigDict(
         env_prefix="chat_",
@@ -76,7 +95,18 @@ class ChatSettings(BaseSettings):
         frozen=True,
     )
 
-    #: The LLM to use (required; see ``CHAT_LLM__*``).
+    #: The tool-calling agent's LLM (required; see ``CHAT_LLM__*``).
     llm: LLMConfig
-    #: The agent's persona (``prompts/system.md``); override via ``CHAT_SYSTEM_PROMPT``.
-    system_prompt: str = Field(default_factory=_load_default_system_prompt)
+    #: Optional cheaper model for the slash-path stylizer (``CHAT_STYLIZER__*``);
+    #: unset ⇒ reuse :attr:`llm`. Resolved by :meth:`stylizer_llm`.
+    stylizer: LLMConfig | None = None
+    #: The agent's persona + rules (``prompts/persona.md`` + ``agent.md``); override
+    #: via ``CHAT_SYSTEM_PROMPT``.
+    system_prompt: str = Field(default_factory=_load_agent_prompt)
+    #: The stylizer's persona + rewrite rule (``persona.md`` + ``stylizer.md``);
+    #: override via ``CHAT_STYLIZER_PROMPT``.
+    stylizer_prompt: str = Field(default_factory=_load_stylizer_prompt)
+
+    def stylizer_llm(self) -> LLMConfig:
+        """The stylizer's model config: its own if set, else the agent's (one tier)."""
+        return self.stylizer or self.llm

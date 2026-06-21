@@ -2,40 +2,49 @@
 
 This is the one place that knows how a result is presented, and it knows nothing
 about ratings beyond the resolved ``color``/``is_safe`` already on the ``Post``.
-The randomized, in-character greeter lives here too (it reads ``utterances.toml``
-shipped alongside this package).
+
+The outcome is modelled, not stringly-typed: a found post becomes a card with no
+greeting text (the persona layer greets over it), and an empty search becomes an
+:class:`EmptyReason` rendered once to a factual note. The voice — greeting or
+relaying that note — is added downstream (the chat agent, or the worker's stylist),
+never shipped from here.
 """
 
 from __future__ import annotations
 
-import logging
-import random
-import tomllib
-from collections.abc import Mapping, Sequence
-from functools import lru_cache
-from importlib import resources
-from typing import Any
+from collections.abc import Sequence
+from enum import StrEnum
 
 from petbot.domain import EmbedSpec, SkillResult
 from petbot.skills.booru.types import Post, SearchRequest
 
-logger = logging.getLogger(__name__)
 
-_UTTERANCES_RESOURCE = "utterances.toml"
+class EmptyReason(StrEnum):
+    """Why a search came back empty — the fact the persona layer relays."""
+
+    #: A safe-only search (the channel isn't age-gated) found nothing.
+    SAFE_FLOOR = "safe_floor"
+    #: A search that looked at everything available found nothing.
+    NO_MATCH = "no_match"
 
 
-def render(post: Post | None, *, request: SearchRequest, author: str) -> SkillResult:
+#: One factual note per reason. Stated plainly so whoever voices it (chat agent or
+#: stylist) relays the real reason instead of inventing one (a typo, etc.).
+_EMPTY_NOTE: dict[EmptyReason, str] = {
+    EmptyReason.SAFE_FLOOR: (
+        "No results. This channel isn't age-gated, so only safe-rated posts were "
+        "searched — there may be more in an NSFW channel."
+    ),
+    EmptyReason.NO_MATCH: "No results found for those tags.",
+}
+
+
+def render(post: Post | None, *, request: SearchRequest) -> SkillResult:
     """Render a search outcome. ``post is None`` is an ordinary empty result."""
     if post is None:
-        text = result_greeter(has_image=False, is_explicit=not request.safe_only, author=author)
-        if request.safe_only:
-            # An empty *SFW* search: state the real reason (the safe-rating floor) so
-            # the chat model relays it instead of guessing one. Only here — an empty
-            # NSFW search really did look at everything.
-            text += f" ({safe_floor_note()})"
-        return SkillResult.message(text)
+        reason = EmptyReason.SAFE_FLOOR if request.safe_only else EmptyReason.NO_MATCH
+        return SkillResult.message(_EMPTY_NOTE[reason])
 
-    greeter = result_greeter(has_image=True, is_explicit=not post.is_safe, author=author)
     if post.total is not None:
         title = f"{post.total} result{'s' if post.total != 1 else ''}: {tags_label(request.tags)}"
     else:
@@ -54,7 +63,8 @@ def render(post: Post | None, *, request: SearchRequest, author: str) -> SkillRe
         author_url=post.site_root,
         author_icon_url=post.site_icon_url,
     )
-    return SkillResult.message(greeter, embed=embed)
+    # No greeting text: the card is the content, and the persona layer greets over it.
+    return SkillResult.message(embed=embed)
 
 
 def tags_label(tags: Sequence[str], *, limit: int = 256) -> str:
@@ -70,37 +80,3 @@ def tags_label(tags: Sequence[str], *, limit: int = 256) -> str:
         truncated.append(tag)
         used += len(tag) + 2
     return ", ".join(truncated) + " …"
-
-
-@lru_cache(maxsize=1)
-def _load_utterances() -> Mapping[str, Any]:
-    text = resources.files(__package__).joinpath(_UTTERANCES_RESOURCE).read_text(encoding="utf-8")
-    parsed: Mapping[str, Any] = tomllib.loads(text)
-    return parsed
-
-
-def result_greeter(*, has_image: bool, is_explicit: bool, author: str) -> str:
-    """Return a randomized, in-character greeting for a search result.
-
-    ``author`` is a plain display name (no Discord objects), keeping this neutral.
-    """
-    try:
-        greeter = _load_utterances()["image_result_greeter"]
-        bucket = greeter["success"] if has_image else greeter["no_image"]
-        sentences: list[str] = list(bucket["universal"])
-        sentences += bucket["explicit"] if is_explicit else bucket["safe"]
-        return random.choice(sentences).format(author=author)
-    except (OSError, KeyError, ValueError):
-        logger.warning("Falling back to default greeter (utterances unavailable)", exc_info=True)
-        return "I have found this image." if has_image else "I couldn't find anything."
-
-
-def safe_floor_note() -> str:
-    """The note appended to an empty SFW search, kept beside the greeters in
-    ``utterances.json`` (persona copy lives in one place)."""
-    try:
-        note: str = _load_utterances()["image_result_greeter"]["no_image"]["safe_floor_note"]
-        return note
-    except (OSError, KeyError, ValueError):
-        logger.warning("Falling back to default safe-floor note (utterances unavailable)")
-        return "I only searched safe-rated posts here — there may be more in an NSFW channel."

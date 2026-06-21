@@ -60,7 +60,7 @@ async def _run(
     # The boundary that *handles* a failed search (turns it into a SkillResult),
     # so it's the one place that logs it — at a level matching severity.
     try:
-        return await run_search(provider, client, search, author=ctx.user.display_name)
+        return await run_search(provider, client, search)
     except SiteFailureStatusError as exc:
         logger.debug("%s rejected the search: %s", provider.name, exc.site_message)
         return SkillResult.failure(exc.print_message)

@@ -70,7 +70,6 @@ include = ["petbot*"]
 
 [tool.setuptools.package-data]
 "petbot" = ["py.typed"]
-"petbot.skills.booru" = ["utterances.toml"]
 "petbot.skills.chat" = ["prompts/*.md"]
 "petbot.logging_configs" = ["*.json"]
 
