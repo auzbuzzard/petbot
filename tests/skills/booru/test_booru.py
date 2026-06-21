@@ -189,7 +189,7 @@ async def test_run_search_renders_post() -> None:
     provider = e621.E621Provider(user_agent="PetBot/2.1 (test)")
     search = SearchRequest(tags=("canine",), safe_only=True)
     async with httpx.AsyncClient() as client:
-        result = await run_search(provider, client, search, author="Rex")
+        result = await run_search(provider, client, search)
     assert not result.is_error
     assert result.embed is not None and result.embed.author_name == "e621"
 
@@ -202,9 +202,7 @@ async def test_run_search_surfaces_site_error_body() -> None:
     provider = e621.E621Provider(user_agent="PetBot/2.1 (test)")
     async with httpx.AsyncClient() as client:
         with pytest.raises(SiteFailureStatusError) as exc:
-            await run_search(
-                provider, client, SearchRequest(tags=("x",), safe_only=False), author="Rex"
-            )
+            await run_search(provider, client, SearchRequest(tags=("x",), safe_only=False))
     assert "more than 40 tags" in exc.value.site_message
 
 

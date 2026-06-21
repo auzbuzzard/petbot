@@ -18,7 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from petbot.domain import Skill, SkillCall, SkillContext, SkillResult
+from petbot.domain import Skill, SkillCall, SkillContext, SkillResult, StyleProvider
 
 logger = logging.getLogger(__name__)
 
@@ -48,10 +48,16 @@ def _discover(group: str = SKILLS_GROUP) -> Iterator[Skill[Any]]:
 class Worker:
     """Runs the skill named in a :class:`SkillCall` against its installed plugins."""
 
-    def __init__(self, skills: Iterable[Skill[Any]]) -> None:
+    def __init__(
+        self, skills: Iterable[Skill[Any]], *, style_provider: StyleProvider | None = None
+    ) -> None:
         self._skills: dict[str, Skill[Any]] = {}
         for skill in skills:
             self._add(skill)
+        # Resolved per request: a result is restyled only when the provider hands back
+        # a port for its context (a frontend with no LLM of its own). Most workers
+        # pass none; the persona model never leaves the worker that holds it.
+        self._style_provider = style_provider
 
     def _add(self, skill: Skill[Any]) -> None:
         if skill.name in self._skills:
@@ -59,9 +65,9 @@ class Worker:
         self._skills[skill.name] = skill
 
     @classmethod
-    def from_installed_skills(cls) -> Worker:
+    def from_installed_skills(cls, *, style_provider: StyleProvider | None = None) -> Worker:
         """Build a worker from the ``petbot.skills`` plugins installed here."""
-        return cls(_discover())
+        return cls(_discover(), style_provider=style_provider)
 
     def register(self, skill: Skill[Any]) -> None:
         """Add a skill built with dependencies discovery can't supply (chat, music)."""
@@ -82,10 +88,26 @@ class Worker:
             logger.warning("Call for unknown skill: %r", call.skill)
             return SkillResult.failure(_unknown_skill(call.skill))
         try:
-            return await skill.run(call.args, call.context)
+            result = await skill.run(call.args, call.context)
         except Exception:
             logger.exception("Skill %r raised", call.skill)
             return SkillResult.failure(_SKILL_CRASHED)
+        return await self._styled(result, call.context)
+
+    async def _styled(self, result: SkillResult, ctx: SkillContext) -> SkillResult:
+        """Restyle the result in PetBot's voice when the provider resolves a port for
+        this request; otherwise return it unchanged. Styling failure is non-fatal —
+        the answer ships unstyled rather than not at all."""
+        if self._style_provider is None:
+            return result
+        port = self._style_provider.for_context(ctx)
+        if port is None:
+            return result
+        try:
+            return await port.stylize(result, ctx)
+        except Exception:
+            logger.warning("Styling failed; returning the unstyled result", exc_info=True)
+            return result
 
     async def serve(self, body: str | bytes) -> str:
         """Remote boundary: decode a wire payload, run it, encode the result.

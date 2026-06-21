@@ -38,8 +38,6 @@ async def run_search(
     provider: BooruProvider,
     client: httpx.AsyncClient,
     search: SearchRequest,
-    *,
-    author: str,
 ) -> SkillResult:
     """Send the search, surface any site/HTTP error, then render the first result."""
     # Logged from the neutral SearchRequest, never the wire request — the latter
@@ -79,7 +77,7 @@ async def run_search(
             print_message=_site_unreadable(provider.name),
         )
 
-    return render(provider.parse(body), request=search, author=author)
+    return render(provider.parse(body), request=search)
 
 
 def _json_body(response: httpx.Response) -> object | None:

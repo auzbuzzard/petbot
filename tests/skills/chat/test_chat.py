@@ -8,9 +8,14 @@ from pydantic import ValidationError
 from pydantic_ai.models.test import TestModel
 
 from petbot.domain import EmbedSpec, Platform, SkillContext, SkillResult, User
-from petbot.skills.chat import ChatSkill
-from petbot.skills.chat.model import build_model
-from petbot.skills.chat.settings import ChatSettings, OpenAICompatibleModel, OpenRouterModel
+from petbot.skills.chat import ChatSkill, Stylist
+from petbot.skills.chat.model import build_model, build_model_from_config
+from petbot.skills.chat.settings import (
+    BedrockModel,
+    ChatSettings,
+    OpenAICompatibleModel,
+    OpenRouterModel,
+)
 from petbot.types import COMMANDS, BooruArgs, ChatArgs, MathArgs, MusicArgs
 
 
@@ -50,26 +55,82 @@ def test_openai_compatible_builds_an_openai_model() -> None:
     assert isinstance(build_model(settings), OpenAIChatModel)
 
 
-def test_system_prompt_loads_from_package_data(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The default persona ships as prompts/system.md (package data), not an inline
-    # constant: loaded by default, with the no-result relay rule baked into the file.
-    monkeypatch.delenv("CHAT_SYSTEM_PROMPT", raising=False)
-    settings = ChatSettings(
+def _settings(**kw: object) -> ChatSettings:
+    return ChatSettings(
         llm=OpenAICompatibleModel(model="m", base_url="https://x/v1", api_key="k"),
         _env_file=None,
+        **kw,  # type: ignore[arg-type]
     )
-    assert "PetBot" in settings.system_prompt
-    assert "age-gated" in settings.system_prompt
+
+
+def test_system_prompt_composes_persona_and_agent_rules(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The agent prompt is persona.md + agent.md package data — the persona (PetBot,
+    # the voice) plus the tool/no-invent rules (the safe-rating relay).
+    monkeypatch.delenv("CHAT_SYSTEM_PROMPT", raising=False)
+    settings = _settings()
+    assert "PetBot" in settings.system_prompt  # persona fragment
+    assert "age-gated" in settings.system_prompt  # agent-rules fragment
 
 
 def test_system_prompt_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     # CHAT_SYSTEM_PROMPT still wins over the shipped default.
     monkeypatch.setenv("CHAT_SYSTEM_PROMPT", "Be terse.")
-    settings = ChatSettings(
-        llm=OpenAICompatibleModel(model="m", base_url="https://x/v1", api_key="k"),
-        _env_file=None,
-    )
-    assert settings.system_prompt == "Be terse."
+    assert _settings().system_prompt == "Be terse."
+
+
+def test_stylizer_prompt_shares_the_persona(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The stylizer prompt reuses persona.md (one voice) plus a faithful-rewrite rule.
+    monkeypatch.delenv("CHAT_STYLIZER_PROMPT", raising=False)
+    stylizer_prompt = _settings().stylizer_prompt
+    assert "PetBot" in stylizer_prompt  # same persona fragment as the agent
+    assert "voice" in stylizer_prompt.lower()
+
+
+def test_stylizer_defaults_to_the_agent_model() -> None:
+    # Unset CHAT_STYLIZER__* ⇒ the stylizer reuses the agent's LLM (a single tier).
+    settings = _settings()
+    assert settings.stylizer is None
+    assert settings.stylizer_llm() == settings.llm
+
+
+def test_stylizer_uses_its_own_tier_when_configured() -> None:
+    # A cheaper stylizer tier is config, not code: a Bedrock Nova for the stylizer,
+    # the OpenAI-compatible agent untouched.
+    nova = BedrockModel(model="amazon.nova-micro-v1:0")
+    settings = _settings(stylizer=nova)
+    assert settings.stylizer_llm() == nova
+    assert settings.stylizer_llm() != settings.llm
+
+
+def test_build_model_from_config_builds_each_role() -> None:
+    from pydantic_ai.models.openai import OpenAIChatModel
+
+    cfg = OpenAICompatibleModel(model="m", base_url="https://x/v1", api_key="k")
+    assert isinstance(build_model_from_config(cfg), OpenAIChatModel)
+
+
+async def test_stylist_rewrites_result_text_in_character() -> None:
+    # The stylist restyles a factual result text into one in-character line.
+    stylist = Stylist(model=TestModel(custom_output_text="meep~ those tags came up empty"))
+    result = await stylist.stylize(SkillResult.message("No results found for those tags."), _ctx())
+    assert not result.is_error
+    assert result.text == "meep~ those tags came up empty"
+
+
+async def test_stylist_greets_over_a_found_image() -> None:
+    # A card-only result (no text) is greeted over; the embed is preserved.
+    stylist = Stylist(model=TestModel(custom_output_text="^v^ here you go~"))
+    found = SkillResult.message(embed=EmbedSpec(title="result", image_url="https://img/x.png"))
+    result = await stylist.stylize(found, _ctx())
+    assert result.text == "^v^ here you go~"
+    assert result.embed is not None and result.embed.image_url == "https://img/x.png"
+
+
+async def test_stylist_passes_errors_through_unchanged() -> None:
+    # A friendly failure is never restyled — it ships as-is.
+    stylist = Stylist(model=TestModel(custom_output_text="should not be used"))
+    result = await stylist.stylize(SkillResult.failure("the booru is down"), _ctx())
+    assert result.is_error and result.error == "the booru is down"
 
 
 class FakeSkills:

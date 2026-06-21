@@ -1,7 +1,9 @@
-"""Build the pydantic-ai model from :class:`ChatSettings` — the only vendor-aware spot.
+"""Build a pydantic-ai model from a provider config — the only vendor-aware spot.
 
 Kept apart from the agent so the agent stays provider-agnostic and tests can run
-the agent against ``TestModel`` without importing any SDK.
+the agent against ``TestModel`` without importing any SDK. The same builder serves
+both roles: the tool-calling agent (:attr:`ChatSettings.llm`) and the slash-path
+stylizer (:meth:`ChatSettings.stylizer_llm`), since both are the same ``LLMConfig`` union.
 """
 
 from __future__ import annotations
@@ -13,14 +15,15 @@ from pydantic_ai.models import Model
 from petbot.skills.chat.settings import (
     BedrockModel,
     ChatSettings,
+    LLMConfig,
     OpenAICompatibleModel,
     OpenRouterModel,
 )
 
 
-def build_model(settings: ChatSettings) -> Model:
-    """Construct the configured LLM model from the discriminated provider config."""
-    match settings.llm:
+def build_model_from_config(llm: LLMConfig) -> Model:
+    """Construct an LLM model from one discriminated provider config (either role)."""
+    match llm:
         case OpenRouterModel(model=model, api_key=api_key):
             from pydantic_ai.models.openai import OpenAIChatModel
             from pydantic_ai.providers.openrouter import OpenRouterProvider
@@ -38,4 +41,9 @@ def build_model(settings: ChatSettings) -> Model:
 
             return BedrockConverseModel(model)
         case _:
-            assert_never(settings.llm)
+            assert_never(llm)
+
+
+def build_model(settings: ChatSettings) -> Model:
+    """The agent's model — the configured tool-calling provider (:attr:`llm`)."""
+    return build_model_from_config(settings.llm)

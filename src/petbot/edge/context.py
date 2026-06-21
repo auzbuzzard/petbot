@@ -59,4 +59,7 @@ def build_interaction_context(interaction: discord.Interaction) -> SkillContext:
         user=user,
         conversation_id=f"discord:{interaction.channel_id}",
         allows_explicit=_channel_is_nsfw(interaction.channel),
+        # A slash command has no chat agent to voice the reply, so the worker applies
+        # the persona style to the result on the way out.
+        style_results=True,
     )

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from petbot.domain.context import SkillContext
+    from petbot.domain.result import SkillResult
 
 #: Invoked (no arguments) when a track finishes on its own, so the caller can
 #: advance a queue. Adapters schedule it on the event loop.
@@ -65,4 +66,31 @@ class VoiceProvider(Protocol):
 
     def for_context(self, ctx: SkillContext) -> VoicePort | None:
         """The voice port for this request, or ``None`` if voice is unavailable."""
+        ...
+
+
+@runtime_checkable
+class StylePort(Protocol):
+    """Rewrites a finished :class:`~petbot.domain.result.SkillResult`'s text into
+    PetBot's voice — text style transfer: change the wording/register, preserve the
+    meaning. It is the persona for a frontend that has no LLM of its own (a slash
+    command); the ``@mention`` path needs none, since the chat agent already voices
+    its output. An error result is returned unchanged.
+    """
+
+    async def stylize(self, result: SkillResult, ctx: SkillContext) -> SkillResult:
+        """Return ``result`` with its text restyled in character (meaning intact)."""
+        ...
+
+
+@runtime_checkable
+class StyleProvider(Protocol):
+    """Resolves the :class:`StylePort` for a request, or ``None`` when no styling is
+    wanted (the caller voices its own output). Like :class:`VoiceProvider` it is
+    implemented worker-side and resolved per request, so the persona model never
+    rides on the wire; the dispatch boundary applies the port it returns.
+    """
+
+    def for_context(self, ctx: SkillContext) -> StylePort | None:
+        """The style port for this request, or ``None`` to leave the result as-is."""
         ...
