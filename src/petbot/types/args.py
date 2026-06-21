@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Literal
 
+from pydantic import Field
+
 from petbot.domain import Frozen
 
 #: The music actions the skill understands.
@@ -22,7 +24,9 @@ MusicAction = Literal["play", "skip", "stop", "queue", "volume"]
 class MathArgs(Frozen):
     """Arguments for the ``math`` skill."""
 
-    expression: str
+    # Field descriptions are the one source of per-argument help: they ride into the
+    # LLM tool's json-schema *and* the Discord slash option descriptions.
+    expression: str = Field(description="Arithmetic expression to evaluate.")
 
 
 class BooruArgs(Frozen):
@@ -34,11 +38,11 @@ class BooruArgs(Frozen):
     provider's native vocabulary.
     """
 
-    tags: str
-    sort: str | None = None
-    file_type: str | None = None
-    min_score: int | None = None
-    descending: bool = True
+    tags: str = Field(description="Search tags, space-separated.")
+    sort: str | None = Field(default=None, description="Provider sort token (e.g. score).")
+    file_type: str | None = Field(default=None, description="Restrict to a file type.")
+    min_score: int | None = Field(default=None, description="Minimum score floor.")
+    descending: bool = Field(default=True, description="Highest-scoring first.")
 
 
 class MusicArgs(Frozen):
