@@ -31,7 +31,7 @@ class TextInput(Frozen):
 class CommandInput(Frozen):
     """A resolved command (a slash invocation): the tool name and its raw arg values.
 
-    ``values`` are *unvalidated* here — the worker validates them against the named
+    ``values`` are *unvalidated* here — the compute service validates them against the named
     skill's ``args_model`` at the dispatch boundary, so this neutral input never
     needs to know any skill's argument shape.
     """

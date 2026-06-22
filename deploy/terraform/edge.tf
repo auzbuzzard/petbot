@@ -75,8 +75,8 @@ resource "aws_lightsail_container_service_deployment_version" "edge" {
     environment = {
       LOG_LEVEL             = var.log_level
       ENV                   = var.lambda_environment
-      WORKER__KIND          = "lambda"
-      WORKER__FUNCTION_NAME = aws_lambda_function.this.function_name
+      SERVICE__KIND          = "lambda"
+      SERVICE__FUNCTION_NAME = aws_lambda_function.this.function_name
       AWS_REGION            = var.aws_region
       # Scoped identity for boto3's default credential chain (Lightsail container
       # services have no IAM instance roles, so a static key is the mechanism).

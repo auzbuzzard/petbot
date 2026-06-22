@@ -3,7 +3,7 @@
 Rendering and length-chunking are the frontend's job, never the skill's — a
 skill returns an :class:`EmbedSpec` (a neutral card description), never a
 platform-native embed. Both types are :class:`~petbot.domain._model.Frozen`
-pydantic models, so a result serialises itself back to the edge over the wire.
+pydantic models, so a result serialises itself back to the frontend over the wire.
 """
 
 from __future__ import annotations

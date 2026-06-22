@@ -34,5 +34,5 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN useradd --create-home --uid 10001 petbot
 USER petbot
 
-# The console script defined in pyproject ([project.scripts] petbot-edge).
-CMD ["petbot-edge"]
+# The console script defined in pyproject ([project.scripts] petbot-discord).
+CMD ["petbot-discord"]

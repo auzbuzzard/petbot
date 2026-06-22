@@ -1,8 +1,8 @@
 """The booru skill package: the ``derpi`` and ``e621`` search skills.
 
 The entry-point factories (:func:`build_derpi`, :func:`build_e621`) read the
-worker's :class:`~petbot.skills.booru.settings.BooruSettings` and inject a shared
-``httpx.AsyncClient`` — the per-skill ``build(settings)`` wiring the worker uses
+service's :class:`~petbot.skills.booru.settings.BooruSettings` and inject a shared
+``httpx.AsyncClient`` — the per-skill ``build(settings)`` wiring the registry uses
 in place of zero-arg construction.
 """
 
@@ -15,7 +15,7 @@ from petbot.skills.booru.skill import DerpiSkill, E621Skill
 
 __all__ = ["DerpiSkill", "E621Skill", "build_derpi", "build_e621"]
 
-#: One client shared by the worker's booru skills (connection reuse).
+#: One client shared by the service's booru skills (connection reuse).
 _client: httpx.AsyncClient | None = None
 
 

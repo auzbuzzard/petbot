@@ -11,12 +11,12 @@ from petbot.domain import CommandInput, EmbedSpec, Platform, Process, SkillConte
 from petbot.frontends.discord.bot import PetBot, _without_mention
 from petbot.frontends.discord.context import build_context, build_interaction_context
 from petbot.frontends.discord.render import (
-    WORKER_UNREACHABLE,
+    SERVICE_UNREACHABLE,
     respond,
     respond_interaction,
     to_embed,
 )
-from petbot.frontends.discord.settings import EdgeSettings, HttpWorker
+from petbot.frontends.discord.settings import DiscordSettings, HttpService
 from petbot.frontends.discord.slash import _as_app_command, _with_defer, build_commands
 from petbot.frontends.discord.text import chunk_text
 from petbot.types import CATALOG
@@ -108,11 +108,11 @@ class _RaisingProcess(Process):
 
 
 async def test_mention_maps_transport_error_to_friendly_result() -> None:
-    bot = PetBot(EdgeSettings(discord_token="x", worker=HttpWorker(url="http://worker/dispatch")))
+    bot = PetBot(DiscordSettings(discord_token="x", service=HttpService(url="http://svc/dispatch")))
     bot.process = _RaisingProcess()
     result = await bot._respond("hello", FakeMessage(FakeChannel()))  # type: ignore[arg-type]
     # The transport failure became the one static, unstyled fallback — not a crash.
-    assert result.text == WORKER_UNREACHABLE
+    assert result.text == SERVICE_UNREACHABLE
 
 
 # --- slash commands ----------------------------------------------------------
@@ -203,7 +203,7 @@ async def test_slash_command_maps_failure_to_friendly_followup() -> None:
     interaction = FakeInteraction()
     await e621.callback(interaction, tags="fox")  # type: ignore[arg-type, call-arg]
     assert interaction.response.deferred is True
-    assert interaction.followup.sent[0]["content"] == WORKER_UNREACHABLE
+    assert interaction.followup.sent[0]["content"] == SERVICE_UNREACHABLE
 
 
 def test_slash_command_options_are_generated_from_args_model() -> None:

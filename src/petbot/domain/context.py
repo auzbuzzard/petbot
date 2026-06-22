@@ -1,11 +1,11 @@
-"""Neutral request context exchanged across the frontend <-> worker boundary.
+"""Neutral request context exchanged across the frontend <-> compute boundary.
 
-:class:`~petbot.domain._model.Frozen` pydantic models — pure data, no platform
-nouns and no live ports, so a :class:`SkillContext` serialises cleanly inside a
-:class:`~petbot.domain.call.SkillCall`. A frontend maps its native request onto
-these on the way in; a worker runs a skill against them with no platform
-knowledge. Live ports (voice) never ride here — the worker that hosts a
-port-requiring skill injects the port itself (see :mod:`petbot.domain.ports`).
+:class:`~petbot.domain._model.Frozen` pydantic models — pure data, no platform nouns
+and no live ports, so a :class:`SkillContext` serialises cleanly across the wire. A
+frontend maps its native request onto these on the way in; a compute service runs a
+skill against them with no platform knowledge. Live ports (voice) never ride here — the
+service that hosts a port-requiring skill injects the port itself (see
+:mod:`petbot.domain.ports`).
 """
 
 from __future__ import annotations

@@ -21,8 +21,8 @@ from discord.ext import commands
 
 from petbot.domain import Process, SkillResult, TextInput
 from petbot.frontends.discord.context import build_context
-from petbot.frontends.discord.render import WORKER_UNREACHABLE, respond
-from petbot.frontends.discord.settings import EdgeSettings, HttpWorker, LambdaWorker
+from petbot.frontends.discord.render import SERVICE_UNREACHABLE, respond
+from petbot.frontends.discord.settings import DiscordSettings, HttpService, LambdaService
 from petbot.frontends.discord.slash import build_commands
 from petbot.logging_setup import configure_logging
 from petbot.platform import HttpTransport, LambdaTransport, ProcessClient
@@ -38,7 +38,7 @@ def _without_mention(content: str, user_id: int) -> str:
 class PetBot(commands.Bot):
     """The Discord gateway client; @mention is the conversational entrypoint."""
 
-    def __init__(self, settings: EdgeSettings) -> None:
+    def __init__(self, settings: DiscordSettings) -> None:
         intents = discord.Intents.default()
         # The conversational entrypoint needs the privileged message-content intent;
         # slash commands would not, but chat does.
@@ -54,15 +54,15 @@ class PetBot(commands.Bot):
         self.process: Process | None = None
 
     async def setup_hook(self) -> None:
-        worker = self.settings.worker
-        match worker:
-            case LambdaWorker(function_name=fn):
+        service = self.settings.service
+        match service:
+            case LambdaService(function_name=fn):
                 self.process = ProcessClient(LambdaTransport.from_function_name(fn))
-            case HttpWorker(url=url):
+            case HttpService(url=url):
                 self._http = httpx.AsyncClient(timeout=30.0)
                 self.process = ProcessClient(HttpTransport(url, self._http))
             case _:
-                assert_never(worker)
+                assert_never(service)
         # Build the slash commands once the process client is wired; the closure
         # captures it. Each command rides the shared CommandInput dispatch path.
         for command in build_commands(self.process):
@@ -103,7 +103,7 @@ class PetBot(commands.Bot):
                 return await self.process.respond(TextInput(text=text), build_context(message))
         except Exception:
             logger.exception("dispatch failed")
-            return SkillResult.message(WORKER_UNREACHABLE)
+            return SkillResult.message(SERVICE_UNREACHABLE)
 
     async def close(self) -> None:
         if self._http is not None:
@@ -111,8 +111,8 @@ class PetBot(commands.Bot):
         await super().close()
 
 
-def run(settings: EdgeSettings) -> None:
+def run(settings: DiscordSettings) -> None:
     """Start the Discord frontend (blocking)."""
     configure_logging(settings.log_level)
-    logger.info("Starting PetBot Discord frontend (worker=%s).", settings.worker.kind)
+    logger.info("Starting PetBot Discord frontend (service=%s).", settings.service.kind)
     PetBot(settings).run(settings.discord_token, log_handler=None)

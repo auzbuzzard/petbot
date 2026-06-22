@@ -1,10 +1,9 @@
-"""The edge's configuration: the gateway token and how to reach the worker.
+"""The Discord frontend's configuration: the gateway token and the compute service.
 
-The worker target is a **discriminated union** (``WORKER__KIND`` selects the
-variant), so only the fields that apply to the chosen transport exist — no
-``str | None`` bag where half the values are inapplicable. Set via nested env
-vars, e.g. ``WORKER__KIND=http`` + ``WORKER__URL=…`` or ``WORKER__KIND=lambda`` +
-``WORKER__FUNCTION_NAME=…``.
+The service target is a **discriminated union** (``SERVICE__KIND`` selects the variant),
+so only the fields that apply to the chosen transport exist — no ``str | None`` bag where
+half the values are inapplicable. Set via nested env vars, e.g. ``SERVICE__KIND=http`` +
+``SERVICE__URL=…`` or ``SERVICE__KIND=lambda`` + ``SERVICE__FUNCTION_NAME=…``.
 """
 
 from __future__ import annotations
@@ -15,26 +14,26 @@ from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class HttpWorker(BaseModel):
-    """Reach the worker over HTTP."""
+class HttpService(BaseModel):
+    """Reach the compute service over HTTP."""
 
     kind: Literal["http"] = "http"
     url: str
 
 
-class LambdaWorker(BaseModel):
-    """Reach the worker by invoking a Lambda."""
+class LambdaService(BaseModel):
+    """Reach the compute service by invoking a Lambda."""
 
     kind: Literal["lambda"] = "lambda"
     function_name: str
 
 
 #: Exactly one transport, with only its own fields. Tagged by ``kind``.
-WorkerTarget = Annotated[HttpWorker | LambdaWorker, Field(discriminator="kind")]
+ServiceTarget = Annotated[HttpService | LambdaService, Field(discriminator="kind")]
 
 
-class EdgeSettings(BaseSettings):
-    """Configuration for the always-on Discord edge."""
+class DiscordSettings(BaseSettings):
+    """Configuration for the always-on Discord frontend."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -47,8 +46,8 @@ class EdgeSettings(BaseSettings):
     discord_token: str
     dev_guild_id: int | None = None
     log_level: str = "INFO"
-    #: The worker to dispatch to (required; see ``WORKER__*``).
-    worker: WorkerTarget
+    #: The compute service to dispatch to (required; see ``SERVICE__*``).
+    service: ServiceTarget
 
     @field_validator("dev_guild_id", mode="before")
     @classmethod

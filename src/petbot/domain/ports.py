@@ -3,7 +3,7 @@
 A *port* lets neutral logic drive a capability without importing the platform.
 These are :class:`typing.Protocol` types — structural, so an adapter satisfies one
 by matching the shape, with no import back into the kernel. Ports are **never**
-serialised: they hold live connections (a voice socket), so the worker that hosts
+serialised: they hold live connections (a voice socket), so the service that hosts
 a port-requiring skill resolves the port locally per ``conversation_id`` rather
 than receiving it over the wire.
 """
@@ -57,7 +57,7 @@ class VoicePort(Protocol):
 class VoiceProvider(Protocol):
     """Resolves the :class:`VoicePort` for a conversation.
 
-    The music worker (which holds its own gateway) implements this; the music
+    The music service (which holds its own gateway) implements this; the music
     skill calls it per request instead of reading a port off the context, keeping
     :class:`~petbot.domain.context.SkillContext` pure serialisable data. It takes
     the whole context because resolving a Discord voice channel needs the invoking
@@ -87,7 +87,7 @@ class StylePort(Protocol):
 class StyleProvider(Protocol):
     """Resolves the :class:`StylePort` for a request, or ``None`` when no styling is
     wanted (the caller voices its own output). Like :class:`VoiceProvider` it is
-    implemented worker-side and resolved per request, so the persona model never
+    implemented compute-side and resolved per request, so the persona model never
     rides on the wire; the dispatch boundary applies the port it returns.
     """
 

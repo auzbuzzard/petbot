@@ -3,10 +3,10 @@
 The queue and skip-vote bookkeeping live here, in the platform-neutral core; the
 actual audio transport is delegated to a :class:`VoicePort`. Because a live voice
 port can't cross the wire, the skill resolves it per request from an injected
-:class:`VoiceProvider` keyed by ``conversation_id`` (the music worker, which holds
+:class:`VoiceProvider` keyed by ``conversation_id`` (the music service, which holds
 its own gateway, supplies the provider) — rather than reading it off the context.
 The skill therefore declares ``requires={Capability.VOICE}`` and is only hosted by
-a worker that can provide voice.
+a service that can provide voice.
 
 The queue **auto-advances**: each track starts with an ``on_finished`` callback
 that plays the next queued track when the current one ends on its own. A

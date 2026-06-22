@@ -1,9 +1,9 @@
-"""The booru worker's own configuration (the credentials its skills need).
+"""The booru skills' own configuration (the credentials they need).
 
 A skill package reads exactly the environment it needs, so it stays
 self-contained — no shared config import couples a skill to the platform. The
-booru worker process supplies these via the environment (``op run``, a ``.env``,
-or injected container/Lambda vars); missing optional creds simply mean
+compute service supplies these via the environment (``op run``, a ``.env``, or
+injected container/Lambda vars); missing optional creds simply mean
 unauthenticated, lower-rate-limit requests.
 """
 

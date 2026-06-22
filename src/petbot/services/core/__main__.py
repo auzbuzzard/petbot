@@ -44,8 +44,8 @@ def main() -> None:
         def log_message(self, *args: object) -> None:
             logger.debug("core-service: %s", args)
 
-    host = os.environ.get("WORKER_HOST", "127.0.0.1")
-    port = int(os.environ.get("WORKER_PORT", "8000"))
+    host = os.environ.get("SERVICE_HOST", "127.0.0.1")
+    port = int(os.environ.get("SERVICE_PORT", "8000"))
     logger.info("core service listening on http://%s:%d/dispatch", host, port)
     ThreadingHTTPServer((host, port), Handler).serve_forever()
 
