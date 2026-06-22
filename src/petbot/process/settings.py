@@ -83,6 +83,24 @@ LLMConfig = Annotated[
 ]
 
 
+class SlidingWindowContext(BaseModel):
+    """Compact an over-long history by dropping its oldest half. No LLM, no cost."""
+
+    kind: Literal["sliding_window"] = "sliding_window"
+
+
+class SummarizeContext(BaseModel):
+    """Compact an over-long history by summarising its oldest half with a small LLM."""
+
+    kind: Literal["summarize"] = "summarize"
+
+
+#: How the chat process compacts history *when the model rejects it for length* — the
+#: strategy is reactive (the provider is the trigger), so it carries no budget/window
+#: number. Tagged by ``kind`` (``CHAT_CONTEXT__KIND=summarize``).
+ContextConfig = Annotated[SlidingWindowContext | SummarizeContext, Field(discriminator="kind")]
+
+
 class ChatSettings(BaseSettings):
     """Which LLM(s) the chat skill talks to, and how to reach them."""
 
@@ -106,6 +124,9 @@ class ChatSettings(BaseSettings):
     #: The stylizer's persona + rewrite rule (``persona.md`` + ``stylizer.md``);
     #: override via ``CHAT_STYLIZER_PROMPT``.
     stylizer_prompt: str = Field(default_factory=_load_stylizer_prompt)
+    #: How to compact an over-long conversation when the model rejects it for length
+    #: (``CHAT_CONTEXT__KIND``); defaults to the zero-cost sliding window.
+    context: ContextConfig = Field(default_factory=SlidingWindowContext)
 
     def stylizer_llm(self) -> LLMConfig:
         """The stylizer's model config: its own if set, else the agent's (one tier)."""
