@@ -12,7 +12,9 @@ branch) is preserved at the git tag **`v0.1-legacy-2018`**.
 
 ## What it does
 
-@mention PetBot and chat. The agent (pydantic-ai) decides when to call a tool:
+@mention PetBot to start a conversation, then **reply to its messages to keep it
+going** — no re-@mention needed; PetBot reconstructs the thread from the Discord reply
+chain. The agent (pydantic-ai) decides when to call a tool:
 
 | Tool | What it does |
 | --- | --- |
