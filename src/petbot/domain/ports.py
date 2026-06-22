@@ -94,3 +94,21 @@ class StyleProvider(Protocol):
     def for_context(self, ctx: SkillContext) -> StylePort | None:
         """The style port for this request, or ``None`` to leave the result as-is."""
         ...
+
+
+@runtime_checkable
+class Notifier(Protocol):
+    """Outbound port: deliver a result to a conversation *out-of-band*.
+
+    The inbound side is ``frontend event -> Input -> Process``; this is its mirror.
+    A long-running effect (a music queue advancing, a future streamed reply) owns
+    its work behind a port and, when it has more to say, calls :meth:`deliver` —
+    which the *frontend* implements, since it already knows how to render a
+    :class:`~petbot.domain.result.SkillResult` to its channel. So "later,
+    unsolicited output" never forces the synchronous pipeline to become a stream;
+    it rides this one port instead.
+    """
+
+    async def deliver(self, conversation_id: str, result: SkillResult) -> None:
+        """Deliver ``result`` to the conversation identified by ``conversation_id``."""
+        ...
