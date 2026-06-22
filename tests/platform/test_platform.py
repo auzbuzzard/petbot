@@ -1,13 +1,25 @@
-"""Worker dispatch, the typed SkillsClient, and the local/HTTP transports."""
+"""The tool registry, the serve boundary, the ProcessClient, and the HTTP transport."""
 
 from __future__ import annotations
+
+import json
 
 import httpx
 import pytest
 
-from petbot.domain import Platform, Skill, SkillCall, SkillContext, SkillResult, User
-from petbot.platform import HttpTransport, LocalTransport, SkillsClient, Worker
-from petbot.types import MathArgs, Skills
+from petbot.domain import (
+    CommandInput,
+    InvalidInput,
+    Platform,
+    Process,
+    Skill,
+    SkillContext,
+    SkillError,
+    SkillResult,
+    User,
+)
+from petbot.platform import HttpTransport, ProcessClient, ToolRegistry, serve
+from petbot.types import MathArgs
 
 
 def _ctx() -> SkillContext:
@@ -27,128 +39,79 @@ class _EchoSkill(Skill[MathArgs]):
         return SkillResult.message(f"got {args.expression}")
 
 
-class _BoomSkill(Skill[MathArgs]):
-    name = "boom"
-    description = "raises"
-    args_model = MathArgs
-
-    async def run(self, args: MathArgs, ctx: SkillContext) -> SkillResult:
-        raise RuntimeError("kaboom")
+# --- ToolRegistry -------------------------------------------------------------
 
 
-def _call(skill: str, expression: str) -> SkillCall:
-    return SkillCall(skill=skill, args=MathArgs(expression=expression), context=_ctx())
-
-
-async def test_run_uses_typed_args() -> None:
-    worker = Worker([_EchoSkill()])
-    result = await worker.run(_call("math", "6 * 7"))
+async def test_registry_dispatch_validates_and_runs() -> None:
+    registry = ToolRegistry([_EchoSkill()])
+    result = await registry.dispatch("math", {"expression": "6 * 7"}, _ctx())
     assert result.text == "got 6 * 7"
 
 
-async def test_serve_decodes_validates_and_encodes() -> None:
-    worker = Worker([_EchoSkill()])
-    ctx_json = _ctx().model_dump_json()
-    wire = f'{{"skill": "math", "args": {{"expression": "1 + 1"}}, "context": {ctx_json}}}'
-    out = await worker.serve(wire)
-    assert SkillResult.model_validate_json(out).text == "got 1 + 1"
+async def test_registry_unknown_tool_raises_skill_error() -> None:
+    registry = ToolRegistry([_EchoSkill()])
+    with pytest.raises(SkillError):
+        await registry.dispatch("nope", {"expression": "1"}, _ctx())
 
 
-async def test_unknown_skill_is_expected_failure() -> None:
-    worker = Worker([_EchoSkill()])
-    assert (await worker.run(_call("nope", "1"))).is_error
-
-
-async def test_serve_maps_malformed_payload_to_failure() -> None:
-    worker = Worker([_EchoSkill()])
-    # Missing "args"/"context", and outright non-JSON, both become a result — never
-    # an exception escaping the boundary.
-    assert SkillResult.model_validate_json(await worker.serve('{"skill": "math"}')).is_error
-    assert SkillResult.model_validate_json(await worker.serve("not json")).is_error
-
-
-async def test_skill_exception_becomes_failure() -> None:
-    worker = Worker([_BoomSkill()])
-    assert (await worker.run(_call("boom", "1"))).is_error
+async def test_registry_bad_args_raise_invalid_input() -> None:
+    registry = ToolRegistry([_EchoSkill()])
+    with pytest.raises(InvalidInput):
+        await registry.dispatch("math", {"not_expression": "x"}, _ctx())
 
 
 def test_duplicate_skill_name_rejected() -> None:
     with pytest.raises(ValueError, match="Duplicate"):
-        Worker([_EchoSkill(), _EchoSkill()])
+        ToolRegistry([_EchoSkill(), _EchoSkill()])
 
 
-async def test_local_transport_runs_in_process_without_json() -> None:
-    worker = Worker([_EchoSkill()])
-    skills: Skills = SkillsClient(LocalTransport(worker))  # satisfies the protocol
-    result = await skills.math(MathArgs(expression="42"), _ctx())
-    assert result.text == "got 42"
+# --- serve + transport --------------------------------------------------------
 
 
-class _Stylist:
-    """A fake StylePort: wraps the result text so styling is observable."""
-
-    async def stylize(self, result: SkillResult, ctx: SkillContext) -> SkillResult:
-        return result.model_copy(update={"text": f"~{result.text}~"})
-
-
-class _StyleProvider:
-    """Resolves the stylist only when the request asked to be styled."""
-
-    def for_context(self, ctx: SkillContext) -> _Stylist | None:
-        return _Stylist() if ctx.style_results else None
+class _EchoProcess(Process):
+    async def respond(self, inp: object, ctx: SkillContext) -> SkillResult:
+        assert isinstance(inp, CommandInput)
+        return SkillResult.message(f"ran {inp.name}")
 
 
-class _BoomStyleProvider:
-    """Its stylist always raises — to prove styling failure is non-fatal."""
-
-    def for_context(self, ctx: SkillContext) -> _Stylist:
-        class _Boom:
-            async def stylize(self, result: SkillResult, ctx: SkillContext) -> SkillResult:
-                raise RuntimeError("stylist down")
-
-        return _Boom()  # type: ignore[return-value]
+class _BoomProcess(Process):
+    async def respond(self, inp: object, ctx: SkillContext) -> SkillResult:
+        raise RuntimeError("kaboom")
 
 
-def _styled_call(expression: str) -> SkillCall:
-    ctx = SkillContext(
-        platform=Platform.DISCORD,
-        user=User(platform=Platform.DISCORD, id="1", display_name="tester"),
-        conversation_id="discord:1",
-        style_results=True,
+def _body(inp: CommandInput) -> str:
+    return json.dumps(
+        {"input": inp.model_dump(mode="json"), "context": _ctx().model_dump(mode="json")}
     )
-    return SkillCall(skill="math", args=MathArgs(expression=expression), context=ctx)
 
 
-async def test_worker_styles_result_when_request_asks() -> None:
-    # A frontend with no LLM (style_results=True) gets the result restyled worker-side.
-    worker = Worker([_EchoSkill()], style_provider=_StyleProvider())
-    result = await worker.run(_styled_call("6 * 7"))
-    assert result.text == "~got 6 * 7~"
+async def test_serve_decodes_runs_and_encodes() -> None:
+    out = await serve(_EchoProcess(), _body(CommandInput(name="math", values={"expression": "1"})))
+    assert SkillResult.model_validate_json(out).text == "ran math"
 
 
-async def test_worker_leaves_result_unstyled_by_default() -> None:
-    # The @mention path (style_results=False) is untouched — the chat agent styles it.
-    worker = Worker([_EchoSkill()], style_provider=_StyleProvider())
-    result = await worker.run(_call("math", "6 * 7"))
-    assert result.text == "got 6 * 7"
+async def test_serve_maps_malformed_payload_to_result() -> None:
+    # Missing fields and outright non-JSON both become a result — never an escaping error.
+    assert SkillResult.model_validate_json(await serve(_EchoProcess(), '{"input": {}}')).text
+    assert SkillResult.model_validate_json(await serve(_EchoProcess(), "not json")).text
 
 
-async def test_worker_styling_failure_degrades_to_unstyled() -> None:
-    # A stylist that raises must not sink the answer — the unstyled result still ships.
-    worker = Worker([_EchoSkill()], style_provider=_BoomStyleProvider())
-    result = await worker.run(_styled_call("6 * 7"))
-    assert result.text == "got 6 * 7"
+async def test_serve_catches_unexpected_exception() -> None:
+    out = await serve(_BoomProcess(), _body(CommandInput(name="math", values={})))
+    assert SkillResult.model_validate_json(out).text  # a generic crash result, not a raise
 
 
-async def test_http_transport_round_trip() -> None:
-    worker = Worker([_EchoSkill()])
+async def test_process_client_http_round_trip() -> None:
+    process = _EchoProcess()
 
     async def _handler(request: httpx.Request) -> httpx.Response:
-        out = await worker.serve(request.content)
+        out = await serve(process, request.content)
         return httpx.Response(200, content=out)
 
     transport = httpx.MockTransport(_handler)
-    async with httpx.AsyncClient(transport=transport, base_url="http://worker") as client:
-        skills: Skills = SkillsClient(HttpTransport("http://worker/dispatch", client))
-        result = await skills.math(MathArgs(expression="6 * 7"), _ctx())
-    assert result.text == "got 6 * 7"
+    async with httpx.AsyncClient(transport=transport, base_url="http://svc") as client:
+        client_process: Process = ProcessClient(HttpTransport("http://svc/dispatch", client))
+        result = await client_process.respond(
+            CommandInput(name="math", values={"expression": "6 * 7"}), _ctx()
+        )
+    assert result.text == "ran math"

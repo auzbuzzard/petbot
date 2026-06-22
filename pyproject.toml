@@ -17,32 +17,32 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The always-on gateway edge: holds the Discord connection, dispatches to a
-# worker over HTTP (or a Lambda, with the `lambda` extra).
-edge = [
+# The always-on Discord frontend: holds the gateway, dispatches to a compute
+# service over HTTP (or a Lambda, with the `lambda` extra).
+discord = [
     "discord.py>=2.7,<2.8",
     "httpx>=0.27",
     "pydantic-settings>=2.14.2",
 ]
-# The core worker: math + booru search + the chat agent.
-worker-core = [
+# The core compute service: math + booru search + the chat process.
+compute-core = [
     "httpx>=0.27",
     "pydantic-settings>=2.14.2",
     "numexpr>=2.8",
     "numpy>=1.26",
     "pydantic-ai-slim[bedrock,openai]>=0.0.30",
 ]
-# The music worker: its own gateway plus voice playback.
-worker-music = [
+# The music compute service: its own gateway plus voice playback.
+compute-music = [
     "discord.py[voice]>=2.7,<2.8",
     "yt-dlp>=2024.0.0",
     "pydantic-settings>=2.14.2",
 ]
-# Dispatch to a Lambda worker (boto3) — used by the edge in production.
+# Dispatch to a Lambda compute service (boto3) — used by the frontend in production.
 lambda = ["boto3>=1.34"]
 # Everything, for development and CI (so type-check and tests see all code).
 dev = [
-    "petbot[edge,worker-core,worker-music,lambda]",
+    "petbot[discord,compute-core,compute-music,lambda]",
     "ruff>=0.5",
     "mypy>=1.10",
     "import-linter>=2.0",
@@ -54,9 +54,9 @@ dev = [
 ]
 
 [project.scripts]
-petbot-edge = "petbot.edge.__main__:main"
-petbot-core = "petbot.workers.core.__main__:main"
-petbot-music = "petbot.workers.music.__main__:main"
+petbot-edge = "petbot.frontends.discord.__main__:main"
+petbot-core = "petbot.services.core.__main__:main"
+petbot-music = "petbot.services.music.__main__:main"
 
 # Skills are discovered at runtime from this entry-point group.
 [project.entry-points."petbot.skills"]
@@ -70,7 +70,7 @@ include = ["petbot*"]
 
 [tool.setuptools.package-data]
 "petbot" = ["py.typed"]
-"petbot.skills.chat" = ["prompts/*.md"]
+"petbot.process" = ["prompts/*.md"]
 "petbot.logging_configs" = ["*.json"]
 
 [tool.ruff]
@@ -105,15 +105,17 @@ testpaths = ["tests"]
 [tool.coverage.run]
 omit = [
     # Live-connection bootstraps are smoke-tested manually, not in CI.
-    "src/petbot/edge/bot.py",
-    "src/petbot/edge/__main__.py",
-    "src/petbot/workers/core/__main__.py",
-    "src/petbot/workers/music/bot.py",
-    "src/petbot/workers/music/voice.py",
-    "src/petbot/workers/music/__main__.py",
+    "src/petbot/frontends/discord/bot.py",
+    "src/petbot/frontends/discord/__main__.py",
+    "src/petbot/services/core/__main__.py",
+    "src/petbot/services/music/bot.py",
+    "src/petbot/services/music/voice.py",
+    "src/petbot/services/music/__main__.py",
 ]
 
-# import-linter: enforce the one-way layering kernel -> types -> platform -> {skills, edge}.
+# import-linter: enforce the layering. domain (center) <- everything; the process core
+# and the frontends are adapters that never import each other or a concrete skill;
+# services are the only composition roots (allowed to import anything).
 [tool.importlinter]
 root_packages = ["petbot"]
 include_external_packages = true
@@ -122,22 +124,34 @@ include_external_packages = true
 name = "The domain kernel depends on nothing else first-party and no platform SDK"
 type = "forbidden"
 source_modules = ["petbot.domain"]
-forbidden_modules = ["petbot.types", "petbot.platform", "petbot.skills", "petbot.edge", "discord", "httpx"]
+forbidden_modules = ["petbot.types", "petbot.platform", "petbot.process", "petbot.skills", "petbot.frontends", "petbot.services", "discord", "httpx"]
 
 [[tool.importlinter.contracts]]
 name = "The typed surface depends only on the kernel"
 type = "forbidden"
 source_modules = ["petbot.types"]
-forbidden_modules = ["petbot.platform", "petbot.skills", "petbot.edge", "discord"]
+forbidden_modules = ["petbot.platform", "petbot.process", "petbot.skills", "petbot.frontends", "petbot.services", "discord"]
 
 [[tool.importlinter.contracts]]
-name = "The platform must not import a skill or the edge"
+name = "The platform is generic plumbing: no skill, process, frontend, or service"
 type = "forbidden"
 source_modules = ["petbot.platform"]
-forbidden_modules = ["petbot.skills", "petbot.edge", "discord"]
+forbidden_modules = ["petbot.process", "petbot.skills", "petbot.frontends", "petbot.services", "discord"]
 
 [[tool.importlinter.contracts]]
-name = "The edge dispatches to workers and never imports a skill"
+name = "Skills are tools: they never import the process, frontend, platform, or a service"
 type = "forbidden"
-source_modules = ["petbot.edge"]
-forbidden_modules = ["petbot.skills"]
+source_modules = ["petbot.skills"]
+forbidden_modules = ["petbot.platform", "petbot.process", "petbot.frontends", "petbot.services", "discord"]
+
+[[tool.importlinter.contracts]]
+name = "The process core never imports a concrete skill, a frontend, or a service"
+type = "forbidden"
+source_modules = ["petbot.process"]
+forbidden_modules = ["petbot.skills", "petbot.frontends", "petbot.services", "discord"]
+
+[[tool.importlinter.contracts]]
+name = "The frontend dispatches to a service and never imports a skill or the process core"
+type = "forbidden"
+source_modules = ["petbot.frontends"]
+forbidden_modules = ["petbot.skills", "petbot.process", "petbot.services"]
