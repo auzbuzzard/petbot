@@ -55,25 +55,38 @@ async def _send(
     sender: Callable[..., Awaitable[object]],
     content: str | None,
     embed: discord.Embed | None,
+    **extra: object,
 ) -> None:
     # Pass `embed` only when present so the call matches discord.py's non-optional
-    # `embed` overload (a None embed must never reach the gateway).
+    # `embed` overload (a None embed must never reach the gateway). `extra` carries the
+    # reply-threading kwargs, on the first chunk only.
     if embed is None:
-        await sender(content=content)
+        await sender(content=content, **extra)
     elif content is None:
-        await sender(embed=embed)
+        await sender(embed=embed, **extra)
     else:
-        await sender(content=content, embed=embed)
+        await sender(content=content, embed=embed, **extra)
 
 
-async def respond(channel: discord.abc.Messageable, result: SkillResult) -> None:
+async def respond(
+    channel: discord.abc.Messageable,
+    result: SkillResult,
+    *,
+    reference: discord.Message | discord.MessageReference | None = None,
+) -> None:
     """Send ``result`` to ``channel`` (the @mention path).
 
-    Expected failures render as a plain message; successes send the text (chunked)
-    and, on the first message, the embed.
+    Expected failures render as a plain message; successes send the text (chunked) and,
+    on the first message, the embed. When ``reference`` is given, the first message is a
+    reply to it (``mention_author=False`` — an anchor, not a re-ping every turn).
     """
-    for content, embed in _plan(result):
-        await _send(channel.send, content, embed)
+    for index, (content, embed) in enumerate(_plan(result)):
+        extra: dict[str, object] = (
+            {"reference": reference, "mention_author": False}
+            if index == 0 and reference is not None
+            else {}
+        )
+        await _send(channel.send, content, embed, **extra)
 
 
 async def respond_interaction(interaction: discord.Interaction, result: SkillResult) -> None:
