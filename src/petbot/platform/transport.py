@@ -1,59 +1,45 @@
-"""Transports: the one way a :class:`~petbot.domain.call.SkillCall` reaches a worker.
+"""Transports: the way a :class:`~petbot.platform.dispatch.Dispatch` reaches a process.
 
-Three interchangeable implementations of the ``Transport`` port:
+Two interchangeable implementations of the ``Transport`` port:
 
-* :class:`LocalTransport` — same process; runs the call directly with its typed
-  args, **no serialisation**.
-* :class:`HttpTransport` — POST the call as JSON to a worker HTTP endpoint.
-* :class:`LambdaTransport` — invoke a worker Lambda synchronously (off-loop,
-  since ``boto3`` is blocking). ``boto3`` is an optional extra, imported lazily.
+* :class:`HttpTransport` — POST the dispatch as JSON to a process HTTP endpoint.
+* :class:`LambdaTransport` — invoke a process Lambda synchronously (off-loop, since
+  ``boto3`` is blocking). ``boto3`` is an optional extra, imported lazily.
 
-Serialisation lives only in the two remote transports — the in-process path never
-touches JSON. Each encodes the call as ``{"skill", "args", "context"}`` and reads
-back a :class:`~petbot.domain.result.SkillResult`.
+Both encode the dispatch as ``{"input", "context"}`` and read back a
+:class:`~petbot.domain.result.SkillResult`. There is no in-process transport: a
+co-located process is called directly (the chat process calls its tools through the
+:class:`~petbot.platform.registry.ToolRegistry`, not over a transport).
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 
 import httpx
 
-from petbot.domain import SkillCall, SkillResult, Transport
-
-if TYPE_CHECKING:
-    from petbot.platform.worker import Worker
+from petbot.domain import SkillResult
+from petbot.platform.dispatch import Dispatch, Transport
 
 
-def _wire(call: SkillCall) -> dict[str, Any]:
+def _wire(dispatch: Dispatch) -> dict[str, Any]:
     return {
-        "skill": call.skill,
-        "args": call.args.model_dump(mode="json"),
-        "context": call.context.model_dump(mode="json"),
+        "input": dispatch.input.model_dump(mode="json"),
+        "context": dispatch.context.model_dump(mode="json"),
     }
 
 
-class LocalTransport(Transport):
-    """Runs the call in-process against a :class:`Worker` — no serialisation."""
-
-    def __init__(self, worker: Worker) -> None:
-        self._worker = worker
-
-    async def send(self, call: SkillCall) -> SkillResult:
-        return await self._worker.run(call)
-
-
 class HttpTransport(Transport):
-    """Dispatches a call by POSTing its JSON to a worker HTTP endpoint."""
+    """Dispatches by POSTing the dispatch JSON to a process HTTP endpoint."""
 
     def __init__(self, url: str, client: httpx.AsyncClient) -> None:
         self._url = url
         self._client = client
 
-    async def send(self, call: SkillCall) -> SkillResult:
-        response = await self._client.post(self._url, json=_wire(call))
+    async def send(self, dispatch: Dispatch) -> SkillResult:
+        response = await self._client.post(self._url, json=_wire(dispatch))
         response.raise_for_status()
         return SkillResult.model_validate_json(response.content)
 
@@ -65,7 +51,7 @@ class _LambdaClient(Protocol):
 
 
 class LambdaTransport(Transport):
-    """Dispatches a call by synchronously invoking a worker Lambda (off-loop)."""
+    """Dispatches by synchronously invoking a process Lambda (off-loop)."""
 
     def __init__(self, function_name: str, client: _LambdaClient) -> None:
         self._function_name = function_name
@@ -78,11 +64,11 @@ class LambdaTransport(Transport):
 
         return cls(function_name, boto3.client("lambda"))
 
-    async def send(self, call: SkillCall) -> SkillResult:
+    async def send(self, dispatch: Dispatch) -> SkillResult:
         response = await asyncio.to_thread(
             self._client.invoke,
             FunctionName=self._function_name,
-            Payload=json.dumps(_wire(call)).encode(),
+            Payload=json.dumps(_wire(dispatch)).encode(),
         )
         payload: bytes = response["Payload"].read()
         return SkillResult.model_validate_json(payload)

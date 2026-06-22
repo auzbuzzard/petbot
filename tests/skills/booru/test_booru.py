@@ -11,6 +11,7 @@ import pytest
 import respx
 
 from conftest import load_fixture, make_context
+from petbot.domain import EmptyResult, UpstreamUnavailable
 from petbot.skills.booru import derpibooru, e621, tags
 from petbot.skills.booru.engine import run_search
 from petbot.skills.booru.errors import SiteFailureStatusError
@@ -190,7 +191,6 @@ async def test_run_search_renders_post() -> None:
     search = SearchRequest(tags=("canine",), safe_only=True)
     async with httpx.AsyncClient() as client:
         result = await run_search(provider, client, search)
-    assert not result.is_error
     assert result.embed is not None and result.embed.author_name == "e621"
 
 
@@ -217,7 +217,7 @@ async def test_derpi_skill_sfw_constrains_to_safe() -> None:
     async with httpx.AsyncClient() as client:
         skill = DerpiSkill(client=client)
         result = await skill.run(BooruArgs(tags="pony"), make_context(allows_explicit=False))
-    assert not result.is_error and result.embed is not None
+    assert result.embed is not None
     assert "safe" in route.calls.last.request.url.params["q"]
 
 
@@ -234,38 +234,40 @@ async def test_skill_nsfw_does_not_inject_safe() -> None:
 
 @respx.mock
 async def test_e621_skill_surfaces_failure() -> None:
+    # A site error is raised as a neutral UpstreamUnavailable carrying the site's reason.
     respx.get("https://e621.net/posts.json").mock(
         return_value=httpx.Response(422, json=load_fixture("e621_error"))
     )
     async with httpx.AsyncClient() as client:
         skill = E621Skill(client=client, user_agent="PetBot/2.1 (test)")
-        result = await skill.run(BooruArgs(tags="x"), make_context(allows_explicit=True))
-    assert result.is_error and "e621 says" in (result.error or "")
+        with pytest.raises(UpstreamUnavailable) as exc:
+            await skill.run(BooruArgs(tags="x"), make_context(allows_explicit=True))
+    assert "e621 says" in exc.value.message
 
 
 @respx.mock
-async def test_e621_skill_empty_is_friendly() -> None:
+async def test_e621_skill_empty_raises_empty_result() -> None:
     respx.get("https://e621.net/posts.json").mock(
         return_value=httpx.Response(200, json=load_fixture("e621_empty"))
     )
     async with httpx.AsyncClient() as client:
         skill = E621Skill(client=client, user_agent="PetBot/2.1 (test)")
-        result = await skill.run(BooruArgs(tags="asdfqwer"), make_context())
-    assert not result.is_error and result.embed is None and result.text
+        with pytest.raises(EmptyResult):
+            await skill.run(BooruArgs(tags="asdfqwer"), make_context())
 
 
 @respx.mock
 async def test_e621_skill_empty_sfw_explains_rating_floor() -> None:
-    # An empty search in a SFW channel must state *why* (the safe-rating floor), so
-    # the chat model relays the real reason instead of inventing one (a typo, etc.).
+    # An empty search in a SFW channel must state *why* (the safe-rating floor), so the
+    # voice layer relays the real reason instead of inventing one (a typo, etc.).
     respx.get("https://e621.net/posts.json").mock(
         return_value=httpx.Response(200, json=load_fixture("e621_empty"))
     )
     async with httpx.AsyncClient() as client:
         skill = E621Skill(client=client, user_agent="PetBot/2.1 (test)")
-        result = await skill.run(BooruArgs(tags="auzbuzzard"), make_context(allows_explicit=False))
-    assert not result.is_error and result.embed is None
-    assert "age-gated" in (result.text or "")
+        with pytest.raises(EmptyResult) as exc:
+            await skill.run(BooruArgs(tags="auzbuzzard"), make_context(allows_explicit=False))
+    assert "age-gated" in exc.value.message
 
 
 @respx.mock
@@ -277,6 +279,6 @@ async def test_e621_skill_empty_nsfw_omits_rating_floor_note() -> None:
     )
     async with httpx.AsyncClient() as client:
         skill = E621Skill(client=client, user_agent="PetBot/2.1 (test)")
-        result = await skill.run(BooruArgs(tags="auzbuzzard"), make_context(allows_explicit=True))
-    assert not result.is_error and result.embed is None
-    assert "age-gated" not in (result.text or "")
+        with pytest.raises(EmptyResult) as exc:
+            await skill.run(BooruArgs(tags="auzbuzzard"), make_context(allows_explicit=True))
+    assert "age-gated" not in exc.value.message

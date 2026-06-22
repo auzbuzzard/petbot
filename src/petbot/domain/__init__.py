@@ -9,7 +9,6 @@ this; neither depends on the other. See
 from __future__ import annotations
 
 from petbot.domain._model import Frozen
-from petbot.domain.call import SkillCall, Transport
 from petbot.domain.capability import Capability
 from petbot.domain.context import Platform, SkillContext, User
 from petbot.domain.errors import (
@@ -43,7 +42,6 @@ __all__ = [
     "Platform",
     "Process",
     "Skill",
-    "SkillCall",
     "SkillContext",
     "SkillError",
     "SkillResult",
@@ -51,7 +49,6 @@ __all__ = [
     "StyleProvider",
     "TextInput",
     "TrackFinishedCallback",
-    "Transport",
     "UpstreamUnavailable",
     "User",
     "VoicePort",

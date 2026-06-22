@@ -40,7 +40,7 @@ called in-process through the same client. See
 [`AGENTS.md`](AGENTS.md) and the ADRs under [`docs/adr/`](docs/adr/).
 
 One installable package (`petbot`); each process installs only the extra it
-needs, so the edge never pulls `pydantic-ai` and a worker never pulls
+needs, so the frontend never pulls `pydantic-ai` and a compute service never pulls
 `discord.py`. The LLM is provider-agnostic (Amazon Bedrock, or an
 OpenAI-compatible endpoint such as OpenRouter), chosen by `CHAT_PROVIDER`.
 
@@ -53,10 +53,10 @@ for voice, the **FFmpeg** system binary.
 uv sync --all-extras                  # install petbot + every extra + dev tooling
 cp .env.example .env                  # then fill in your secrets/references
 
-# One shell: a local core worker (math + booru + chat) on :8000
-python -m petbot.workers.core
-# Another: the edge (talks to the worker over HTTP by default)
-python -m petbot.edge
+# One shell: the local core compute service (math + booru + chat) on :8000
+python -m petbot.services.core
+# Another: the Discord frontend (talks to the service over HTTP by default)
+python -m petbot.frontends.discord
 ```
 
 @mention the bot in a server it's in and start chatting.

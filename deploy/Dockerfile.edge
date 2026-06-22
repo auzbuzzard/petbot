@@ -24,11 +24,11 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src ./src
 
-# `.[edge,lambda]` = the gateway edge plus the boto3 dispatch transport. No
-# secrets are baked in — the runner supplies the Discord token, the worker target,
+# `.[discord,lambda]` = the Discord frontend plus the boto3 dispatch transport. No
+# secrets are baked in — the runner supplies the Discord token, the service target,
 # and the scoped AWS key as environment variables.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --compile-bytecode ".[edge,lambda]"
+    uv pip install --system --compile-bytecode ".[discord,lambda]"
 
 # Run as a non-root user.
 RUN useradd --create-home --uid 10001 petbot

@@ -12,7 +12,7 @@ import logging
 
 import httpx
 
-from petbot.domain import Skill, SkillContext, SkillResult
+from petbot.domain import Skill, SkillContext, SkillResult, UpstreamUnavailable
 from petbot.skills.booru import derpibooru, e621
 from petbot.skills.booru.base import BooruProvider
 from petbot.skills.booru.engine import run_search
@@ -57,16 +57,17 @@ async def _run(
     ctx: SkillContext,
 ) -> SkillResult:
     search = _build_search(provider, args, ctx)
-    # The boundary that *handles* a failed search (turns it into a SkillResult),
-    # so it's the one place that logs it — at a level matching severity.
+    # The one place that logs a search failure (at a level matching severity) before
+    # re-raising it as a neutral SkillError the process boundary voices. An empty search
+    # raises EmptyResult from run_search and propagates untouched.
     try:
         return await run_search(provider, client, search)
     except SiteFailureStatusError as exc:
         logger.debug("%s rejected the search: %s", provider.name, exc.site_message)
-        return SkillResult.failure(exc.print_message)
-    except (httpx.HTTPError, ValueError):
+        raise UpstreamUnavailable(exc.print_message) from exc
+    except (httpx.HTTPError, ValueError) as exc:
         logger.warning("%s search failed to reach/parse the site", provider.name, exc_info=True)
-        return SkillResult.failure(_NETWORK_FAILURE)
+        raise UpstreamUnavailable(_NETWORK_FAILURE) from exc
 
 
 class DerpiSkill(Skill[BooruArgs]):
