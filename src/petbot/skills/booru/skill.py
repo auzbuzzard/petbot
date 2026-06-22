@@ -2,7 +2,7 @@
 
 Both wrap a provider in this package's engine. There is no explicit *option*: the
 channel decides the safety floor (``safe_only`` comes from ``ctx.allows_explicit``,
-which the edge fills from ``channel.is_nsfw()``). The other options — ``sort``,
+which the frontend fills from ``channel.is_nsfw()``). The other options — ``sort``,
 ``file_type``, ``min_score`` — map onto each provider's full native vocabulary.
 """
 

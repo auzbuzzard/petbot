@@ -21,7 +21,7 @@ from discord import app_commands
 
 from petbot.domain import CommandInput, Process, SkillResult
 from petbot.frontends.discord.context import build_interaction_context
-from petbot.frontends.discord.render import WORKER_UNREACHABLE, respond_interaction
+from petbot.frontends.discord.render import SERVICE_UNREACHABLE, respond_interaction
 from petbot.types import CATALOG, Command
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ def _make_handler(process: Process, spec: Command[Any]) -> Callable[..., Awaitab
             result = await process.respond(CommandInput(name=spec.name, values=values), ctx)
         except Exception:
             logger.exception("slash dispatch failed")
-            result = SkillResult.message(WORKER_UNREACHABLE)
+            result = SkillResult.message(SERVICE_UNREACHABLE)
         await respond_interaction(interaction, result)
 
     return handle

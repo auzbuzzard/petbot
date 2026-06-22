@@ -33,7 +33,7 @@ from petbot.skills.music import MusicSkill
 logger = logging.getLogger(__name__)
 
 
-class MusicWorker(discord.Client):
+class MusicService(discord.Client):
     """Gateway client that serves dispatched music commands over HTTP."""
 
     def __init__(self, settings: MusicSettings) -> None:
@@ -75,4 +75,4 @@ def run(settings: MusicSettings) -> None:
     """Start the music service (blocking)."""
     configure_logging(settings.log_level)
     logger.info("Starting PetBot music service.")
-    MusicWorker(settings).run(settings.discord_token, log_handler=None)
+    MusicService(settings).run(settings.discord_token, log_handler=None)

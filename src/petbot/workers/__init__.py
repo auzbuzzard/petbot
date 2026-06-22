@@ -1,1 +1,0 @@
-"""PetBot worker bundles."""

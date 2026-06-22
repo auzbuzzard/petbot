@@ -15,10 +15,10 @@ import discord
 from petbot.domain import EmbedSpec, SkillResult
 from petbot.frontends.discord.text import DISCORD_MAX_TEXT, chunk_text
 
-#: User-facing fallback when the edge can't reach the worker (any transport error).
-#: Lives here (the presentation layer) so both the @mention and slash paths share one
-#: copy without a bot<->slash import cycle.
-WORKER_UNREACHABLE = "uwu I couldn't reach my brain right now — please try again soon."
+#: User-facing fallback when the frontend can't reach the compute service (any transport
+#: error). Lives here (the presentation layer) so both the @mention and slash paths share
+#: one copy without a bot<->slash import cycle.
+SERVICE_UNREACHABLE = "uwu I couldn't reach my brain right now — please try again soon."
 
 
 def to_embed(spec: EmbedSpec) -> discord.Embed:

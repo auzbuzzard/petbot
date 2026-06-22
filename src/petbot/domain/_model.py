@@ -2,7 +2,7 @@
 
 Frozen (immutable, hashable) and strict-ish: extra fields are rejected so a
 malformed wire payload fails loudly instead of silently dropping data. Every
-value object the edge and a worker exchange derives from this, which is what
+value object a frontend and a compute service exchange derives from this, which is what
 lets them serialise themselves with ``model_dump_json`` / ``model_validate_json``
 — no hand-rolled wire layer anywhere.
 """

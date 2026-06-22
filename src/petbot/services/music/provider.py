@@ -1,6 +1,6 @@
 """Resolve a :class:`~petbot.domain.ports.VoicePort` from a request context.
 
-The music worker's gateway caches guild/member/voice state; this provider reads
+The music service's gateway caches guild/member/voice state; this provider reads
 that cache to bind a :class:`DiscordVoicePort` to the invoking member's current
 voice channel. The conversation id is ``discord:{text_channel_id}``; the guild is
 that channel's guild, the member is ``ctx.user.id`` within it.
