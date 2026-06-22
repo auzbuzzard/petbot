@@ -13,7 +13,7 @@ import discord
 from petbot.domain import Role, Turn
 from petbot.frontends.discord.bot import _without_mention
 from petbot.frontends.discord.history import (
-    RawTurn,
+    DiscordTurn,
     _describe_card,
     reconstruct,
     resolve_parent,
@@ -73,8 +73,8 @@ class FakeMessage:
 
 def test_to_turns_orders_oldest_first_and_maps_roles() -> None:
     raw = [  # walk yields newest-first
-        RawTurn(display_name="Alice", is_self=False, text="<@1> and another?"),
-        RawTurn(display_name="PetBot", is_self=True, text="here you go!"),
+        DiscordTurn(display_name="Alice", is_self=False, text="<@1> and another?"),
+        DiscordTurn(display_name="PetBot", is_self=True, text="here you go!"),
     ]
     assert to_turns(raw, bot_user_id=1, strip_mention=_without_mention) == (
         Turn(role=Role.ASSISTANT, author="PetBot", text="here you go!"),
@@ -84,8 +84,8 @@ def test_to_turns_orders_oldest_first_and_maps_roles() -> None:
 
 def test_to_turns_drops_turns_that_become_empty() -> None:
     raw = [
-        RawTurn(display_name="Alice", is_self=False, text="<@1>"),  # only a mention
-        RawTurn(display_name="PetBot", is_self=True, text="   "),
+        DiscordTurn(display_name="Alice", is_self=False, text="<@1>"),  # only a mention
+        DiscordTurn(display_name="PetBot", is_self=True, text="   "),
     ]
     assert to_turns(raw, bot_user_id=1, strip_mention=_without_mention) == ()
 

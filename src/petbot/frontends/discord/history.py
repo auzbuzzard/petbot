@@ -8,7 +8,7 @@ driving-adapter half of "map a platform event to a complete ``Input``".
 Three parts: :func:`resolve_parent` (one message → the message it replies to, preferring
 a copy Discord already gave us over a REST fetch), an async :func:`walk_reply_chain` that
 follows it up the chain (bounded, tolerant of deleted/unreadable ancestors), and a pure
-:func:`to_turns` that maps the gathered raw turns to neutral ones. The history is shipped
+:func:`to_turns` that maps the gathered Discord turns to neutral ones. The history is shipped
 *faithful and untrimmed* — an
 over-long conversation is handled compute-side (reactively), not here. An image-only bot
 card is flattened to a faithful text description (its real title + image URL), since an
@@ -26,7 +26,7 @@ from petbot.domain import Role, Turn
 
 
 @dataclass(frozen=True, slots=True)
-class RawTurn:
+class DiscordTurn:
     """One ancestor message, read off Discord, before neutral mapping."""
 
     display_name: str
@@ -74,18 +74,18 @@ async def resolve_parent(message: discord.Message) -> discord.Message | None:
 
 async def walk_reply_chain(
     parent: discord.Message | None, *, bot_user_id: int, max_turns: int
-) -> list[RawTurn]:
+) -> list[DiscordTurn]:
     """Walk the reply chain from ``parent`` upward (newest-first), up to ``max_turns``.
 
     ``parent`` is the message the current one replies to (``None`` when it isn't a reply),
     already resolved by the caller so the immediate parent is fetched only once. Stops —
     without raising — at the chain's end, a deleted ancestor, or one that can't be fetched.
     """
-    raw: list[RawTurn] = []
+    raw: list[DiscordTurn] = []
     current = parent
     while current is not None and len(raw) < max_turns:
         raw.append(
-            RawTurn(
+            DiscordTurn(
                 display_name=current.author.display_name,
                 is_self=current.author.id == bot_user_id,
                 text=_message_text(current),
@@ -96,12 +96,12 @@ async def walk_reply_chain(
 
 
 def to_turns(
-    raw: list[RawTurn],
+    raw: list[DiscordTurn],
     *,
     bot_user_id: int,
     strip_mention: Callable[[str, int], str],
 ) -> tuple[Turn, ...]:
-    """Map gathered raw turns (newest-first) to neutral turns (oldest-first).
+    """Map gathered Discord turns (newest-first) to neutral turns (oldest-first).
 
     A turn PetBot authored is an assistant turn; everything else is a user turn, with the
     bot's own mention stripped (``strip_mention``). Empty turns are dropped.
