@@ -41,7 +41,7 @@ from petbot.process.context import (
     build_compactor,
     is_context_overflow,
 )
-from petbot.process.history import to_model_messages
+from petbot.process.history import drop_leading_assistant, to_model_messages
 from petbot.process.model import build_model, build_model_from_config
 from petbot.process.settings import (
     BedrockModel,
@@ -300,11 +300,41 @@ def test_to_model_messages_merges_consecutive_same_role() -> None:
 def test_to_model_messages_drops_empty_turns() -> None:
     msgs = to_model_messages(
         (
-            Turn(role=Role.USER, author="Alice", text="   "),
-            Turn(role=Role.ASSISTANT, author="PetBot", text="hi"),
+            Turn(role=Role.USER, author="Alice", text="real"),
+            Turn(role=Role.ASSISTANT, author="PetBot", text="   "),  # empty -> dropped
         )
     )
-    assert _texts(msgs) == [("response", "hi")]
+    assert _texts(msgs) == [("request", "Alice: real")]
+
+
+def test_to_model_messages_drops_leading_assistant_turns() -> None:
+    # History must begin with a user message (providers reject an assistant-first run), so
+    # a leading bot turn is dropped.
+    msgs = to_model_messages(
+        (
+            Turn(role=Role.ASSISTANT, author="PetBot", text="earlier reply"),
+            Turn(role=Role.USER, author="Alice", text="hi"),
+        )
+    )
+    assert _texts(msgs) == [("request", "Alice: hi")]
+
+
+def test_to_model_messages_lone_assistant_history_is_empty() -> None:
+    # A reply to an image-only bot card with no prior user turn: nothing to prepend.
+    msgs = to_model_messages((Turn(role=Role.ASSISTANT, author="PetBot", text="hi"),))
+    assert msgs == []
+
+
+def test_drop_leading_assistant_keeps_from_first_user() -> None:
+    # The shared guard the mapper and post-compaction path both apply: a compacted slice
+    # that begins with a bot message is trimmed to the first user message.
+    messages: list[ModelMessage] = [
+        ModelResponse(parts=[TextPart(content="earlier bot reply")]),
+        ModelRequest(parts=[UserPromptPart(content="user")]),
+        ModelResponse(parts=[TextPart(content="bot")]),
+    ]
+    assert drop_leading_assistant(messages) == messages[1:]
+    assert drop_leading_assistant(messages[2:]) == []  # all-assistant -> nothing
 
 
 # --- reactive context compaction ----------------------------------------------

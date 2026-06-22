@@ -5,9 +5,11 @@ walk ``message.reference`` to recover the turns a reply continues. This maps tha
 onto neutral :class:`~petbot.domain.input.Turn` values for ``TextInput.history`` — the
 driving-adapter half of "map a platform event to a complete ``Input``".
 
-Two parts: an async :func:`walk_reply_chain` that does the Discord I/O (bounded, and
-tolerant of deleted/unreadable ancestors), and a pure :func:`to_turns` that maps the
-gathered raw turns to neutral ones. The history is shipped *faithful and untrimmed* — an
+Three parts: :func:`resolve_parent` (one message → the message it replies to, preferring
+a copy Discord already gave us over a REST fetch), an async :func:`walk_reply_chain` that
+follows it up the chain (bounded, tolerant of deleted/unreadable ancestors), and a pure
+:func:`to_turns` that maps the gathered raw turns to neutral ones. The history is shipped
+*faithful and untrimmed* — an
 over-long conversation is handled compute-side (reactively), not here. An image-only bot
 card is flattened to a faithful text description (its real title + image URL), since an
 assistant turn can only be text in the model's history.
@@ -49,39 +51,47 @@ def _message_text(message: discord.Message) -> str:
     return ""
 
 
-async def walk_reply_chain(
-    message: discord.Message, *, bot_user_id: int, max_turns: int
-) -> list[RawTurn]:
-    """Walk ``message``'s reply ancestors (newest-first), up to ``max_turns``.
+async def resolve_parent(message: discord.Message) -> discord.Message | None:
+    """The message ``message`` replies to, or ``None`` if it isn't a reply (or the parent
+    was deleted / can't be read).
 
-    Excludes ``message`` itself (it is the current prompt). Stops — without raising — at
-    the chain's end, a deleted ancestor, or one that can't be fetched.
+    Prefers a copy Discord already handed us — inline ``resolved``, then ``cached_message``
+    — and only pays for a REST ``fetch_message`` when neither has it.
     """
-    channel = message.channel
+    ref = message.reference
+    if ref is None or ref.message_id is None:
+        return None
+    if isinstance(ref.resolved, discord.DeletedReferencedMessage):
+        return None
+    free = ref.resolved if isinstance(ref.resolved, discord.Message) else ref.cached_message
+    if free is not None:
+        return free
+    try:
+        return await message.channel.fetch_message(ref.message_id)
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        return None
+
+
+async def walk_reply_chain(
+    parent: discord.Message | None, *, bot_user_id: int, max_turns: int
+) -> list[RawTurn]:
+    """Walk the reply chain from ``parent`` upward (newest-first), up to ``max_turns``.
+
+    ``parent`` is the message the current one replies to (``None`` when it isn't a reply),
+    already resolved by the caller so the immediate parent is fetched only once. Stops —
+    without raising — at the chain's end, a deleted ancestor, or one that can't be fetched.
+    """
     raw: list[RawTurn] = []
-    current = message
-    for _ in range(max_turns):
-        ref = current.reference
-        if ref is None or ref.message_id is None:
-            break
-        resolved = ref.resolved
-        if isinstance(resolved, discord.Message):
-            parent = resolved
-        elif isinstance(resolved, discord.DeletedReferencedMessage):
-            break
-        else:
-            try:
-                parent = await channel.fetch_message(ref.message_id)
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                break
+    current = parent
+    while current is not None and len(raw) < max_turns:
         raw.append(
             RawTurn(
-                display_name=parent.author.display_name,
-                is_self=parent.author.id == bot_user_id,
-                text=_message_text(parent),
+                display_name=current.author.display_name,
+                is_self=current.author.id == bot_user_id,
+                text=_message_text(current),
             )
         )
-        current = parent
+        current = await resolve_parent(current)
     return raw
 
 
@@ -108,12 +118,12 @@ def to_turns(
 
 
 async def reconstruct(
-    message: discord.Message,
+    parent: discord.Message | None,
     *,
     bot_user_id: int,
     max_turns: int,
     strip_mention: Callable[[str, int], str],
 ) -> tuple[Turn, ...]:
-    """Walk the reply chain and map it to neutral history (oldest-first)."""
-    raw = await walk_reply_chain(message, bot_user_id=bot_user_id, max_turns=max_turns)
+    """Walk the reply chain from ``parent`` and map it to neutral history (oldest-first)."""
+    raw = await walk_reply_chain(parent, bot_user_id=bot_user_id, max_turns=max_turns)
     return to_turns(raw, bot_user_id=bot_user_id, strip_mention=strip_mention)

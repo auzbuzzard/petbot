@@ -21,7 +21,7 @@ from discord.ext import commands
 
 from petbot.domain import Process, SkillResult, TextInput, Turn
 from petbot.frontends.discord.context import build_context
-from petbot.frontends.discord.history import reconstruct
+from petbot.frontends.discord.history import reconstruct, resolve_parent
 from petbot.frontends.discord.render import SERVICE_UNREACHABLE, respond
 from petbot.frontends.discord.settings import DiscordSettings, HttpService, LambdaService
 from petbot.frontends.discord.slash import build_commands
@@ -88,42 +88,31 @@ class PetBot(commands.Bot):
     async def on_message(self, message: discord.Message) -> None:
         # Conversational entry: an @mention, OR a reply to one of PetBot's own messages
         # (so a follow-up needs no re-mention). Other bots and our own messages are ignored.
+        # The reply parent is resolved once here and reused for both the trigger test and
+        # the history walk, so the immediate parent is never fetched twice.
         if message.author.bot or self.user is None:
             return
         bot_user_id = self.user.id
-        if self.user not in message.mentions and not await self._is_reply_to_self(
-            message, bot_user_id
-        ):
+        parent = await resolve_parent(message)
+        replying_to_self = parent is not None and parent.author.id == bot_user_id
+        if self.user not in message.mentions and not replying_to_self:
             return
         text = _without_mention(message.content, bot_user_id).strip()
         if not text:
             return
-        history = await self._history_for(message, bot_user_id)
+        history = await self._history_for(parent, bot_user_id)
         await respond(
             message.channel, await self._respond(text, message, history), reference=message
         )
 
-    async def _is_reply_to_self(self, message: discord.Message, bot_user_id: int) -> bool:
-        """True if ``message`` is a reply to one of PetBot's own messages."""
-        ref = message.reference
-        if ref is None or ref.message_id is None:
-            return False
-        resolved = ref.resolved
-        if isinstance(resolved, discord.Message):
-            return resolved.author.id == bot_user_id
-        if isinstance(resolved, discord.DeletedReferencedMessage):
-            return False
-        try:
-            parent = await message.channel.fetch_message(ref.message_id)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            return False
-        return parent.author.id == bot_user_id
-
-    async def _history_for(self, message: discord.Message, bot_user_id: int) -> tuple[Turn, ...]:
-        """Reconstruct the reply-chain history, degrading to none on any failure."""
+    async def _history_for(
+        self, parent: discord.Message | None, bot_user_id: int
+    ) -> tuple[Turn, ...]:
+        """Reconstruct the reply-chain history from the resolved ``parent``, degrading to
+        none on any failure."""
         try:
             return await reconstruct(
-                message,
+                parent,
                 bot_user_id=bot_user_id,
                 max_turns=self.settings.history_max_turns,
                 strip_mention=_without_mention,

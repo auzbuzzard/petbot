@@ -25,7 +25,7 @@ from petbot.process.context import (
     build_compactor,
     is_context_overflow,
 )
-from petbot.process.history import to_model_messages
+from petbot.process.history import drop_leading_assistant, to_model_messages
 from petbot.process.model import build_model
 from petbot.process.settings import ChatSettings
 from petbot.process.voice import PassthroughStyle
@@ -95,7 +95,7 @@ class ChatProcess(Process):
             except ModelHTTPError as exc:
                 if not is_context_overflow(exc) or attempt == MAX_COMPACTION_RETRIES:
                     raise
-                compacted = await self._compactor.compact(history)
+                compacted = drop_leading_assistant(await self._compactor.compact(history))
                 if len(compacted) >= len(history):
                     raise  # can't shrink further — give up rather than loop forever
                 history = compacted

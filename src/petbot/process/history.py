@@ -8,6 +8,7 @@ handled reactively in :mod:`petbot.process.context`, not by trimming here).
 
 from __future__ import annotations
 
+from itertools import groupby
 from typing import assert_never
 
 from pydantic_ai.messages import (
@@ -33,28 +34,33 @@ def _content(turn: Turn) -> str:
     return f"{turn.author}: {text}" if turn.role is Role.USER else text
 
 
+def drop_leading_assistant(messages: list[ModelMessage]) -> list[ModelMessage]:
+    """Drop leading assistant messages so the history starts with a user message —
+    providers reject an assistant-first run.
+
+    Applied to a freshly-mapped history and again to a *compacted* one, since compaction
+    can slice the leading user message off the front.
+    """
+    first_user = next(
+        (i for i, message in enumerate(messages) if isinstance(message, ModelRequest)),
+        len(messages),
+    )
+    return messages[first_user:]
+
+
 def to_model_messages(history: tuple[Turn, ...]) -> list[ModelMessage]:
     """Turn the neutral ``history`` into pydantic-ai ``message_history``.
 
-    Empty turns are dropped, then consecutive same-role turns are merged into one
-    message (most chat backends reject a run of two user or two assistant messages, and
-    a multi-user chain produces them), then each is mapped by an exhaustive role match.
+    Empty turns are dropped; consecutive same-role turns are merged (a multi-user chain
+    produces them, and most backends reject a run of two of the same role); each is mapped
+    by a role match; and any leading assistant message is dropped (the history must start
+    with a user message).
     """
-    pairs: list[tuple[Role, str]] = []
-    for turn in history:
-        content = _content(turn)
-        if content:
-            pairs.append((turn.role, content))
-
-    merged: list[tuple[Role, str]] = []
-    for role, content in pairs:
-        if merged and merged[-1][0] == role:
-            merged[-1] = (role, f"{merged[-1][1]}\n{content}")
-        else:
-            merged.append((role, content))
+    pairs = [(turn.role, content) for turn in history if (content := _content(turn))]
 
     messages: list[ModelMessage] = []
-    for role, content in merged:
+    for role, group in groupby(pairs, key=lambda pair: pair[0]):
+        content = "\n".join(text for _, text in group)
         match role:
             case Role.USER:
                 messages.append(ModelRequest(parts=[UserPromptPart(content=content)]))
@@ -62,4 +68,4 @@ def to_model_messages(history: tuple[Turn, ...]) -> list[ModelMessage]:
                 messages.append(ModelResponse(parts=[TextPart(content=content)]))
             case _:
                 assert_never(role)
-    return messages
+    return drop_leading_assistant(messages)

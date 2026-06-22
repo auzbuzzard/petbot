@@ -16,6 +16,7 @@ from petbot.frontends.discord.history import (
     RawTurn,
     _describe_card,
     reconstruct,
+    resolve_parent,
     to_turns,
     walk_reply_chain,
 )
@@ -34,9 +35,10 @@ class FakeAuthor:
 
 class FakeRef:
     def __init__(self, message_id: int | None) -> None:
-        # Always unresolved, so the walk goes through `fetch_message` (the general path).
+        # Always unresolved + uncached, so resolution goes through `fetch_message`.
         self.message_id = message_id
         self.resolved = None
+        self.cached_message = None
 
 
 class FakeChannel:
@@ -98,38 +100,57 @@ def test_describe_card_uses_title_and_image() -> None:
 # --- the walk -----------------------------------------------------------------
 
 
+async def test_resolve_parent_fetches_when_unresolved() -> None:
+    parent = FakeMessage(author=FakeAuthor(1, "PetBot"), content="here you go!")
+    trigger = FakeMessage(
+        author=FakeAuthor(2, "Alice"), content="<@1> another?", reference=FakeRef(100)
+    )
+    trigger.channel = FakeChannel({100: parent})
+    assert await resolve_parent(trigger) is parent  # type: ignore[arg-type, comparison-overlap]
+
+
+async def test_resolve_parent_is_none_without_a_reference() -> None:
+    msg = FakeMessage(author=FakeAuthor(2, "Alice"), content="hi")
+    assert await resolve_parent(msg) is None  # type: ignore[arg-type]
+
+
+async def test_resolve_parent_is_none_when_unfetchable() -> None:
+    msg = FakeMessage(author=FakeAuthor(2, "Alice"), content="hi", reference=FakeRef(999))
+    msg.channel = FakeChannel({})  # 999 missing -> NotFound -> None, not raised
+    assert await resolve_parent(msg) is None  # type: ignore[arg-type]
+
+
 async def test_walk_collects_ancestors_newest_first() -> None:
     bot_msg = FakeMessage(author=FakeAuthor(1, "PetBot"), content="here you go!")
     user_msg = FakeMessage(
         author=FakeAuthor(2, "Alice"), content="<@1> show me a pony", reference=FakeRef(100)
     )
-    trigger = FakeMessage(
-        author=FakeAuthor(2, "Alice"), content="<@1> another?", reference=FakeRef(101)
-    )
-    channel = FakeChannel({100: bot_msg, 101: user_msg})
-    for msg in (bot_msg, user_msg, trigger):
+    channel = FakeChannel({100: bot_msg})
+    for msg in (bot_msg, user_msg):
         msg.channel = channel
 
-    raw = await walk_reply_chain(trigger, bot_user_id=1, max_turns=25)  # type: ignore[arg-type]
+    # The caller passes the already-resolved immediate parent (`user_msg`).
+    raw = await walk_reply_chain(user_msg, bot_user_id=1, max_turns=25)  # type: ignore[arg-type]
     assert [(r.display_name, r.is_self) for r in raw] == [("Alice", False), ("PetBot", True)]
 
 
 async def test_walk_respects_max_turns() -> None:
-    parent = FakeMessage(author=FakeAuthor(1, "PetBot"), content="oldest")
+    oldest = FakeMessage(author=FakeAuthor(1, "PetBot"), content="oldest")
     middle = FakeMessage(author=FakeAuthor(2, "Alice"), content="middle", reference=FakeRef(1))
-    trigger = FakeMessage(author=FakeAuthor(2, "Alice"), content="newest", reference=FakeRef(2))
-    channel = FakeChannel({1: parent, 2: middle})
-    for msg in (parent, middle, trigger):
+    channel = FakeChannel({1: oldest})
+    for msg in (oldest, middle):
         msg.channel = channel
 
-    raw = await walk_reply_chain(trigger, bot_user_id=1, max_turns=1)  # type: ignore[arg-type]
+    raw = await walk_reply_chain(middle, bot_user_id=1, max_turns=1)  # type: ignore[arg-type]
     assert len(raw) == 1 and raw[0].text == "middle"
 
 
 async def test_walk_stops_on_unfetchable_ancestor() -> None:
-    trigger = FakeMessage(author=FakeAuthor(2, "Alice"), content="hi", reference=FakeRef(999))
-    trigger.channel = FakeChannel({})  # 999 missing -> NotFound -> stop, not raise
-    assert await walk_reply_chain(trigger, bot_user_id=1, max_turns=25) == []  # type: ignore[arg-type]
+    # The parent is recorded; its own parent (999) is missing -> the walk stops, not raises.
+    parent = FakeMessage(author=FakeAuthor(1, "PetBot"), content="hi", reference=FakeRef(999))
+    parent.channel = FakeChannel({})
+    raw = await walk_reply_chain(parent, bot_user_id=1, max_turns=25)  # type: ignore[arg-type]
+    assert [r.text for r in raw] == ["hi"]
 
 
 # --- end to end ---------------------------------------------------------------
@@ -145,8 +166,9 @@ async def test_reconstruct_flattens_an_image_only_bot_card() -> None:
     channel = FakeChannel({100: bot_card})
     bot_card.channel = trigger.channel = channel
 
+    parent = await resolve_parent(trigger)  # type: ignore[arg-type]
     turns = await reconstruct(
-        trigger,  # type: ignore[arg-type]
+        parent,
         bot_user_id=1,
         max_turns=25,
         strip_mention=_without_mention,
@@ -158,8 +180,9 @@ async def test_reconstruct_flattens_an_image_only_bot_card() -> None:
 
 async def test_reconstruct_is_empty_without_a_reply() -> None:
     msg = FakeMessage(author=FakeAuthor(2, "Alice"), content="<@1> hi")
+    parent = await resolve_parent(msg)  # type: ignore[arg-type]
     turns = await reconstruct(
-        msg,  # type: ignore[arg-type]
+        parent,
         bot_user_id=1,
         max_turns=25,
         strip_mention=_without_mention,
