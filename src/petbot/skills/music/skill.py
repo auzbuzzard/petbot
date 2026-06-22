@@ -23,8 +23,10 @@ from dataclasses import dataclass, field
 
 from petbot.domain import (
     Capability,
+    InvalidInput,
     Skill,
     SkillContext,
+    SkillError,
     SkillResult,
     TrackFinishedCallback,
     VoicePort,
@@ -82,7 +84,7 @@ class MusicSkill(Skill[MusicArgs]):
     async def run(self, args: MusicArgs, ctx: SkillContext) -> SkillResult:
         voice = self._voice.for_context(ctx)
         if voice is None:
-            return SkillResult.failure("I'm not able to use voice here.")
+            raise SkillError("I'm not able to use voice here.")
 
         state = self._state(ctx.conversation_id)
         if args.action == "play":
@@ -95,7 +97,7 @@ class MusicSkill(Skill[MusicArgs]):
             return self._show_queue(state)
         if args.action == "volume":
             return self._set_volume(args, state)
-        return SkillResult.failure(f"Unknown music action: {args.action!r}.")
+        raise SkillError(f"Unknown music action: {args.action!r}.")
 
     async def _start(self, state: ConversationMusic, voice: VoicePort, track: Track) -> None:
         """Make ``track`` the current track and begin playing it."""
@@ -133,7 +135,7 @@ class MusicSkill(Skill[MusicArgs]):
     ) -> SkillResult:
         query = (args.query or "").strip()
         if not query:
-            return SkillResult.failure("Tell me what to play (a URL or search terms).")
+            raise InvalidInput("Tell me what to play (a URL or search terms).")
         track = Track(
             source_url=query,
             requested_by_id=ctx.user.id,
@@ -198,7 +200,7 @@ class MusicSkill(Skill[MusicArgs]):
 
     def _set_volume(self, args: MusicArgs, state: ConversationMusic) -> SkillResult:
         if args.level is None:
-            return SkillResult.failure("Give me a volume level between 0 and 100.")
+            raise InvalidInput("Give me a volume level between 0 and 100.")
         state.volume = max(0, min(100, args.level)) / 100
         return SkillResult.message(
             f"🔊 Volume set to {state.volume:.0%} (applies to the next track)."

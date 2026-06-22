@@ -1,21 +1,27 @@
-"""PetBot platform: the worker runtime, the typed ``Skills`` client, and transports.
+"""PetBot platform: the compute plumbing — registry, transports, serve, client.
 
-:class:`Worker` hosts skills and runs a dispatched call; :class:`SkillsClient` is
-the one typed client; :class:`LocalTransport` / :class:`HttpTransport` /
-:class:`LambdaTransport` move a call to a worker.
+:class:`ToolRegistry` holds the tools a process can call; :func:`serve` is the remote
+boundary that runs a :class:`~petbot.domain.process.Process` behind a transport;
+:class:`ProcessClient` is the frontend's handle to a process; :class:`HttpTransport` /
+:class:`LambdaTransport` carry a :class:`Dispatch` to it. Platform-agnostic: it knows
+no skill, no frontend, and no concrete process impl.
 """
 
 from __future__ import annotations
 
-from petbot.platform.client import SkillsClient
-from petbot.platform.transport import HttpTransport, LambdaTransport, LocalTransport
-from petbot.platform.worker import SKILLS_GROUP, Worker
+from petbot.platform.client import ProcessClient
+from petbot.platform.dispatch import Dispatch, Transport
+from petbot.platform.registry import SKILLS_GROUP, ToolRegistry
+from petbot.platform.serve import serve
+from petbot.platform.transport import HttpTransport, LambdaTransport
 
 __all__ = [
     "SKILLS_GROUP",
+    "Dispatch",
     "HttpTransport",
     "LambdaTransport",
-    "LocalTransport",
-    "SkillsClient",
-    "Worker",
+    "ProcessClient",
+    "ToolRegistry",
+    "Transport",
+    "serve",
 ]

@@ -17,12 +17,11 @@ def _ctx() -> SkillContext:
 
 async def test_evaluates_expression() -> None:
     result = await MathSkill().run(MathArgs(expression="6 * 7"), _ctx())
-    assert not result.is_error
     assert result.text is not None and "42" in result.text
 
 
-async def test_bad_expression_is_output_not_failure() -> None:
+async def test_bad_expression_is_output_not_raised() -> None:
+    # The legacy contract: an invalid expression is shown as output in the code block,
+    # not raised as a SkillError.
     result = await MathSkill().run(MathArgs(expression="this is not math"), _ctx())
-    # The legacy contract: the error is shown as output, not an expected failure.
-    assert not result.is_error
     assert result.text is not None

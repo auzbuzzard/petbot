@@ -1437,6 +1437,18 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+compute-core = [
+    { name = "httpx" },
+    { name = "numexpr" },
+    { name = "numpy" },
+    { name = "pydantic-ai-slim", extra = ["bedrock", "openai"] },
+    { name = "pydantic-settings" },
+]
+compute-music = [
+    { name = "discord-py", extra = ["voice"] },
+    { name = "pydantic-settings" },
+    { name = "yt-dlp" },
+]
 dev = [
     { name = "boto3" },
     { name = "discord-py", extra = ["voice"] },
@@ -1455,7 +1467,7 @@ dev = [
     { name = "ruff" },
     { name = "yt-dlp" },
 ]
-edge = [
+discord = [
     { name = "discord-py" },
     { name = "httpx" },
     { name = "pydantic-settings" },
@@ -1463,45 +1475,33 @@ edge = [
 lambda = [
     { name = "boto3" },
 ]
-worker-core = [
-    { name = "httpx" },
-    { name = "numexpr" },
-    { name = "numpy" },
-    { name = "pydantic-ai-slim", extra = ["bedrock", "openai"] },
-    { name = "pydantic-settings" },
-]
-worker-music = [
-    { name = "discord-py", extra = ["voice"] },
-    { name = "pydantic-settings" },
-    { name = "yt-dlp" },
-]
 
 [package.metadata]
 requires-dist = [
     { name = "boto3", marker = "extra == 'lambda'", specifier = ">=1.34" },
-    { name = "discord-py", marker = "extra == 'edge'", specifier = ">=2.7,<2.8" },
-    { name = "discord-py", extras = ["voice"], marker = "extra == 'worker-music'", specifier = ">=2.7,<2.8" },
-    { name = "httpx", marker = "extra == 'edge'", specifier = ">=0.27" },
-    { name = "httpx", marker = "extra == 'worker-core'", specifier = ">=0.27" },
+    { name = "discord-py", marker = "extra == 'discord'", specifier = ">=2.7,<2.8" },
+    { name = "discord-py", extras = ["voice"], marker = "extra == 'compute-music'", specifier = ">=2.7,<2.8" },
+    { name = "httpx", marker = "extra == 'compute-core'", specifier = ">=0.27" },
+    { name = "httpx", marker = "extra == 'discord'", specifier = ">=0.27" },
     { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
-    { name = "numexpr", marker = "extra == 'worker-core'", specifier = ">=2.8" },
-    { name = "numpy", marker = "extra == 'worker-core'", specifier = ">=1.26" },
-    { name = "petbot", extras = ["edge", "worker-core", "worker-music", "lambda"], marker = "extra == 'dev'" },
+    { name = "numexpr", marker = "extra == 'compute-core'", specifier = ">=2.8" },
+    { name = "numpy", marker = "extra == 'compute-core'", specifier = ">=1.26" },
+    { name = "petbot", extras = ["discord", "compute-core", "compute-music", "lambda"], marker = "extra == 'dev'" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.7" },
     { name = "pydantic", specifier = ">=2" },
-    { name = "pydantic-ai-slim", extras = ["bedrock", "openai"], marker = "extra == 'worker-core'", specifier = ">=0.0.30" },
-    { name = "pydantic-settings", marker = "extra == 'edge'", specifier = ">=2.14.2" },
-    { name = "pydantic-settings", marker = "extra == 'worker-core'", specifier = ">=2.14.2" },
-    { name = "pydantic-settings", marker = "extra == 'worker-music'", specifier = ">=2.14.2" },
+    { name = "pydantic-ai-slim", extras = ["bedrock", "openai"], marker = "extra == 'compute-core'", specifier = ">=0.0.30" },
+    { name = "pydantic-settings", marker = "extra == 'compute-core'", specifier = ">=2.14.2" },
+    { name = "pydantic-settings", marker = "extra == 'compute-music'", specifier = ">=2.14.2" },
+    { name = "pydantic-settings", marker = "extra == 'discord'", specifier = ">=2.14.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "respx", marker = "extra == 'dev'", specifier = ">=0.21" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
-    { name = "yt-dlp", marker = "extra == 'worker-music'", specifier = ">=2024.0.0" },
+    { name = "yt-dlp", marker = "extra == 'compute-music'", specifier = ">=2024.0.0" },
 ]
-provides-extras = ["edge", "worker-core", "worker-music", "lambda", "dev"]
+provides-extras = ["discord", "compute-core", "compute-music", "lambda", "dev"]
 
 [[package]]
 name = "platformdirs"

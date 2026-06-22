@@ -51,9 +51,3 @@ class MusicArgs(Frozen):
     action: MusicAction
     query: str | None = None
     level: int | None = None
-
-
-class ChatArgs(Frozen):
-    """Arguments for the ``chat`` skill (the conversational LLM entrypoint)."""
-
-    message: str

@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-from petbot.domain import Platform, SkillContext, TrackFinishedCallback, User, VoicePort
+import pytest
+
+from petbot.domain import (
+    Platform,
+    SkillContext,
+    SkillError,
+    TrackFinishedCallback,
+    User,
+    VoicePort,
+)
 from petbot.skills.music import MusicSkill
 from petbot.skills.music.skill import SKIP_THRESHOLD
 from petbot.types import MusicArgs
@@ -110,7 +119,7 @@ async def test_volume_clamps_and_persists() -> None:
     assert "100%" in (out.text or "")
 
 
-async def test_voice_unavailable_is_friendly_failure() -> None:
+async def test_voice_unavailable_raises() -> None:
     skill = MusicSkill(FakeVoiceProvider(None))
-    out = await skill.run(MusicArgs(action="play", query="x"), _ctx())
-    assert out.is_error
+    with pytest.raises(SkillError):
+        await skill.run(MusicArgs(action="play", query="x"), _ctx())

@@ -25,21 +25,16 @@ class EmbedSpec(Frozen):
 
 
 class SkillResult(Frozen):
-    """A skill's neutral result: optional text, an optional card, files, an error.
+    """A skill's neutral result: optional text, an optional card, files.
 
-    ``error`` carries *expected* failures (empty search, bad input) rendered as a
-    friendly message — not exceptions.
+    There is no error channel: an expected failure is **raised** as a
+    :class:`~petbot.domain.errors.SkillError` and turned into a (voiced) result at the
+    process output boundary — a result only ever describes an *answer*.
     """
 
     text: str | None = None
     embed: EmbedSpec | None = None
     files: tuple[str, ...] = ()
-    error: str | None = None
-
-    @property
-    def is_error(self) -> bool:
-        """Whether this result represents an expected failure."""
-        return self.error is not None
 
     @classmethod
     def message(
@@ -49,10 +44,5 @@ class SkillResult(Frozen):
         embed: EmbedSpec | None = None,
         files: tuple[str, ...] = (),
     ) -> SkillResult:
-        """Build a successful result."""
+        """Build a result (optional text, an optional card, optional files)."""
         return cls(text=text, embed=embed, files=files)
-
-    @classmethod
-    def failure(cls, error: str) -> SkillResult:
-        """Build an expected-failure result (rendered as a friendly message)."""
-        return cls(error=error)

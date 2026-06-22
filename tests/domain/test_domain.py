@@ -5,15 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from petbot.domain import (
-    EmbedSpec,
-    Platform,
-    SkillCall,
-    SkillContext,
-    SkillResult,
-    User,
-)
-from petbot.types import MathArgs
+from petbot.domain import EmbedSpec, Platform, SkillContext, SkillResult, User
 
 
 def _ctx() -> SkillContext:
@@ -24,24 +16,15 @@ def _ctx() -> SkillContext:
     )
 
 
-def test_result_helpers() -> None:
+def test_result_message_carries_text_and_embed() -> None:
     ok = SkillResult.message("hi", embed=EmbedSpec(title="t"))
-    assert not ok.is_error
     assert ok.text == "hi"
-    assert SkillResult.failure("nope").is_error
+    assert ok.embed is not None
 
 
 def test_result_round_trips() -> None:
     result = SkillResult.message("hi", embed=EmbedSpec(title="t", color=0xFF0000))
     assert SkillResult.model_validate_json(result.model_dump_json()) == result
-
-
-def test_skill_call_holds_typed_args_in_memory() -> None:
-    # SkillCall is an in-memory envelope: args is a live model, not pre-serialised.
-    args = MathArgs(expression="6 * 7")
-    call = SkillCall(skill="math", args=args, context=_ctx())
-    assert call.args is args
-    assert call.context.user.display_name == "tester"
 
 
 def test_models_are_frozen() -> None:

@@ -9,39 +9,46 @@ A thin, always-on Discord **edge** holds the gateway and runs no skills; it
 dispatches every request to a **worker** that does. One installable package
 (`petbot`) under `src/`, with install-extras slicing dependencies per process:
 
+Organised by **concept** (`src/`), deployed by **service** (`deploy/` + `petbot.services`):
+
 | Module | Role |
 |---|---|
-| `petbot.domain` | Kernel: frozen pydantic models (`SkillResult`, `SkillContext`, `EmbedSpec`), the generic `Skill[ArgsT]` ABC, ports (`VoicePort`, `VoiceProvider`), and the dispatch primitives (`SkillCall`, `Transport`). Depends on nothing else first-party. |
-| `petbot.types` | The typed surface the edge imports without skills: per-skill `*Args` models + the `Skills` client Protocol. |
-| `petbot.platform` | `Worker` (runs a dispatched call), `SkillsClient` (the one `Skills` impl), and the transports (`LocalTransport`, `HttpTransport`, `LambdaTransport`). |
-| `petbot.skills.{math,booru,music,chat}` | One skill each. `chat` is a pydantic-ai agent whose tools are its sibling skills; it also exports `LLMStyleProvider` (a `StyleProvider` port), the small LLM that restyles a result in PetBot's voice for the LLM-free slash path. |
-| `petbot.edge` | The edge: `@mention` → `skills.chat(...)` → render. |
-| `petbot.workers.{core,music}` | Deployable bundles: core = math+booru+chat (Lambda/HTTP); music = gateway + voice host. |
+| `petbot.domain` | Kernel: frozen models (`SkillResult`, `SkillContext`, `EmbedSpec`, the `Input` sum type `TextInput \| CommandInput`), the `Process` verb + the `Skill[ArgsT]` tool ABC, ports (`VoicePort`, `StylePort`, `Notifier`), and `SkillError`. Imports nothing else first-party. |
+| `petbot.process` | **The core.** The `Process` impls: `ChatProcess` (the LLM brain), `CommandProcess`, the `RouterProcess` (the one exhaustive `match` on input type), and the persona voice (`Stylist` / `PassthroughStyle`, a `StylePort`). |
+| `petbot.skills.{math,booru,music}` | One **tool** each (a `Skill[ArgsT]`); the process calls them through the `ToolRegistry`. Tools *raise* `SkillError` for expected failures. |
+| `petbot.types` | The typed surface a frontend imports without a skill: per-skill `*Args` models + the `Command` / `CATALOG`. |
+| `petbot.platform` | Plumbing: `ToolRegistry`, `serve`, `ProcessClient`, the `Dispatch` envelope + transports (`HttpTransport`, `LambdaTransport`). |
+| `petbot.frontends.{discord}` | Driving adapters: map a platform event to an `Input`, dispatch via a `ProcessClient`, render the `SkillResult`. |
+| `petbot.services.{core,music}` | Composition roots (deploy-by-service): wire process + skills + platform and `serve` it. core = chat + command over math/booru; music = the voice service. |
 
-The calling pattern: the edge holds a `Skills` client — `SkillsClient(transport)`
-— and calls `await skills.chat(ChatArgs(...), ctx)`. `SkillCall` carries the
-*typed* args (no pre-serialisation); the transport delivers it (a local transport
-in-process with no JSON, a remote transport serialising at the boundary), and the
-worker validates the args against the skill's `args_model` and runs it. mypy
-`--strict` checks every call across modules.
+The calling pattern: a frontend builds a neutral `Input` (`TextInput` for `@mention`,
+`CommandInput` for slash) + a `SkillContext` and calls `await process.respond(inp, ctx)`
+on its `ProcessClient` (over a transport). On the compute side `serve` decodes the
+`Dispatch`, the `RouterProcess` picks `ChatProcess`/`CommandProcess` by the input *type*
+(the one exhaustive `match`), and the process calls its tools through the `ToolRegistry`,
+which validates raw values against each skill's `args_model`. mypy `--strict` checks every
+call across modules.
 
 ## Install extras
 
-`pip install petbot[edge]` (discord.py, httpx), `petbot[worker-core]`
-(pydantic-ai, numexpr), `petbot[worker-music]` (yt-dlp, voice), `petbot[lambda]`
+`pip install petbot[discord]` (discord.py, httpx), `petbot[compute-core]`
+(pydantic-ai, numexpr), `petbot[compute-music]` (yt-dlp, voice), `petbot[lambda]`
 (boto3), `petbot[dev]` (everything + tooling). The module boundaries are enforced
 statically by `lint-imports`, not by packaging.
 
 ## Invariants (do not violate)
 
 1. **`petbot.domain` imports nothing else first-party and no `discord`/`httpx`.**
-   The edge never imports a skill. Enforced by `lint-imports`.
-2. **Skills are pure w.r.t. the platform.** They read typed `args` + `ctx`, return
-   a `SkillResult`, and branch on `ctx` flags — never on the platform name.
-3. **Explicit content is gated on `ctx.allows_explicit`** (the edge sets it from
+   A frontend never imports a skill or the process core; the process core never imports
+   a concrete skill. Enforced by `lint-imports`.
+2. **Skills are pure tools.** They read typed `args` + `ctx`, return a `SkillResult` (or
+   **raise** a `SkillError` for an expected failure), and branch on `ctx` flags — never on
+   the platform name. The process output boundary catches a `SkillError` and voices it once
+   through the `StylePort`; there is no error channel on `SkillResult`.
+3. **Explicit content is gated on `ctx.allows_explicit`** (the frontend sets it from
    `channel.is_nsfw()`).
-4. **`SkillContext` is pure serialisable data** — no live ports on it. A
-   voice-needing skill gets its port from an injected `VoiceProvider` worker-side.
+4. **`SkillContext` is pure serialisable data** — no live ports, no presentation flags. A
+   voice-needing skill gets its port from an injected `VoiceProvider` compute-side.
 5. **Never block the event loop.** Offload `numexpr`/`yt-dlp`/sync work with
    `asyncio.to_thread`.
 6. **Logging is configured once, at each entrypoint.** Modules do
@@ -54,17 +61,18 @@ statically by `lint-imports`, not by packaging.
 ## Typing convention
 
 First-party classes that exist to implement a Protocol **explicitly subclass** it
-(`class SkillsClient(Skills)`, `class HttpTransport(Transport)`) so mypy verifies
+(`class ProcessClient(Process)`, `class HttpTransport(Transport)`) so mypy verifies
 conformance at the definition. Structural (no inheritance) is reserved for foreign
 types and test fakes.
 
 ## Adding a skill
 
-1. Add the `*Args` model + a `Skills` method in `petbot.types`.
-2. Add the one-line `SkillsClient` method in `petbot.platform.client`.
-3. Create `petbot/skills/<name>/` with a `Skill[<Args>]` subclass; register an
-   entry point under `petbot.skills` (or build it explicitly if it needs DI).
-4. Host it in the relevant worker; expose it as a chat tool if conversational.
+1. Add the `*Args` model in `petbot.types.args` and a `Command` entry in
+   `petbot.types.catalog` (`CATALOG`).
+2. Create `petbot/skills/<name>/` with a `Skill[<Args>]` subclass; register an entry
+   point under `petbot.skills` (or build it explicitly in a service if it needs DI).
+3. It's hosted wherever its extra is installed; the slash surface and the chat agent both
+   pick it up from `CATALOG` for free.
 
 ## Commands
 
@@ -75,8 +83,8 @@ uv run mypy                                      # strict typing
 uv run lint-imports                              # module boundaries
 uv run pytest                                    # offline tests
 
-python -m petbot.workers.core                    # local core worker (:8000)
-python -m petbot.edge                            # the edge (talks to the worker)
+python -m petbot.services.core                   # local core compute service (:8000)
+python -m petbot.frontends.discord               # the Discord frontend (talks to it)
 ```
 
 CI runs lint/format/mypy/lint-imports/pytest and needs **no secrets**.

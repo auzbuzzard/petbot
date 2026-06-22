@@ -36,21 +36,16 @@ class User(Frozen):
 class SkillContext(Frozen):
     """Everything a skill needs about a request, with no platform nouns.
 
-    ``allows_explicit`` and ``style_results`` are *runtime* flags (the booru skills
-    raise their rating floor on an NSFW channel; the dispatch boundary styles a
-    result for a frontend that has no LLM) — distinct from a hard
-    :class:`~petbot.domain.capability.Capability`, which gates whether a skill is
-    hosted at all.
+    ``allows_explicit`` is a *runtime* flag (the booru skills raise their rating floor
+    on an NSFW channel) — distinct from a hard
+    :class:`~petbot.domain.capability.Capability`, which gates whether a skill is hosted
+    at all. There is no styling/presentation flag here: which process voices a result is
+    decided by the ``Input`` type at dispatch, not carried as request data.
     """
 
     platform: Platform
     user: User
     #: Neutral key identifying the conversation, for grouping its history and
-    #: resolving per-conversation worker state (e.g. a music queue + voice port).
+    #: resolving per-conversation compute state (e.g. a music queue + voice port).
     conversation_id: str
     allows_explicit: bool = False
-    #: The originating frontend has no LLM to voice the result itself (a slash
-    #: command), so the worker applies the persona style on the way out. The
-    #: ``@mention`` path leaves this ``False`` — the chat agent voices its own
-    #: output, and a nested chat tool-call inherits that ``False``.
-    style_results: bool = False

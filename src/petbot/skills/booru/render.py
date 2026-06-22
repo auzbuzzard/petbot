@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from enum import StrEnum
 
-from petbot.domain import EmbedSpec, SkillResult
+from petbot.domain import EmbedSpec, EmptyResult, SkillResult
 from petbot.skills.booru.types import Post, SearchRequest
 
 
@@ -40,10 +40,11 @@ _EMPTY_NOTE: dict[EmptyReason, str] = {
 
 
 def render(post: Post | None, *, request: SearchRequest) -> SkillResult:
-    """Render a search outcome. ``post is None`` is an ordinary empty result."""
+    """Render a found post. An empty search **raises** :class:`EmptyResult`, whose factual
+    note the process output boundary voices in persona."""
     if post is None:
         reason = EmptyReason.SAFE_FLOOR if request.safe_only else EmptyReason.NO_MATCH
-        return SkillResult.message(_EMPTY_NOTE[reason])
+        raise EmptyResult(_EMPTY_NOTE[reason])
 
     if post.total is not None:
         title = f"{post.total} result{'s' if post.total != 1 else ''}: {tags_label(request.tags)}"
