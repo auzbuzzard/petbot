@@ -12,6 +12,12 @@ from petbot.domain._model import Frozen
 from petbot.domain.call import SkillCall, Transport
 from petbot.domain.capability import Capability
 from petbot.domain.context import Platform, SkillContext, User
+from petbot.domain.errors import (
+    EmptyResult,
+    InvalidInput,
+    SkillError,
+    UpstreamUnavailable,
+)
 from petbot.domain.input import CommandInput, Input, TextInput
 from petbot.domain.ports import (
     Notifier,
@@ -29,20 +35,24 @@ __all__ = [
     "Capability",
     "CommandInput",
     "EmbedSpec",
+    "EmptyResult",
     "Frozen",
     "Input",
+    "InvalidInput",
     "Notifier",
     "Platform",
     "Process",
     "Skill",
     "SkillCall",
     "SkillContext",
+    "SkillError",
     "SkillResult",
     "StylePort",
     "StyleProvider",
     "TextInput",
     "TrackFinishedCallback",
     "Transport",
+    "UpstreamUnavailable",
     "User",
     "VoicePort",
     "VoiceProvider",
