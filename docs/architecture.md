@@ -12,6 +12,9 @@ For the module map, the calling pattern, and the invariants, see
 - [ADR 0009](adr/0009-process-pipeline.md) — the process pipeline: the `Input` sum
   type, the `Process` verb (chat / command), the `ToolRegistry`, errors-as-exceptions,
   and the concept/service organisation. **The current end state.**
+- [ADR 0010](adr/0010-conversational-memory-reply-to-continue.md) — reply-to-continue
+  conversational memory (`TextInput.history`, reconstructed from the Discord reply
+  chain) and reactive context-window compaction.
 - [ADR 0006](adr/0006-gateway-edge-microservice-skills.md) — the original frontend +
   compute split and why music is its own service (vocabulary reshaped by 0009).
 - [ADR 0007](adr/0007-llm-agent-pydantic-ai.md) — the chat agent (pydantic-ai),
@@ -30,18 +33,21 @@ Discord ⇄ [ frontend ]  --Input(JSON)-->  [ core service ]  chat(LLM) · math 
                                                         petbot.services.music
 ```
 
-1. The frontend maps an `@mention` to a `TextInput` (and a slash command to a
-   `CommandInput`) plus a neutral `SkillContext`, and calls
-   `await process.respond(inp, ctx)` on its `ProcessClient` (a `Process` over a
-   transport).
+1. The frontend maps an `@mention` — or a **reply to PetBot** — to a `TextInput` (and a
+   slash command to a `CommandInput`) plus a neutral `SkillContext`. For a conversation,
+   it reconstructs the prior turns from the Discord reply chain into `TextInput.history`,
+   then calls `await process.respond(inp, ctx)` on its `ProcessClient` (a `Process` over
+   a transport).
 2. A `Dispatch` envelope carries the typed input. A remote transport
    (`HttpTransport`, `LambdaTransport`) serialises it at the boundary; `serve` decodes
    it on the compute side.
 3. A `RouterProcess` picks — by the input *type*, the one place anything branches —
-   the **chat process** (the pydantic-ai brain, which voices itself) or the **command
-   process** (which runs the resolved tool and applies the persona `StylePort`). Tools
-   are called in-process through the `ToolRegistry`; the agent's tools and the slash
-   surface both derive from one `CATALOG`.
+   the **chat process** (the pydantic-ai brain, which voices itself; it feeds
+   `TextInput.history` to the agent as message history and reactively compacts it — a
+   DI-selected sliding window or summarizer — only if the model rejects the conversation
+   for length) or the **command process** (which runs the resolved tool and applies the
+   persona `StylePort`). Tools are called in-process through the `ToolRegistry`; the
+   agent's tools and the slash surface both derive from one `CATALOG`.
 4. The service returns a neutral `SkillResult`; the frontend renders it (the one place
    neutral results become `discord.Embed`/messages). An expected failure is **raised**
    as a `SkillError` and voiced once at the process output boundary — there is no error

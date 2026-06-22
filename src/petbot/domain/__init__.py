@@ -17,7 +17,7 @@ from petbot.domain.errors import (
     SkillError,
     UpstreamUnavailable,
 )
-from petbot.domain.input import CommandInput, Input, TextInput
+from petbot.domain.input import CommandInput, Input, Role, TextInput, Turn
 from petbot.domain.ports import (
     Notifier,
     StylePort,
@@ -40,6 +40,7 @@ __all__ = [
     "Notifier",
     "Platform",
     "Process",
+    "Role",
     "Skill",
     "SkillContext",
     "SkillError",
@@ -47,6 +48,7 @@ __all__ = [
     "StylePort",
     "TextInput",
     "TrackFinishedCallback",
+    "Turn",
     "UpstreamUnavailable",
     "User",
     "VoicePort",

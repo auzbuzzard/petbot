@@ -46,6 +46,9 @@ class DiscordSettings(BaseSettings):
     discord_token: str
     dev_guild_id: int | None = None
     log_level: str = "INFO"
+    #: How many reply-chain ancestors to fetch when reconstructing conversation history
+    #: (a Discord-API cost bound, not a model-context bound). Env ``HISTORY_MAX_TURNS``.
+    history_max_turns: int = 25
     #: The compute service to dispatch to (required; see ``SERVICE__*``).
     service: ServiceTarget
 
