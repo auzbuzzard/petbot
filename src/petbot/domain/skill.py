@@ -2,7 +2,7 @@
 
 Generic over a pydantic ``args`` model: the model *is* the single source of truth
 for the skill's arguments. It drives the typed client method
-(:mod:`petbot.types`), the worker's re-hydration + validation of a wire payload,
+(:mod:`petbot.types`), the service's re-hydration + validation of a wire payload,
 and — for the chat agent — the LLM tool schema (``args_model.model_json_schema``).
 One declaration, three consumers, all type-checked.
 """
@@ -32,7 +32,7 @@ class Skill[ArgsT: BaseModel](ABC):
     description: str
     #: The pydantic model for this skill's arguments — the source of truth.
     args_model: type[ArgsT]
-    #: Hard capabilities the skill needs; only a providing worker hosts it.
+    #: Hard capabilities the skill needs; only a providing service hosts it.
     requires: frozenset[Capability] = frozenset()
 
     @abstractmethod

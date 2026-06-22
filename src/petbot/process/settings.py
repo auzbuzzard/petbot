@@ -1,4 +1,4 @@
-"""The chat worker's model configuration.
+"""The chat process's model configuration.
 
 Provider-agnostic (no vendor lock-in): the LLM is a **discriminated union**
 (``CHAT_LLM__KIND`` selects the variant), so only the chosen provider's fields

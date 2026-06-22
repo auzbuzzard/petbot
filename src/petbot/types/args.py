@@ -1,12 +1,12 @@
 """Per-skill argument models — the typed surface shared across packages.
 
-Each ``*Args`` is a :class:`~petbot.domain._model.Frozen` pydantic model and is
-the single source of truth for one skill's arguments: the skill implementation
-declares it as ``args_model``, the typed :class:`~petbot.types.client.Skills`
-client takes it as a parameter, the worker re-validates the wire payload against
-it, and the chat agent derives the LLM tool schema from it. Defining them here —
-*without* the skill implementations — is what lets the edge call skills with
-full types while keeping ``numexpr`` / ``yt-dlp`` / ``boto3`` out of the edge.
+Each ``*Args`` is a :class:`~petbot.domain._model.Frozen` pydantic model and is the
+single source of truth for one skill's arguments: the skill implementation declares it
+as ``args_model``, a :class:`~petbot.types.catalog.Command` carries it, the compute
+service re-validates a wire payload against it, and the chat agent derives the LLM tool
+schema from it. Defining them here — *without* the skill implementations — is what lets
+the frontend build its slash surface with full types while keeping ``numexpr`` /
+``yt-dlp`` / ``boto3`` out of the frontend.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ class MathArgs(Frozen):
 class BooruArgs(Frozen):
     """Arguments for a booru search (``derpi`` / ``e621``).
 
-    The channel decides the safety floor (the edge sets ``ctx.allows_explicit``
+    The channel decides the safety floor (the frontend sets ``ctx.allows_explicit``
     from ``channel.is_nsfw()``), so there is no explicit *option* here. ``sort`` /
     ``file_type`` are provider tokens validated by the skill against that
     provider's native vocabulary.

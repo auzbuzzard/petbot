@@ -4,10 +4,10 @@ This is the one place that knows how a result is presented, and it knows nothing
 about ratings beyond the resolved ``color``/``is_safe`` already on the ``Post``.
 
 The outcome is modelled, not stringly-typed: a found post becomes a card with no
-greeting text (the persona layer greets over it), and an empty search becomes an
-:class:`EmptyReason` rendered once to a factual note. The voice — greeting or
-relaying that note — is added downstream (the chat agent, or the worker's stylist),
-never shipped from here.
+greeting text (the persona layer greets over it), and an empty search **raises**
+:class:`~petbot.domain.errors.EmptyResult` carrying the factual reason. The voice —
+greeting or relaying that reason — is added downstream (the chat agent, or the command
+process's stylist), never shipped from here.
 """
 
 from __future__ import annotations

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "petbot"
 version = "2.1.0"
-description = "A Discord bot: a thin gateway edge that dispatches to skill workers."
+description = "A chatbot: a thin Discord frontend that dispatches to a compute service."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
@@ -54,7 +54,7 @@ dev = [
 ]
 
 [project.scripts]
-petbot-edge = "petbot.frontends.discord.__main__:main"
+petbot-discord = "petbot.frontends.discord.__main__:main"
 petbot-core = "petbot.services.core.__main__:main"
 petbot-music = "petbot.services.music.__main__:main"
 

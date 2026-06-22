@@ -1,5 +1,5 @@
 output "core_function_name" {
-  description = "Name of the core worker Lambda (the edge's WORKER__FUNCTION_NAME)."
+  description = "Name of the core compute Lambda (the frontend's SERVICE__FUNCTION_NAME)."
   value       = aws_lambda_function.this.function_name
 }
 

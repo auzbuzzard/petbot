@@ -1,6 +1,6 @@
 """Platform-neutral text chunking for the per-message length cap.
 
-Pure (no platform types): the edge is the only thing left that needs it, so it
+Pure (no platform types): the frontend is the only thing left that needs it, so it
 lives beside the renderer rather than in the kernel.
 """
 
