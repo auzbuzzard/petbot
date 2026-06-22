@@ -1,7 +1,15 @@
 # ADR 0006: Single gateway edge + microservice skills (reimagined architecture)
 
-- Status: Accepted
+- Status: Accepted — topology reshaped by [ADR 0009](0009-process-pipeline.md)
 - Date: 2026-06-17
+
+> **Update (2026-06-22):** ADR 0009 reshaped the *vocabulary and internals* recorded
+> here. The two roles are now **frontend** (was "edge") and **compute service** (was
+> "worker"); the `Worker` dispatcher dissolved into a `ToolRegistry` + the `Process`
+> verb + a `serve` boundary; `DispatchPort` is the `Transport` carrying a `Dispatch`;
+> the deploy bundles live under `petbot.services.{core,music}`. The *decisions* in this
+> ADR — one Gateway ingress, microservice compute, music as its own service, the
+> capability split — stand; only the shapes/names changed. Read 0009 for the end state.
 
 ## Context
 
