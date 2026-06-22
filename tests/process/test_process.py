@@ -7,6 +7,15 @@ from typing import Any
 
 import pytest
 from pydantic import BaseModel, ValidationError
+from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    UserPromptPart,
+)
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from petbot.domain import (
@@ -14,22 +23,33 @@ from petbot.domain import (
     EmbedSpec,
     Platform,
     Process,
+    Role,
     Skill,
     SkillContext,
     SkillResult,
     StylePort,
     TextInput,
+    Turn,
     UpstreamUnavailable,
     User,
 )
 from petbot.platform import ToolRegistry
 from petbot.process import ChatProcess, CommandProcess, PassthroughStyle, RouterProcess, Stylist
+from petbot.process.context import (
+    SlidingWindow,
+    Summarizer,
+    build_compactor,
+    is_context_overflow,
+)
+from petbot.process.history import drop_leading_assistant, to_model_messages
 from petbot.process.model import build_model, build_model_from_config
 from petbot.process.settings import (
     BedrockModel,
     ChatSettings,
     OpenAICompatibleModel,
     OpenRouterModel,
+    SlidingWindowContext,
+    SummarizeContext,
 )
 from petbot.types import BooruArgs, MathArgs
 
@@ -239,3 +259,168 @@ async def test_router_without_chat_rejects_conversational_input() -> None:
     router = RouterProcess(chat=None, command=_Recorder("command"))
     with pytest.raises(TypeError):
         await router.respond(TextInput(text="hi"), _ctx())
+
+
+# --- history mapping (neutral Turn -> pydantic-ai message_history) -------------
+
+
+def _texts(messages: list[ModelMessage]) -> list[tuple[str, str]]:
+    """``(kind, text)`` for each string part, for compact assertions."""
+    out: list[tuple[str, str]] = []
+    for message in messages:
+        for part in message.parts:
+            content = getattr(part, "content", None)
+            if isinstance(content, str):
+                out.append((message.kind, content))
+    return out
+
+
+def test_to_model_messages_inlines_user_author_not_assistant() -> None:
+    # The user turn is prefixed with its author (multi-user attribution); the bot turn
+    # isn't — the model owns its own replies.
+    msgs = to_model_messages(
+        (
+            Turn(role=Role.USER, author="Alice", text="show me a pony"),
+            Turn(role=Role.ASSISTANT, author="PetBot", text="here you go!"),
+        )
+    )
+    assert _texts(msgs) == [("request", "Alice: show me a pony"), ("response", "here you go!")]
+
+
+def test_to_model_messages_merges_consecutive_same_role() -> None:
+    msgs = to_model_messages(
+        (
+            Turn(role=Role.USER, author="Alice", text="one"),
+            Turn(role=Role.USER, author="Bob", text="two"),
+        )
+    )
+    assert _texts(msgs) == [("request", "Alice: one\nBob: two")]
+
+
+def test_to_model_messages_drops_empty_turns() -> None:
+    msgs = to_model_messages(
+        (
+            Turn(role=Role.USER, author="Alice", text="real"),
+            Turn(role=Role.ASSISTANT, author="PetBot", text="   "),  # empty -> dropped
+        )
+    )
+    assert _texts(msgs) == [("request", "Alice: real")]
+
+
+def test_to_model_messages_drops_leading_assistant_turns() -> None:
+    # History must begin with a user message (providers reject an assistant-first run), so
+    # a leading bot turn is dropped.
+    msgs = to_model_messages(
+        (
+            Turn(role=Role.ASSISTANT, author="PetBot", text="earlier reply"),
+            Turn(role=Role.USER, author="Alice", text="hi"),
+        )
+    )
+    assert _texts(msgs) == [("request", "Alice: hi")]
+
+
+def test_to_model_messages_lone_assistant_history_is_empty() -> None:
+    # A reply to an image-only bot card with no prior user turn: nothing to prepend.
+    msgs = to_model_messages((Turn(role=Role.ASSISTANT, author="PetBot", text="hi"),))
+    assert msgs == []
+
+
+def test_drop_leading_assistant_keeps_from_first_user() -> None:
+    # The shared guard the mapper and post-compaction path both apply: a compacted slice
+    # that begins with a bot message is trimmed to the first user message.
+    messages: list[ModelMessage] = [
+        ModelResponse(parts=[TextPart(content="earlier bot reply")]),
+        ModelRequest(parts=[UserPromptPart(content="user")]),
+        ModelResponse(parts=[TextPart(content="bot")]),
+    ]
+    assert drop_leading_assistant(messages) == messages[1:]
+    assert drop_leading_assistant(messages[2:]) == []  # all-assistant -> nothing
+
+
+# --- reactive context compaction ----------------------------------------------
+
+
+def _overflow() -> ModelHTTPError:
+    return ModelHTTPError(
+        status_code=400,
+        model_name="m",
+        body={"error": {"message": "maximum context length is 8192 tokens"}},
+    )
+
+
+def test_is_context_overflow_matches_only_length_rejections() -> None:
+    server_error = ModelHTTPError(status_code=500, model_name="m", body="boom")
+    assert is_context_overflow(_overflow()) is True
+    assert is_context_overflow(server_error) is False
+    assert is_context_overflow(ValueError("nope")) is False
+
+
+def test_build_compactor_selects_strategy_from_config() -> None:
+    assert isinstance(build_compactor(_settings(context=SlidingWindowContext())), SlidingWindow)
+    assert isinstance(build_compactor(_settings(context=SummarizeContext())), Summarizer)
+
+
+def _history(n: int) -> list[ModelMessage]:
+    return [ModelRequest(parts=[UserPromptPart(content=f"m{i}")]) for i in range(n)]
+
+
+async def test_sliding_window_drops_oldest_half() -> None:
+    history = _history(4)
+    assert await SlidingWindow().compact(history) == history[2:]
+
+
+async def test_sliding_window_leaves_a_single_message() -> None:
+    history = _history(1)
+    assert await SlidingWindow().compact(history) == history
+
+
+async def test_summarizer_replaces_oldest_half_with_a_summary() -> None:
+    summarizer = Summarizer(model=TestModel(custom_output_text="earlier: ponies"))
+    history = _history(4)
+    compacted = await summarizer.compact(history)
+    assert len(compacted) == 3  # one summary note + the recent half (2)
+    assert compacted[1:] == history[2:]
+    note = compacted[0]
+    assert isinstance(note, ModelRequest)
+    assert "earlier: ponies" in _texts([note])[0][1]
+
+
+# --- the chat process retries on a provider length rejection ------------------
+
+
+async def test_chat_compacts_and_retries_on_context_overflow() -> None:
+    calls = {"n": 0}
+
+    def fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _overflow()
+        return ModelResponse(parts=[TextPart(content="recovered")])
+
+    chat = ChatProcess(_registry(), model=FunctionModel(fn))
+    history = tuple(
+        Turn(role=Role.USER if i % 2 == 0 else Role.ASSISTANT, author="x", text=f"t{i}")
+        for i in range(6)
+    )
+    result = await chat.respond(TextInput(text="now", history=history), _ctx())
+    assert calls["n"] == 2  # first attempt overflowed; the compacted retry succeeded
+    assert result.text == "recovered"
+
+
+async def test_chat_passes_prior_turns_as_message_history() -> None:
+    captured: list[ModelMessage] = []
+
+    def fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        captured.extend(messages)
+        return ModelResponse(parts=[TextPart(content="ok")])
+
+    chat = ChatProcess(_registry(), model=FunctionModel(fn))
+    history = (
+        Turn(role=Role.USER, author="Alice", text="what's a pony?"),
+        Turn(role=Role.ASSISTANT, author="PetBot", text="a small horse"),
+    )
+    await chat.respond(TextInput(text="and a foal?", history=history), _ctx())
+    seen = [text for _, text in _texts(captured)]
+    assert "Alice: what's a pony?" in seen
+    assert "a small horse" in seen
+    assert any("and a foal?" in text for text in seen)

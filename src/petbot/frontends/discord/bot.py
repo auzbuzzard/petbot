@@ -19,8 +19,9 @@ import discord
 import httpx
 from discord.ext import commands
 
-from petbot.domain import Process, SkillResult, TextInput
+from petbot.domain import Process, SkillResult, TextInput, Turn
 from petbot.frontends.discord.context import build_context
+from petbot.frontends.discord.history import reconstruct, resolve_parent
 from petbot.frontends.discord.render import SERVICE_UNREACHABLE, respond
 from petbot.frontends.discord.settings import DiscordSettings, HttpService, LambdaService
 from petbot.frontends.discord.slash import build_commands
@@ -85,22 +86,55 @@ class PetBot(commands.Bot):
             logger.info("Logged in as %s (discord.py %s).", self.user, discord.__version__)
 
     async def on_message(self, message: discord.Message) -> None:
-        if message.author.bot or self.user is None or self.user not in message.mentions:
+        # Conversational entry: an @mention, OR a reply to one of PetBot's own messages
+        # (so a follow-up needs no re-mention). Other bots and our own messages are ignored.
+        # The reply parent is resolved once here and reused for both the trigger test and
+        # the history walk, so the immediate parent is never fetched twice.
+        if message.author.bot or self.user is None:
             return
-        text = _without_mention(message.content, self.user.id).strip()
+        bot_user_id = self.user.id
+        parent = await resolve_parent(message)
+        replying_to_self = parent is not None and parent.author.id == bot_user_id
+        if self.user not in message.mentions and not replying_to_self:
+            return
+        text = _without_mention(message.content, bot_user_id).strip()
         if not text:
             return
-        await respond(message.channel, await self._respond(text, message))
+        history = await self._history_for(parent, bot_user_id)
+        await respond(
+            message.channel, await self._respond(text, message, history), reference=message
+        )
 
-    async def _respond(self, text: str, message: discord.Message) -> SkillResult:
-        """Dispatch the @mention, mapping any transport failure to a friendly result.
+    async def _history_for(
+        self, parent: discord.Message | None, bot_user_id: int
+    ) -> tuple[Turn, ...]:
+        """Reconstruct the reply-chain history from the resolved ``parent``, degrading to
+        none on any failure."""
+        try:
+            return await reconstruct(
+                parent,
+                bot_user_id=bot_user_id,
+                max_turns=self.settings.history_max_turns,
+                strip_mention=_without_mention,
+            )
+        except Exception:
+            logger.exception("history reconstruction failed; continuing without it")
+            return ()
+
+    async def _respond(
+        self, text: str, message: discord.Message, history: tuple[Turn, ...] = ()
+    ) -> SkillResult:
+        """Dispatch the conversational turn, mapping any transport failure to a friendly
+        result.
 
         A transport failure is the one error the frontend renders itself: the styler is
         on the far side of the unreachable connection, so this fallback is static."""
         assert self.process is not None
         try:
             async with message.channel.typing():
-                return await self.process.respond(TextInput(text=text), build_context(message))
+                return await self.process.respond(
+                    TextInput(text=text, history=history), build_context(message)
+                )
         except Exception:
             logger.exception("dispatch failed")
             return SkillResult.message(SERVICE_UNREACHABLE)

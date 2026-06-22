@@ -3,9 +3,20 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
-from petbot.domain import EmbedSpec, Platform, SkillContext, SkillResult, User
+from petbot.domain import (
+    CommandInput,
+    EmbedSpec,
+    Input,
+    Platform,
+    Role,
+    SkillContext,
+    SkillResult,
+    TextInput,
+    Turn,
+    User,
+)
 
 
 def _ctx() -> SkillContext:
@@ -35,3 +46,22 @@ def test_models_are_frozen() -> None:
 def test_unknown_fields_rejected() -> None:
     with pytest.raises(ValidationError):
         SkillResult.model_validate({"text": "hi", "bogus": 1})
+
+
+def test_text_input_history_round_trips() -> None:
+    # History rides on the wire inside the Input sum type: dump to JSON-able data, then
+    # re-hydrate the right member by `kind` — tuple + Role enum + nested Turn survive.
+    inp = TextInput(
+        text="and another?",
+        history=(
+            Turn(role=Role.USER, author="Alice", text="show me a pony"),
+            Turn(role=Role.ASSISTANT, author="PetBot", text="here you go!"),
+        ),
+    )
+    adapter: TypeAdapter[Input] = TypeAdapter(Input)
+    assert adapter.validate_python(inp.model_dump(mode="json")) == inp
+
+
+def test_command_input_has_no_history() -> None:
+    # History is sum-type-local: only the conversational variant carries it.
+    assert "history" not in CommandInput.model_fields

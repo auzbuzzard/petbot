@@ -29,12 +29,21 @@ class FakeChannel:
         self.id = channel_id
         self._nsfw = nsfw
         self.sent: list[dict[str, object]] = []
+        self.kwargs: list[dict[str, object]] = []
 
     def is_nsfw(self) -> bool:
         return self._nsfw
 
-    async def send(self, content: str | None = None, embed: discord.Embed | None = None) -> None:
+    async def send(
+        self,
+        content: str | None = None,
+        embed: discord.Embed | None = None,
+        *,
+        reference: object = None,
+        mention_author: bool | None = None,
+    ) -> None:
         self.sent.append({"content": content, "embed": embed})
+        self.kwargs.append({"reference": reference, "mention_author": mention_author})
 
     @contextlib.asynccontextmanager
     async def typing(self) -> AsyncIterator[None]:
@@ -83,6 +92,15 @@ async def test_respond_chunks_long_text_embed_only_first() -> None:
     assert len(channel.sent) == len(chunk_text(long))
     assert channel.sent[0]["embed"] is not None
     assert channel.sent[1]["embed"] is None
+
+
+async def test_respond_threads_reply_on_first_chunk_only() -> None:
+    channel = FakeChannel()
+    parent = object()  # stands in for the triggering discord.Message
+    await respond(channel, SkillResult.message("x" * 4500), reference=parent)  # type: ignore[arg-type]
+    # First chunk replies to the parent without re-pinging; later chunks are plain.
+    assert channel.kwargs[0] == {"reference": parent, "mention_author": False}
+    assert channel.kwargs[1] == {"reference": None, "mention_author": None}
 
 
 def test_build_context_reads_nsfw_and_ids() -> None:
