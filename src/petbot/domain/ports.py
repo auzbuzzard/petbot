@@ -84,19 +84,6 @@ class StylePort(Protocol):
 
 
 @runtime_checkable
-class StyleProvider(Protocol):
-    """Resolves the :class:`StylePort` for a request, or ``None`` when no styling is
-    wanted (the caller voices its own output). Like :class:`VoiceProvider` it is
-    implemented compute-side and resolved per request, so the persona model never
-    rides on the wire; the dispatch boundary applies the port it returns.
-    """
-
-    def for_context(self, ctx: SkillContext) -> StylePort | None:
-        """The style port for this request, or ``None`` to leave the result as-is."""
-        ...
-
-
-@runtime_checkable
 class Notifier(Protocol):
     """Outbound port: deliver a result to a conversation *out-of-band*.
 

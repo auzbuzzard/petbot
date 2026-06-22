@@ -21,7 +21,6 @@ from petbot.domain.input import CommandInput, Input, TextInput
 from petbot.domain.ports import (
     Notifier,
     StylePort,
-    StyleProvider,
     TrackFinishedCallback,
     VoicePort,
     VoiceProvider,
@@ -46,7 +45,6 @@ __all__ = [
     "SkillError",
     "SkillResult",
     "StylePort",
-    "StyleProvider",
     "TextInput",
     "TrackFinishedCallback",
     "UpstreamUnavailable",
