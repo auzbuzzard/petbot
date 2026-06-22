@@ -1,6 +1,6 @@
 # ADR 0008: LLM-native persona — structured results and the slash Style port
 
-- Status: Accepted (with a known limitation; see *Open issue*)
+- Status: Accepted — the *Open issue* below is **resolved by [ADR 0009](0009-process-pipeline.md)**
 - Date: 2026-06-21
 - Builds on the edge/worker split in [ADR 0006](0006-gateway-edge-microservice-skills.md)
   and the chat agent in [ADR 0007](0007-llm-agent-pydantic-ai.md).
@@ -60,6 +60,12 @@ reuses the agent's model.
   tier is chosen for latency/fit, not savings.
 
 ## Open issue — the pipeline does not yet match the intended DDD layering
+
+> **Resolved by [ADR 0009](0009-process-pipeline.md)** (2026-06-22). The styling flag on
+> `SkillContext` and the styling transform in the dispatcher are both gone: presentation
+> now lives in the per-process output stage (a uniform `StylePort`, DI'd per process),
+> and routing is the `Input` *type*, not a context flag. The reasoning below is kept as
+> the record of how the concern surfaced.
 
 The trigger above is the cheapest option *within the current pipeline*, and shipping
 it surfaced a deeper concern the maintainer has flagged: **the request → dispatch →
