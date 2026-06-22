@@ -5,9 +5,10 @@ read [`docs/architecture.md`](docs/architecture.md) for the *why*.
 
 ## Architecture
 
-A thin, always-on Discord **edge** holds the gateway and runs no skills; it
-dispatches every request to a **worker** that does. One installable package
-(`petbot`) under `src/`, with install-extras slicing dependencies per process:
+A thin, always-on Discord **frontend** holds the gateway and runs no skills; it
+dispatches every request to a **compute service** that runs the process. One
+installable package (`petbot`) under `src/`, with install-extras slicing
+dependencies per process:
 
 Organised by **concept** (`src/`), deployed by **service** (`deploy/` + `petbot.services`):
 

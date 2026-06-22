@@ -1,42 +1,52 @@
 # Architecture
 
-A thin, always-on Discord **edge** holds the gateway and runs no skills; it
-dispatches every request to a **worker** that does. The codebase is one
-installable package, `petbot`, under `src/`, with install-extras slicing
-dependencies per process.
+PetBot is a chatbot: **`input → process → output`**. A thin, always-on Discord
+**frontend** holds the gateway and runs no skills; it dispatches every request to a
+**compute service** that runs the process. The codebase is one installable package,
+`petbot`, under `src/`, organised **by concept** (and deployed **by service**), with
+install-extras slicing dependencies per process.
 
 For the module map, the calling pattern, and the invariants, see
-[`AGENTS.md`](../AGENTS.md). For the *why* behind the splits and the LLM layer:
+[`AGENTS.md`](../AGENTS.md). For the *why* behind the splits:
 
-- [ADR 0006](adr/0006-gateway-edge-microservice-skills.md) — the edge/worker
-  split and why music is its own worker.
+- [ADR 0009](adr/0009-process-pipeline.md) — the process pipeline: the `Input` sum
+  type, the `Process` verb (chat / command), the `ToolRegistry`, errors-as-exceptions,
+  and the concept/service organisation. **The current end state.**
+- [ADR 0006](adr/0006-gateway-edge-microservice-skills.md) — the original frontend +
+  compute split and why music is its own service (vocabulary reshaped by 0009).
 - [ADR 0007](adr/0007-llm-agent-pydantic-ai.md) — the chat agent (pydantic-ai),
   skills-as-tools, and the provider-agnostic model choice.
-- [ADR 0003](adr/0003-neutral-core.md) — the neutral-core decision the
-  `petbot.domain` kernel descends from.
+- [ADR 0003](adr/0003-neutral-core.md) — the neutral-core decision the `petbot.domain`
+  kernel descends from.
 - [ADR 0005](adr/0005-serverless-deployment.md) — serverless compute (the core
-  worker's Lambda path).
+  service's Lambda path).
 
 ## The request path
 
 ```
-Discord ⇄ [ edge ]  --dispatch(JSON)-->  [ core worker ]  math · booru · chat(LLM)
-          petbot.edge    transport          petbot.workers.core
-                                              \--> [ music worker ]  gateway + voice
-                                                    petbot.workers.music
+Discord ⇄ [ frontend ]  --Input(JSON)-->  [ core service ]  chat(LLM) · math · booru
+            petbot.frontends.discord  transport  petbot.services.core
+                                                  \--> [ music service ]  gateway + voice
+                                                        petbot.services.music
 ```
 
-1. The edge maps an @mention to a neutral `SkillContext` and calls
-   `await skills.chat(ChatArgs(message), ctx)` on its typed `Skills` client
-   (`SkillsClient` over a transport).
-2. `SkillCall` carries the typed args. A `LocalTransport` runs the call
-   in-process with no serialisation; a remote transport (`HttpTransport`,
-   `LambdaTransport`) serialises at the boundary, and the worker validates the
-   args against the skill's `args_model`. The chat skill's LLM tools are its
-   sibling skills, called in-process through the same client.
-3. The worker returns a neutral `SkillResult`; the edge renders it to Discord
-   (the one place neutral results become `discord.Embed`/messages).
+1. The frontend maps an `@mention` to a `TextInput` (and a slash command to a
+   `CommandInput`) plus a neutral `SkillContext`, and calls
+   `await process.respond(inp, ctx)` on its `ProcessClient` (a `Process` over a
+   transport).
+2. A `Dispatch` envelope carries the typed input. A remote transport
+   (`HttpTransport`, `LambdaTransport`) serialises it at the boundary; `serve` decodes
+   it on the compute side.
+3. A `RouterProcess` picks — by the input *type*, the one place anything branches —
+   the **chat process** (the pydantic-ai brain, which voices itself) or the **command
+   process** (which runs the resolved tool and applies the persona `StylePort`). Tools
+   are called in-process through the `ToolRegistry`; the agent's tools and the slash
+   surface both derive from one `CATALOG`.
+4. The service returns a neutral `SkillResult`; the frontend renders it (the one place
+   neutral results become `discord.Embed`/messages). An expected failure is **raised**
+   as a `SkillError` and voiced once at the process output boundary — there is no error
+   channel on the result.
 
-The dependency rules (kernel imports nothing else first-party; the edge never
-imports a skill) are enforced by `lint-imports` — see `[tool.importlinter]` in
-`pyproject.toml`.
+The dependency rules (the kernel imports nothing else first-party; the frontend never
+imports a skill or the process core; the process core never imports a concrete skill)
+are enforced by `lint-imports` — see `[tool.importlinter]` in `pyproject.toml`.
