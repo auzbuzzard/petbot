@@ -45,6 +45,9 @@ locals {
       # ChatSettings reads (CHAT_LLM__KIND / CHAT_LLM__MODEL[ / __BASE_URL / __API_KEY]).
       CHAT_LLM__KIND  = var.chat_llm_kind
       CHAT_LLM__MODEL = var.chat_llm_model
+      # How an over-long conversation is compacted when the model rejects it for
+      # length (reactive). Default sliding_window; summarize uses the stylizer tier.
+      CHAT_CONTEXT__KIND = var.context_kind
     },
     var.chat_llm_base_url != "" ? { CHAT_LLM__BASE_URL = var.chat_llm_base_url } : {},
     var.user_agent != "" ? { USER_AGENT = var.user_agent } : {},
