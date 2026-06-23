@@ -104,6 +104,23 @@ variable "chat_llm_api_key_ssm_parameter" {
   default     = ""
 }
 
+variable "context_kind" {
+  type        = string
+  description = <<-EOT
+    How the chat agent compacts an over-long conversation *when the model rejects it
+    for length* (reactive — there is no token budget to set):
+      sliding_window - drop the oldest half (zero cost; default).
+      summarize      - summarise the oldest half with the stylizer-tier model.
+    Sets CHAT_CONTEXT__KIND in the worker.
+  EOT
+  default     = "sliding_window"
+
+  validation {
+    condition     = contains(["sliding_window", "summarize"], var.context_kind)
+    error_message = "context_kind must be one of: sliding_window, summarize."
+  }
+}
+
 variable "booru_ssm_parameters" {
   type        = map(string)
   description = <<-EOT
@@ -174,4 +191,14 @@ variable "edge_image_tag" {
     with no deployment (apply the service first, then push + set this).
   EOT
   default     = ""
+}
+
+variable "history_max_turns" {
+  type        = number
+  description = <<-EOT
+    How many reply-chain ancestors the edge fetches when reconstructing conversation
+    history (a Discord-API cost bound, not a model-context bound). Sets
+    HISTORY_MAX_TURNS in the edge container.
+  EOT
+  default     = 25
 }
