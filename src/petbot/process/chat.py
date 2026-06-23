@@ -11,12 +11,23 @@ styling stays uniform across processes without a second LLM pass.
 
 from __future__ import annotations
 
+from typing import assert_never
+
 from pydantic_ai import AgentRunResult
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models import Model
 
-from petbot.domain import Input, Process, SkillContext, SkillResult, StylePort, TextInput
+from petbot.domain import (
+    Input,
+    Process,
+    Recalled,
+    SkillContext,
+    SkillResult,
+    StylePort,
+    TextInput,
+    Unrecalled,
+)
 from petbot.platform import ToolRegistry
 from petbot.process.agent import ChatDeps, build_agent
 from petbot.process.context import (
@@ -29,6 +40,14 @@ from petbot.process.history import drop_leading_assistant, to_model_messages
 from petbot.process.model import build_model
 from petbot.process.settings import ChatSettings
 from petbot.process.voice import PassthroughStyle
+
+#: Per-run instruction added to PetBot's persona when a reply's prior context couldn't be
+#: read (``Unrecalled``), so the agent voices that it lost the thread instead of guessing.
+_LOST_CONTEXT_NOTE = (
+    "The user is replying to earlier messages you can no longer see. If their message "
+    "relies on that lost context, tell them you've lost the thread and ask them to recap; "
+    "otherwise just answer normally."
+)
 
 
 class ChatProcess(Process):
@@ -66,7 +85,16 @@ class ChatProcess(Process):
             # The router only sends conversational input here; guard for type-safety.
             raise TypeError(f"ChatProcess received {type(inp).__name__}")
         deps = ChatDeps(registry=self._registry, ctx=ctx)
-        result = await self._run(inp.text, to_model_messages(inp.history), deps)
+        match inp.history:
+            case Recalled(turns=turns):
+                history, note = to_model_messages(turns), None
+            case Unrecalled():
+                # Replied to context we couldn't read: no history, and tell the agent so it
+                # voices that it lost the thread rather than answering blind.
+                history, note = [], _LOST_CONTEXT_NOTE
+            case _:
+                assert_never(inp.history)
+        result = await self._run(inp.text, history, deps, instructions=note)
         card = next((a for a in deps.attachments if a.embed is not None), None)
         files = tuple(f for a in deps.attachments for f in a.files)
         out = SkillResult.message(
@@ -77,7 +105,12 @@ class ChatProcess(Process):
         return await self._style.stylize(out, ctx)
 
     async def _run(
-        self, prompt: str, history: list[ModelMessage], deps: ChatDeps
+        self,
+        prompt: str,
+        history: list[ModelMessage],
+        deps: ChatDeps,
+        *,
+        instructions: str | None = None,
     ) -> AgentRunResult[str]:
         """Run the agent, reactively compacting ``history`` if the model rejects it for
         length — the model's real window is the trigger, so we never guess a budget.
@@ -90,7 +123,11 @@ class ChatProcess(Process):
         for attempt in range(MAX_COMPACTION_RETRIES + 1):
             try:
                 return await self._agent.run(
-                    prompt, message_history=history, deps=deps, model=model
+                    prompt,
+                    message_history=history,
+                    deps=deps,
+                    model=model,
+                    instructions=instructions,
                 )
             except ModelHTTPError as exc:
                 if not is_context_overflow(exc) or attempt == MAX_COMPACTION_RETRIES:

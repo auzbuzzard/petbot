@@ -1,28 +1,70 @@
 """Reconstruct a conversation's history from the Discord reply chain.
 
-The frontend is the only place that holds the gateway, so it is the only place that can
-walk ``message.reference`` to recover the turns a reply continues. This maps that chain
-onto neutral :class:`~petbot.domain.input.Turn` values for ``TextInput.history`` — the
-driving-adapter half of "map a platform event to a complete ``Input``".
+The frontend holds the gateway, so it is the only place that can walk ``message.reference``
+to recover the turns a reply continues, mapping them onto neutral
+:class:`~petbot.domain.input.Turn` values for ``TextInput.history`` — the driving-adapter
+half of "map a platform event to a complete ``Input``".
 
-Three parts: :func:`resolve_parent` (one message → the message it replies to, preferring
-a copy Discord already gave us over a REST fetch), an async :func:`walk_reply_chain` that
-follows it up the chain (bounded, tolerant of deleted/unreadable ancestors), and a pure
-:func:`to_turns` that maps the gathered Discord turns to neutral ones. The history is shipped
-*faithful and untrimmed* — an
-over-long conversation is handled compute-side (reactively), not here. An image-only bot
-card is flattened to a faithful text description (its real title + image URL), since an
-assistant turn can only be text in the model's history.
+The walk is an async *unfold* of the reply chain (:func:`aiter_until_none` over
+:func:`resolve_parent`), bounded by :func:`atake`, then mapped by the pure :func:`to_turns`.
+:func:`resolve_parent` **raises** on an unreadable hop (e.g. a missing ``Read Message
+History`` permission) rather than swallowing it — the error unwinds to the single
+reconstruction boundary (``PetBot._reply_context``), which turns it into an ``Unrecalled``
+history so the agent is told it lost the thread instead of answering blind (ADR 0009: errors
+are raised, handled once at a boundary). An image-only bot card is flattened to a faithful
+text description (its real title + image URL), since an assistant turn can only be text in
+the model's history.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import re
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 
 import discord
 
 from petbot.domain import Role, Turn
+
+
+def strip_self_mention(content: str, bot_user_id: int) -> str:
+    """Remove only this bot's mention (``<@id>`` / ``<@!id>``), leaving others intact."""
+    return re.sub(rf"<@!?{bot_user_id}>", "", content)
+
+
+# --- async iteration the stdlib doesn't ship (no 2-arg ``aiter``, no async ``islice``) ----
+
+
+async def aiter_until_none[T](
+    step: Callable[[T], Awaitable[T | None]], start: T
+) -> AsyncIterator[T]:
+    """Async unfold: yield ``step(start)``, ``step(step(start))``… until ``step`` returns
+    ``None``. ``step``'s exceptions propagate, short-circuiting the stream.
+
+    (The async equivalent of ``iter(callable, sentinel)`` that feeds each result back as the
+    next seed — which ``aiter`` has no two-argument form for.)"""
+    node = await step(start)
+    while node is not None:
+        yield node
+        node = await step(node)
+
+
+async def atake[T](n: int, it: AsyncIterator[T]) -> AsyncIterator[T]:
+    """Yield at most the first ``n`` items of ``it`` — the async ``islice`` the stdlib lacks.
+
+    Pulls exactly ``n`` items (never an extra), so a bounded reply-chain walk fetches no more
+    ancestors than asked for."""
+    if n <= 0:
+        return
+    count = 0
+    async for item in it:
+        yield item
+        count += 1
+        if count >= n:
+            return
+
+
+# --- reading the reply chain --------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +74,14 @@ class DiscordTurn:
     display_name: str
     is_self: bool
     text: str
+
+    @classmethod
+    def of(cls, message: discord.Message, bot_user_id: int) -> DiscordTurn:
+        return cls(
+            display_name=message.author.display_name,
+            is_self=message.author.id == bot_user_id,
+            text=_message_text(message),
+        )
 
 
 def _describe_card(embed: discord.Embed) -> str:
@@ -51,12 +101,27 @@ def _message_text(message: discord.Message) -> str:
     return ""
 
 
-async def resolve_parent(message: discord.Message) -> discord.Message | None:
-    """The message ``message`` replies to, or ``None`` if it isn't a reply (or the parent
-    was deleted / can't be read).
+def replying_to_self(message: discord.Message, bot_user_id: int) -> bool:
+    """Whether ``message`` replies to one of the bot's own messages — read only from the copy
+    Discord inlined (``reference.resolved``), never a fetch, so the conversational trigger
+    can't fail on a missing permission (a reply-to-self that wasn't inlined just needs an
+    @mention, like any other message)."""
+    ref = message.reference
+    resolved = ref.resolved if ref is not None else None
+    if resolved is None or isinstance(resolved, discord.DeletedReferencedMessage):
+        return False
+    return resolved.author.id == bot_user_id
 
-    Prefers a copy Discord already handed us — inline ``resolved``, then ``cached_message``
-    — and only pays for a REST ``fetch_message`` when neither has it.
+
+async def resolve_parent(message: discord.Message) -> discord.Message | None:
+    """The valid parent ``message`` replies to, or ``None`` if it isn't a reply or the parent
+    was deleted (a ``NotFound`` is the reply chain's natural end).
+
+    Prefers a copy Discord already handed us (inline ``resolved``, then ``cached_message``)
+    and only pays for a REST ``fetch_message`` when neither has it. A permission
+    (``Forbidden``) or transient (``HTTPException``) error is **not** swallowed here — it
+    propagates to the one reconstruction boundary (``PetBot._reply_context``), which logs it
+    and degrades to ``Unrecalled`` (ADR 0009: errors are raised, handled once at a boundary).
     """
     ref = message.reference
     if ref is None or ref.message_id is None:
@@ -68,62 +133,32 @@ async def resolve_parent(message: discord.Message) -> discord.Message | None:
         return free
     try:
         return await message.channel.fetch_message(ref.message_id)
-    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+    except discord.NotFound:
         return None
 
 
-async def walk_reply_chain(
-    parent: discord.Message | None, *, bot_user_id: int, max_turns: int
-) -> list[DiscordTurn]:
-    """Walk the reply chain from ``parent`` upward (newest-first), up to ``max_turns``.
-
-    ``parent`` is the message the current one replies to (``None`` when it isn't a reply),
-    already resolved by the caller so the immediate parent is fetched only once. Stops —
-    without raising — at the chain's end, a deleted ancestor, or one that can't be fetched.
-    """
-    raw: list[DiscordTurn] = []
-    current = parent
-    while current is not None and len(raw) < max_turns:
-        raw.append(
-            DiscordTurn(
-                display_name=current.author.display_name,
-                is_self=current.author.id == bot_user_id,
-                text=_message_text(current),
-            )
-        )
-        current = await resolve_parent(current)
-    return raw
-
-
-def to_turns(
-    raw: list[DiscordTurn],
-    *,
-    bot_user_id: int,
-    strip_mention: Callable[[str, int], str],
-) -> tuple[Turn, ...]:
+def to_turns(raw: list[DiscordTurn], *, bot_user_id: int) -> tuple[Turn, ...]:
     """Map gathered Discord turns (newest-first) to neutral turns (oldest-first).
 
     A turn PetBot authored is an assistant turn; everything else is a user turn, with the
-    bot's own mention stripped (``strip_mention``). Empty turns are dropped.
-    """
+    bot's own mention stripped. Empty turns are dropped."""
     turns: list[Turn] = []
     for entry in reversed(raw):
         if entry.is_self:
             role, text = Role.ASSISTANT, entry.text.strip()
         else:
-            role, text = Role.USER, strip_mention(entry.text, bot_user_id).strip()
+            role, text = Role.USER, strip_self_mention(entry.text, bot_user_id).strip()
         if text:
             turns.append(Turn(role=role, author=entry.display_name, text=text))
     return tuple(turns)
 
 
 async def reconstruct(
-    parent: discord.Message | None,
-    *,
-    bot_user_id: int,
-    max_turns: int,
-    strip_mention: Callable[[str, int], str],
+    message: discord.Message, *, bot_user_id: int, max_turns: int
 ) -> tuple[Turn, ...]:
-    """Walk the reply chain from ``parent`` and map it to neutral history (oldest-first)."""
-    raw = await walk_reply_chain(parent, bot_user_id=bot_user_id, max_turns=max_turns)
-    return to_turns(raw, bot_user_id=bot_user_id, strip_mention=strip_mention)
+    """Walk the reply chain from ``message`` (bounded by ``max_turns``) and map it to neutral
+    history, oldest-first: ``take(max_turns, unfold(resolve_parent, message))``, then
+    :func:`to_turns`. Raises on an unreadable hop — handled at the reconstruction boundary."""
+    chain = atake(max_turns, aiter_until_none(resolve_parent, message))
+    raw = [DiscordTurn.of(parent, bot_user_id) async for parent in chain]
+    return to_turns(raw, bot_user_id=bot_user_id)

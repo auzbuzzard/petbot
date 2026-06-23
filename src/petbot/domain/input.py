@@ -46,18 +46,40 @@ class Turn(Frozen):
     text: str
 
 
+class Recalled(Frozen):
+    """The prior turns PetBot recalled for this reply — the reply chain, oldest-first;
+    empty for a fresh ``@mention`` or a thread with nothing before it."""
+
+    kind: Literal["recalled"] = "recalled"
+    turns: tuple[Turn, ...] = ()
+
+
+class Unrecalled(Frozen):
+    """The message replies to earlier context PetBot *couldn't* read (e.g. a missing
+    Read Message History permission). Distinct from an empty :class:`Recalled` so the chat
+    agent can say it has lost the thread instead of answering blind."""
+
+    kind: Literal["unrecalled"] = "unrecalled"
+
+
+#: A reply's prior context: the turns PetBot recalled, or a marker that it couldn't. A
+#: discriminated union (not a bare tuple) so "empty because fresh" and "empty because
+#: unreadable" are not the same value.
+History = Annotated[Recalled | Unrecalled, Field(discriminator="kind")]
+
+
 class TextInput(Frozen):
     """Free-text conversational input (an ``@mention``). The process interprets it.
 
-    ``history`` is the prior turns of the conversation this message continues (the
-    reply chain, oldest-first), reconstructed by the frontend; empty for a fresh
-    @mention. It rides on the conversational variant — never on ``CommandInput`` — so a
-    command can't carry chat history.
+    ``history`` is the conversation this message continues (the reply chain), reconstructed
+    by the frontend: :class:`Recalled` turns, or :class:`Unrecalled` when it couldn't be
+    read. It rides on the conversational variant — never on ``CommandInput`` — so a command
+    can't carry chat history.
     """
 
     kind: Literal["text"] = "text"
     text: str
-    history: tuple[Turn, ...] = ()
+    history: History = Field(default_factory=Recalled)
 
 
 class CommandInput(Frozen):
