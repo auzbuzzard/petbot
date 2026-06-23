@@ -19,7 +19,7 @@ import discord
 import httpx
 from discord.ext import commands
 
-from petbot.domain import Process, SkillResult, TextInput, Turn
+from petbot.domain import History, Process, Recalled, SkillResult, TextInput, Unrecalled
 from petbot.frontends.discord.context import build_context
 from petbot.frontends.discord.history import reconstruct, resolve_parent
 from petbot.frontends.discord.render import SERVICE_UNREACHABLE, respond
@@ -29,6 +29,9 @@ from petbot.logging_setup import configure_logging
 from petbot.platform import HttpTransport, LambdaTransport, ProcessClient
 
 logger = logging.getLogger(__name__)
+
+#: A fresh reply context (no prior turns). Module-level so it isn't a function-call default.
+_NO_HISTORY: History = Recalled()
 
 
 def _without_mention(content: str, user_id: int) -> str:
@@ -118,29 +121,32 @@ class PetBot(commands.Bot):
             logger.exception("resolving the reply parent failed; continuing without memory")
             return None
 
-    async def _history_for(
-        self, parent: discord.Message | None, bot_user_id: int
-    ) -> tuple[Turn, ...]:
-        """Reconstruct the reply-chain history from the resolved ``parent``. A Discord
-        error during the walk (e.g. a missing ``Read Message History`` permission) is
-        caught here, logged, and degraded to no memory — PetBot still answers (ADR 0009:
-        errors are raised, handled once at a boundary)."""
+    async def _history_for(self, parent: discord.Message | None, bot_user_id: int) -> History:
+        """Reconstruct the reply-chain history from the resolved ``parent`` into a
+        :class:`Recalled`. A Discord error during the walk (e.g. a missing ``Read Message
+        History`` permission) is caught here and becomes :class:`Unrecalled` — so the chat
+        agent is told it lost the thread instead of answering blind (ADR 0009: errors are
+        raised, handled once at a boundary)."""
+        if parent is None:
+            return _NO_HISTORY
         try:
-            return await reconstruct(
-                parent,
-                bot_user_id=bot_user_id,
-                max_turns=self.settings.history_max_turns,
-                strip_mention=_without_mention,
+            return Recalled(
+                turns=await reconstruct(
+                    parent,
+                    bot_user_id=bot_user_id,
+                    max_turns=self.settings.history_max_turns,
+                    strip_mention=_without_mention,
+                )
             )
         except Exception:
             logger.exception(
                 "history reconstruction failed (e.g. missing 'Read Message History'); "
-                "continuing without memory"
+                "telling the agent it lost the thread"
             )
-            return ()
+            return Unrecalled()
 
     async def _respond(
-        self, text: str, message: discord.Message, history: tuple[Turn, ...] = ()
+        self, text: str, message: discord.Message, history: History = _NO_HISTORY
     ) -> SkillResult:
         """Dispatch the conversational turn, mapping any transport failure to a friendly
         result.
