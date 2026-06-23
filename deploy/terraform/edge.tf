@@ -78,6 +78,9 @@ resource "aws_lightsail_container_service_deployment_version" "edge" {
       SERVICE__KIND          = "lambda"
       SERVICE__FUNCTION_NAME = aws_lambda_function.this.function_name
       AWS_REGION             = var.aws_region
+      # Reply-chain fetch depth for conversation-history reconstruction (a Discord-API
+      # cost bound, not a model-context bound).
+      HISTORY_MAX_TURNS = tostring(var.history_max_turns)
       # Scoped identity for boto3's default credential chain (Lightsail container
       # services have no IAM instance roles, so a static key is the mechanism).
       AWS_ACCESS_KEY_ID     = aws_iam_access_key.edge.id
