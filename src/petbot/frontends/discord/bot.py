@@ -12,7 +12,6 @@ from the typed :data:`~petbot.types.CATALOG`, so the frontend still never import
 from __future__ import annotations
 
 import logging
-import re
 from typing import assert_never
 
 import discord
@@ -21,7 +20,7 @@ from discord.ext import commands
 
 from petbot.domain import History, Process, Recalled, SkillResult, TextInput, Unrecalled
 from petbot.frontends.discord.context import build_context
-from petbot.frontends.discord.history import reconstruct, resolve_parent
+from petbot.frontends.discord.history import reconstruct, replying_to_self, strip_self_mention
 from petbot.frontends.discord.render import SERVICE_UNREACHABLE, respond
 from petbot.frontends.discord.settings import DiscordSettings, HttpService, LambdaService
 from petbot.frontends.discord.slash import build_commands
@@ -29,14 +28,6 @@ from petbot.logging_setup import configure_logging
 from petbot.platform import HttpTransport, LambdaTransport, ProcessClient
 
 logger = logging.getLogger(__name__)
-
-#: A fresh reply context (no prior turns). Module-level so it isn't a function-call default.
-_NO_HISTORY: History = Recalled()
-
-
-def _without_mention(content: str, user_id: int) -> str:
-    """Remove only this bot's mention (``<@id>`` / ``<@!id>``), leaving others intact."""
-    return re.sub(rf"<@!?{user_id}>", "", content)
 
 
 class PetBot(commands.Bot):
@@ -94,60 +85,36 @@ class PetBot(commands.Bot):
         if message.author.bot or self.user is None:
             return
         bot_user_id = self.user.id
-        parent = await self._reply_parent(message)
-        replying_to_self = parent is not None and parent.author.id == bot_user_id
-        if self.user not in message.mentions and not replying_to_self:
+        if self.user not in message.mentions and not replying_to_self(message, bot_user_id):
             return
-        text = _without_mention(message.content, bot_user_id).strip()
+        text = strip_self_mention(message.content, bot_user_id).strip()
         if not text:
             return
-        history = await self._history_for(parent, bot_user_id)
+        history = await self._reply_context(message, bot_user_id)
         await respond(
             message.channel, await self._respond(text, message, history), reference=message
         )
 
-    async def _reply_parent(self, message: discord.Message) -> discord.Message | None:
-        """The message ``message`` replies to, or ``None`` if there isn't one or it can't
-        be read.
-
-        ``resolve_parent`` *raises* a Discord error (e.g. a missing ``Read Message
-        History`` permission) rather than swallowing it; it is caught here and degraded to
-        no parent. Kept separate from history reconstruction so a *walk* failure can't drop
-        the parent the trigger check needs — PetBot still answers (just without memory).
-        """
-        try:
-            return await resolve_parent(message)
-        except Exception:
-            logger.exception("resolving the reply parent failed; continuing without memory")
-            return None
-
-    async def _history_for(self, parent: discord.Message | None, bot_user_id: int) -> History:
-        """Reconstruct the reply-chain history from the resolved ``parent`` into a
-        :class:`Recalled`. A Discord error during the walk (e.g. a missing ``Read Message
-        History`` permission) is caught here and becomes :class:`Unrecalled` — so the chat
-        agent is told it lost the thread instead of answering blind (ADR 0009: errors are
-        raised, handled once at a boundary)."""
-        if parent is None:
-            return _NO_HISTORY
+    async def _reply_context(self, message: discord.Message, bot_user_id: int) -> History:
+        """Reconstruct the reply-chain history into a :class:`Recalled` — the single boundary
+        for a reconstruction error. An unreadable chain (e.g. a missing ``Read Message
+        History`` permission) is *raised* by the walk, caught here, logged loudly, and turned
+        into :class:`Unrecalled` so the agent is told it lost the thread instead of answering
+        blind (ADR 0009: errors are raised, handled once at a boundary)."""
         try:
             return Recalled(
                 turns=await reconstruct(
-                    parent,
-                    bot_user_id=bot_user_id,
-                    max_turns=self.settings.history_max_turns,
-                    strip_mention=_without_mention,
+                    message, bot_user_id=bot_user_id, max_turns=self.settings.history_max_turns
                 )
             )
-        except Exception:
+        except discord.HTTPException:
             logger.exception(
-                "history reconstruction failed (e.g. missing 'Read Message History'); "
+                "reply chain unreadable (e.g. missing 'Read Message History'); "
                 "telling the agent it lost the thread"
             )
             return Unrecalled()
 
-    async def _respond(
-        self, text: str, message: discord.Message, history: History = _NO_HISTORY
-    ) -> SkillResult:
+    async def _respond(self, text: str, message: discord.Message, history: History) -> SkillResult:
         """Dispatch the conversational turn, mapping any transport failure to a friendly
         result.
 

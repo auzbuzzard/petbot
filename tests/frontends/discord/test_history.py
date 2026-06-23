@@ -1,25 +1,28 @@
 """Reconstructing conversation history from the Discord reply chain.
 
-The pure mapping (`to_turns`) is tested directly; the walk is tested against fake
-messages whose parents are served through a fake channel's `fetch_message`.
+The generic async combinators (`aiter_until_none`, `atake`) and the pure mapping (`to_turns`)
+are tested directly; the walk is tested against fake messages whose parents are served through
+a fake channel's `fetch_message`.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 
 import discord
 import pytest
 
 from petbot.domain import Role, Turn
-from petbot.frontends.discord.bot import _without_mention
 from petbot.frontends.discord.history import (
     DiscordTurn,
     _describe_card,
+    aiter_until_none,
+    atake,
     reconstruct,
+    replying_to_self,
     resolve_parent,
+    strip_self_mention,
     to_turns,
-    walk_reply_chain,
 )
 
 
@@ -47,10 +50,11 @@ class FakeAuthor:
 
 
 class FakeRef:
-    def __init__(self, message_id: int | None) -> None:
-        # Always unresolved + uncached, so resolution goes through `fetch_message`.
+    def __init__(self, message_id: int | None, *, resolved: object = None) -> None:
+        # `resolved` defaults to None (uncached) so resolution goes through `fetch_message`;
+        # a test can inline a copy to exercise the no-fetch path.
         self.message_id = message_id
-        self.resolved = None
+        self.resolved = resolved
         self.cached_message = None
 
 
@@ -81,7 +85,46 @@ class FakeMessage:
         self.channel = channel or FakeChannel()
 
 
+# --- generic async combinators ------------------------------------------------
+
+
+async def test_aiter_until_none_unfolds_feeding_each_result_back() -> None:
+    async def step(n: int) -> int | None:
+        return n - 1 if n > 0 else None
+
+    assert [x async for x in aiter_until_none(step, 3)] == [2, 1, 0]
+
+
+async def test_aiter_until_none_propagates_step_errors() -> None:
+    async def boom(_: int) -> int | None:
+        raise RuntimeError("nope")
+
+    with pytest.raises(RuntimeError):
+        [x async for x in aiter_until_none(boom, 1)]
+
+
+async def test_atake_yields_at_most_n_and_pulls_no_more() -> None:
+    pulled = 0
+
+    async def naturals() -> AsyncIterator[int]:
+        nonlocal pulled
+        i = 0
+        while True:
+            pulled += 1
+            yield i
+            i += 1
+
+    assert [x async for x in atake(2, naturals())] == [0, 1]
+    assert pulled == 2  # exactly n items pulled, never an extra
+    assert [x async for x in atake(0, naturals())] == []
+
+
 # --- the pure mapping ---------------------------------------------------------
+
+
+def test_strip_self_mention_strips_only_this_bot() -> None:
+    assert strip_self_mention("<@1> hi <@2>", 1) == " hi <@2>"
+    assert strip_self_mention("<@!1> yo", 1) == " yo"
 
 
 def test_to_turns_orders_oldest_first_and_maps_roles() -> None:
@@ -89,7 +132,7 @@ def test_to_turns_orders_oldest_first_and_maps_roles() -> None:
         DiscordTurn(display_name="Alice", is_self=False, text="<@1> and another?"),
         DiscordTurn(display_name="PetBot", is_self=True, text="here you go!"),
     ]
-    assert to_turns(raw, bot_user_id=1, strip_mention=_without_mention) == (
+    assert to_turns(raw, bot_user_id=1) == (
         Turn(role=Role.ASSISTANT, author="PetBot", text="here you go!"),
         Turn(role=Role.USER, author="Alice", text="and another?"),
     )
@@ -100,7 +143,7 @@ def test_to_turns_drops_turns_that_become_empty() -> None:
         DiscordTurn(display_name="Alice", is_self=False, text="<@1>"),  # only a mention
         DiscordTurn(display_name="PetBot", is_self=True, text="   "),
     ]
-    assert to_turns(raw, bot_user_id=1, strip_mention=_without_mention) == ()
+    assert to_turns(raw, bot_user_id=1) == ()
 
 
 def test_describe_card_uses_title_and_image() -> None:
@@ -110,7 +153,25 @@ def test_describe_card_uses_title_and_image() -> None:
     assert _describe_card(discord.Embed()) == ""
 
 
-# --- the walk -----------------------------------------------------------------
+# --- the trigger predicate ----------------------------------------------------
+
+
+def test_replying_to_self_reads_only_the_inlined_copy() -> None:
+    bot_reply = FakeMessage(author=FakeAuthor(1, "PetBot"), content="hi")
+    msg = FakeMessage(
+        author=FakeAuthor(2, "Alice"),
+        content="<@1> yo",
+        reference=FakeRef(100, resolved=bot_reply),
+    )
+    assert replying_to_self(msg, 1) is True  # type: ignore[arg-type]
+    assert replying_to_self(msg, 99) is False  # type: ignore[arg-type]  # not the bot
+    # Not a reply, or no inlined copy -> False (no fetch, so the trigger can't fail).
+    assert replying_to_self(FakeMessage(author=FakeAuthor(2, "Alice")), 1) is False  # type: ignore[arg-type]
+    plain_reply = FakeMessage(author=FakeAuthor(2, "Alice"), reference=FakeRef(100))
+    assert replying_to_self(plain_reply, 1) is False  # type: ignore[arg-type]
+
+
+# --- resolving one hop --------------------------------------------------------
 
 
 async def test_resolve_parent_fetches_when_unresolved() -> None:
@@ -142,67 +203,71 @@ async def test_resolve_parent_raises_on_forbidden() -> None:
         await resolve_parent(msg)  # type: ignore[arg-type]
 
 
-async def test_walk_collects_ancestors_newest_first() -> None:
-    bot_msg = FakeMessage(author=FakeAuthor(1, "PetBot"), content="here you go!")
-    user_msg = FakeMessage(
-        author=FakeAuthor(2, "Alice"), content="<@1> show me a pony", reference=FakeRef(100)
+# --- the bounded walk, end to end ---------------------------------------------
+
+
+def _chained(*messages: FakeMessage) -> FakeChannel:
+    """Wire a newest-first run of messages into one channel, each replying to the next, and
+    return that channel. ``messages[0]`` is the trigger; each gets ``reference`` + fetch id."""
+    channel = FakeChannel()
+    for i, msg in enumerate(messages):
+        msg.channel = channel
+        if i + 1 < len(messages):
+            msg.reference = FakeRef(i + 1)
+            channel._fetch[i + 1] = messages[i + 1]
+    return channel
+
+
+async def test_reconstruct_walks_the_chain_oldest_first() -> None:
+    trigger = FakeMessage(author=FakeAuthor(2, "Alice"), content="<@1> and another?")
+    parent = FakeMessage(author=FakeAuthor(2, "Alice"), content="<@1> show me a pony")
+    grandparent = FakeMessage(author=FakeAuthor(1, "PetBot"), content="here you go!")
+    _chained(trigger, parent, grandparent)
+    turns = await reconstruct(trigger, bot_user_id=1, max_turns=25)  # type: ignore[arg-type]
+    # The trigger itself is excluded (it's the current prompt); ancestors come oldest-first.
+    assert turns == (
+        Turn(role=Role.ASSISTANT, author="PetBot", text="here you go!"),
+        Turn(role=Role.USER, author="Alice", text="show me a pony"),
     )
-    channel = FakeChannel({100: bot_msg})
-    for msg in (bot_msg, user_msg):
-        msg.channel = channel
-
-    # The caller passes the already-resolved immediate parent (`user_msg`).
-    raw = await walk_reply_chain(user_msg, bot_user_id=1, max_turns=25)  # type: ignore[arg-type]
-    assert [(r.display_name, r.is_self) for r in raw] == [("Alice", False), ("PetBot", True)]
 
 
-async def test_walk_respects_max_turns() -> None:
-    oldest = FakeMessage(author=FakeAuthor(1, "PetBot"), content="oldest")
-    middle = FakeMessage(author=FakeAuthor(2, "Alice"), content="middle", reference=FakeRef(1))
-    channel = FakeChannel({1: oldest})
-    for msg in (oldest, middle):
-        msg.channel = channel
-
-    raw = await walk_reply_chain(middle, bot_user_id=1, max_turns=1)  # type: ignore[arg-type]
-    assert len(raw) == 1 and raw[0].text == "middle"
+async def test_reconstruct_respects_max_turns() -> None:
+    trigger = FakeMessage(author=FakeAuthor(2, "Alice"), content="trigger")
+    newer = FakeMessage(author=FakeAuthor(2, "Alice"), content="newer")
+    older = FakeMessage(author=FakeAuthor(1, "PetBot"), content="older")
+    _chained(trigger, newer, older)
+    turns = await reconstruct(trigger, bot_user_id=1, max_turns=1)  # type: ignore[arg-type]
+    assert turns == (Turn(role=Role.USER, author="Alice", text="newer"),)
 
 
-async def test_walk_stops_on_unfetchable_ancestor() -> None:
-    # The parent is recorded; its own parent (999) is missing -> the walk stops, not raises.
+async def test_reconstruct_stops_on_a_deleted_ancestor() -> None:
+    # The immediate parent is read; ITS parent (999) is gone -> the walk stops, not raises.
+    trigger = FakeMessage(author=FakeAuthor(2, "Alice"), content="<@1> yo", reference=FakeRef(100))
     parent = FakeMessage(author=FakeAuthor(1, "PetBot"), content="hi", reference=FakeRef(999))
-    parent.channel = FakeChannel({})
-    raw = await walk_reply_chain(parent, bot_user_id=1, max_turns=25)  # type: ignore[arg-type]
-    assert [r.text for r in raw] == ["hi"]
+    channel = FakeChannel({100: parent})  # 999 missing -> NotFound -> None
+    trigger.channel = parent.channel = channel
+    turns = await reconstruct(trigger, bot_user_id=1, max_turns=25)  # type: ignore[arg-type]
+    assert turns == (Turn(role=Role.ASSISTANT, author="PetBot", text="hi"),)
 
 
-async def test_walk_propagates_a_forbidden_fetch() -> None:
+async def test_reconstruct_propagates_a_forbidden_fetch() -> None:
     # The walk doesn't silently stop on a permission error — it propagates to the boundary.
-    parent = FakeMessage(author=FakeAuthor(1, "PetBot"), content="hi", reference=FakeRef(500))
-    parent.channel = ForbiddenChannel()  # type: ignore[assignment]
+    trigger = FakeMessage(author=FakeAuthor(2, "Alice"), content="<@1> yo", reference=FakeRef(500))
+    trigger.channel = ForbiddenChannel()  # type: ignore[assignment]
     with pytest.raises(discord.Forbidden):
-        await walk_reply_chain(parent, bot_user_id=1, max_turns=25)  # type: ignore[arg-type]
-
-
-# --- end to end ---------------------------------------------------------------
+        await reconstruct(trigger, bot_user_id=1, max_turns=25)  # type: ignore[arg-type]
 
 
 async def test_reconstruct_flattens_an_image_only_bot_card() -> None:
     card = discord.Embed(title="results")
     card.set_image(url="http://i/x.png")
-    bot_card = FakeMessage(author=FakeAuthor(1, "PetBot"), content="", embeds=(card,))
     trigger = FakeMessage(
         author=FakeAuthor(2, "Alice"), content="<@1> another?", reference=FakeRef(100)
     )
+    bot_card = FakeMessage(author=FakeAuthor(1, "PetBot"), content="", embeds=(card,))
     channel = FakeChannel({100: bot_card})
-    bot_card.channel = trigger.channel = channel
-
-    parent = await resolve_parent(trigger)  # type: ignore[arg-type]
-    turns = await reconstruct(
-        parent,
-        bot_user_id=1,
-        max_turns=25,
-        strip_mention=_without_mention,
-    )
+    trigger.channel = bot_card.channel = channel
+    turns = await reconstruct(trigger, bot_user_id=1, max_turns=25)  # type: ignore[arg-type]
     assert turns == (
         Turn(role=Role.ASSISTANT, author="PetBot", text="[image] results — http://i/x.png"),
     )
@@ -210,11 +275,4 @@ async def test_reconstruct_flattens_an_image_only_bot_card() -> None:
 
 async def test_reconstruct_is_empty_without_a_reply() -> None:
     msg = FakeMessage(author=FakeAuthor(2, "Alice"), content="<@1> hi")
-    parent = await resolve_parent(msg)  # type: ignore[arg-type]
-    turns = await reconstruct(
-        parent,
-        bot_user_id=1,
-        max_turns=25,
-        strip_mention=_without_mention,
-    )
-    assert turns == ()
+    assert await reconstruct(msg, bot_user_id=1, max_turns=25) == ()  # type: ignore[arg-type]
