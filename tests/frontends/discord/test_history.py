@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 import discord
+import pytest
 
 from petbot.domain import Role, Turn
 from petbot.frontends.discord.bot import _without_mention
@@ -25,6 +26,18 @@ from petbot.frontends.discord.history import (
 class _FakeResp:
     status = 404
     reason = "Not Found"
+
+
+class _ForbiddenResp:
+    status = 403
+    reason = "Forbidden"
+
+
+class ForbiddenChannel:
+    """A channel whose fetch is denied — stands in for a missing 'Read Message History'."""
+
+    async def fetch_message(self, message_id: int) -> object:
+        raise discord.Forbidden(_ForbiddenResp(), "missing access")  # type: ignore[arg-type]
 
 
 class FakeAuthor:
@@ -120,6 +133,15 @@ async def test_resolve_parent_is_none_when_unfetchable() -> None:
     assert await resolve_parent(msg) is None  # type: ignore[arg-type]
 
 
+async def test_resolve_parent_raises_on_forbidden() -> None:
+    # A missing 'Read Message History' permission is NOT swallowed — it propagates to the
+    # reconstruction boundary (ADR 0009: errors are raised, handled once).
+    msg = FakeMessage(author=FakeAuthor(2, "Alice"), content="hi", reference=FakeRef(500))
+    msg.channel = ForbiddenChannel()  # type: ignore[assignment]
+    with pytest.raises(discord.Forbidden):
+        await resolve_parent(msg)  # type: ignore[arg-type]
+
+
 async def test_walk_collects_ancestors_newest_first() -> None:
     bot_msg = FakeMessage(author=FakeAuthor(1, "PetBot"), content="here you go!")
     user_msg = FakeMessage(
@@ -151,6 +173,14 @@ async def test_walk_stops_on_unfetchable_ancestor() -> None:
     parent.channel = FakeChannel({})
     raw = await walk_reply_chain(parent, bot_user_id=1, max_turns=25)  # type: ignore[arg-type]
     assert [r.text for r in raw] == ["hi"]
+
+
+async def test_walk_propagates_a_forbidden_fetch() -> None:
+    # The walk doesn't silently stop on a permission error — it propagates to the boundary.
+    parent = FakeMessage(author=FakeAuthor(1, "PetBot"), content="hi", reference=FakeRef(500))
+    parent.channel = ForbiddenChannel()  # type: ignore[assignment]
+    with pytest.raises(discord.Forbidden):
+        await walk_reply_chain(parent, bot_user_id=1, max_turns=25)  # type: ignore[arg-type]
 
 
 # --- end to end ---------------------------------------------------------------

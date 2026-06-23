@@ -88,12 +88,10 @@ class PetBot(commands.Bot):
     async def on_message(self, message: discord.Message) -> None:
         # Conversational entry: an @mention, OR a reply to one of PetBot's own messages
         # (so a follow-up needs no re-mention). Other bots and our own messages are ignored.
-        # The reply parent is resolved once here and reused for both the trigger test and
-        # the history walk, so the immediate parent is never fetched twice.
         if message.author.bot or self.user is None:
             return
         bot_user_id = self.user.id
-        parent = await resolve_parent(message)
+        parent = await self._reply_parent(message)
         replying_to_self = parent is not None and parent.author.id == bot_user_id
         if self.user not in message.mentions and not replying_to_self:
             return
@@ -105,11 +103,28 @@ class PetBot(commands.Bot):
             message.channel, await self._respond(text, message, history), reference=message
         )
 
+    async def _reply_parent(self, message: discord.Message) -> discord.Message | None:
+        """The message ``message`` replies to, or ``None`` if there isn't one or it can't
+        be read.
+
+        ``resolve_parent`` *raises* a Discord error (e.g. a missing ``Read Message
+        History`` permission) rather than swallowing it; it is caught here and degraded to
+        no parent. Kept separate from history reconstruction so a *walk* failure can't drop
+        the parent the trigger check needs — PetBot still answers (just without memory).
+        """
+        try:
+            return await resolve_parent(message)
+        except Exception:
+            logger.exception("resolving the reply parent failed; continuing without memory")
+            return None
+
     async def _history_for(
         self, parent: discord.Message | None, bot_user_id: int
     ) -> tuple[Turn, ...]:
-        """Reconstruct the reply-chain history from the resolved ``parent``, degrading to
-        none on any failure."""
+        """Reconstruct the reply-chain history from the resolved ``parent``. A Discord
+        error during the walk (e.g. a missing ``Read Message History`` permission) is
+        caught here, logged, and degraded to no memory — PetBot still answers (ADR 0009:
+        errors are raised, handled once at a boundary)."""
         try:
             return await reconstruct(
                 parent,
@@ -118,7 +133,10 @@ class PetBot(commands.Bot):
                 strip_mention=_without_mention,
             )
         except Exception:
-            logger.exception("history reconstruction failed; continuing without it")
+            logger.exception(
+                "history reconstruction failed (e.g. missing 'Read Message History'); "
+                "continuing without memory"
+            )
             return ()
 
     async def _respond(

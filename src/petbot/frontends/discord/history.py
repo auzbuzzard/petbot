@@ -53,10 +53,13 @@ def _message_text(message: discord.Message) -> str:
 
 async def resolve_parent(message: discord.Message) -> discord.Message | None:
     """The message ``message`` replies to, or ``None`` if it isn't a reply (or the parent
-    was deleted / can't be read).
+    was deleted — a ``NotFound`` is the reply chain's natural end).
 
-    Prefers a copy Discord already handed us — inline ``resolved``, then ``cached_message``
-    — and only pays for a REST ``fetch_message`` when neither has it.
+    Prefers a copy Discord already handed us (inline ``resolved``, then ``cached_message``)
+    and only pays for a REST ``fetch_message`` when neither has it. A permission
+    (``Forbidden``) or transient error is **not** swallowed here — it propagates to the
+    one reconstruction boundary (``PetBot._reply_context``), which logs it and degrades to
+    no memory (ADR 0009: errors are raised, handled once at a boundary).
     """
     ref = message.reference
     if ref is None or ref.message_id is None:
@@ -68,7 +71,7 @@ async def resolve_parent(message: discord.Message) -> discord.Message | None:
         return free
     try:
         return await message.channel.fetch_message(ref.message_id)
-    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+    except discord.NotFound:
         return None
 
 
@@ -78,8 +81,9 @@ async def walk_reply_chain(
     """Walk the reply chain from ``parent`` upward (newest-first), up to ``max_turns``.
 
     ``parent`` is the message the current one replies to (``None`` when it isn't a reply),
-    already resolved by the caller so the immediate parent is fetched only once. Stops —
-    without raising — at the chain's end, a deleted ancestor, or one that can't be fetched.
+    already resolved by the caller so the immediate parent is fetched only once. It stops
+    at the chain's end or a deleted ancestor (``resolve_parent`` returns ``None``); a
+    permission/transient error propagates to the reconstruction boundary, not swallowed.
     """
     raw: list[DiscordTurn] = []
     current = parent
