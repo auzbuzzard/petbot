@@ -7,8 +7,16 @@ from collections.abc import AsyncIterator
 
 import discord
 
-from petbot.domain import CommandInput, EmbedSpec, Platform, Process, SkillContext, SkillResult
-from petbot.frontends.discord.bot import PetBot, _without_mention
+from petbot.domain import (
+    CommandInput,
+    EmbedSpec,
+    Platform,
+    Process,
+    Recalled,
+    SkillContext,
+    SkillResult,
+)
+from petbot.frontends.discord.bot import PetBot
 from petbot.frontends.discord.context import build_context, build_interaction_context
 from petbot.frontends.discord.render import (
     SERVICE_UNREACHABLE,
@@ -113,11 +121,6 @@ def test_build_context_reads_nsfw_and_ids() -> None:
     assert sfw.allows_explicit is False
 
 
-def test_without_mention_strips_only_this_bot() -> None:
-    assert _without_mention("<@1> hi <@2>", 1) == " hi <@2>"
-    assert _without_mention("<@!1> yo", 1) == " yo"
-
-
 class _RaisingProcess(Process):
     """A process whose every call fails — stands in for an unreachable service."""
 
@@ -128,7 +131,7 @@ class _RaisingProcess(Process):
 async def test_mention_maps_transport_error_to_friendly_result() -> None:
     bot = PetBot(DiscordSettings(discord_token="x", service=HttpService(url="http://svc/dispatch")))
     bot.process = _RaisingProcess()
-    result = await bot._respond("hello", FakeMessage(FakeChannel()))  # type: ignore[arg-type]
+    result = await bot._respond("hello", FakeMessage(FakeChannel()), Recalled())  # type: ignore[arg-type]
     # The transport failure became the one static, unstyled fallback — not a crash.
     assert result.text == SERVICE_UNREACHABLE
 

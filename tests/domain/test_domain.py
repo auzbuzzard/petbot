@@ -10,11 +10,13 @@ from petbot.domain import (
     EmbedSpec,
     Input,
     Platform,
+    Recalled,
     Role,
     SkillContext,
     SkillResult,
     TextInput,
     Turn,
+    Unrecalled,
     User,
 )
 
@@ -50,16 +52,22 @@ def test_unknown_fields_rejected() -> None:
 
 def test_text_input_history_round_trips() -> None:
     # History rides on the wire inside the Input sum type: dump to JSON-able data, then
-    # re-hydrate the right member by `kind` — tuple + Role enum + nested Turn survive.
-    inp = TextInput(
+    # re-hydrate the right member by `kind` — the Recalled/Unrecalled union, Role enum, and
+    # nested Turn all survive.
+    adapter: TypeAdapter[Input] = TypeAdapter(Input)
+    recalled = TextInput(
         text="and another?",
-        history=(
-            Turn(role=Role.USER, author="Alice", text="show me a pony"),
-            Turn(role=Role.ASSISTANT, author="PetBot", text="here you go!"),
+        history=Recalled(
+            turns=(
+                Turn(role=Role.USER, author="Alice", text="show me a pony"),
+                Turn(role=Role.ASSISTANT, author="PetBot", text="here you go!"),
+            )
         ),
     )
-    adapter: TypeAdapter[Input] = TypeAdapter(Input)
-    assert adapter.validate_python(inp.model_dump(mode="json")) == inp
+    assert adapter.validate_python(recalled.model_dump(mode="json")) == recalled
+
+    unrecalled = TextInput(text="why?", history=Unrecalled())
+    assert adapter.validate_python(unrecalled.model_dump(mode="json")) == unrecalled
 
 
 def test_command_input_has_no_history() -> None:

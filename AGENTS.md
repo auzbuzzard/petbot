@@ -14,7 +14,7 @@ Organised by **concept** (`src/`), deployed by **service** (`deploy/` + `petbot.
 
 | Module | Role |
 |---|---|
-| `petbot.domain` | Kernel: frozen models (`SkillResult`, `SkillContext`, `EmbedSpec`, the `Input` sum type `TextInput \| CommandInput` — `TextInput` carries reply-chain `history: tuple[Turn, …]`), the `Process` verb + the `Skill[ArgsT]` tool ABC, ports (`VoicePort`, `StylePort`, `Notifier`), and `SkillError`. Imports nothing else first-party. |
+| `petbot.domain` | Kernel: frozen models (`SkillResult`, `SkillContext`, `EmbedSpec`, the `Input` sum type `TextInput \| CommandInput` — `TextInput` carries reply-chain `history: Recalled \| Unrecalled` — the turns PetBot recalled, or a marker that it *couldn't*), the `Process` verb + the `Skill[ArgsT]` tool ABC, ports (`VoicePort`, `StylePort`, `Notifier`), and `SkillError`. Imports nothing else first-party. |
 | `petbot.process` | **The core.** The `Process` impls: `ChatProcess` (the LLM brain — maps `history` to `message_history` and **reactively compacts** it on a provider length-rejection, via a DI-selected `SlidingWindow`/`Summarizer`), `CommandProcess`, the `RouterProcess` (the one exhaustive `match` on input type), and the persona voice (`Stylist` / `PassthroughStyle`, a `StylePort`). |
 | `petbot.skills.{math,booru,music}` | One **tool** each (a `Skill[ArgsT]`); the process calls them through the `ToolRegistry`. Tools *raise* `SkillError` for expected failures. |
 | `petbot.types` | The typed surface a frontend imports without a skill: per-skill `*Args` models + the `Command` / `CATALOG`. |

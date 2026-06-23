@@ -32,6 +32,15 @@ Two facts shaped the design:
   would reintroduce the cross-path baggage ADR 0009 removed) and *not* a compute-side
   store (which can't see Discord's reply chain). The core stays a pure function of
   `(Input, SkillContext)`.
+- `history` is itself a discriminated union — **`Recalled` | `Unrecalled`** — *not* a bare
+  `tuple[Turn, …]`. When the frontend can't read the reply chain (e.g. a missing Discord
+  *Read Message History* permission), the walk **raises** and the boundary degrades to
+  `Unrecalled()`, distinct from an empty `Recalled()` (a genuinely fresh turn). This keeps
+  "empty because fresh" and "empty because unreadable" from collapsing to the same value
+  (no flag/boolean branching — ADR 0009 invariant). `ChatProcess.respond` exhaustively
+  `match`es it: `Recalled` maps its turns to `message_history`; `Unrecalled` runs with no
+  history **plus a per-run instruction** telling the agent it lost the thread, so it asks
+  for a recap instead of answering blind.
 - `Role` is neutral `USER`/`ASSISTANT`; the speaker's name (including "PetBot") lives on
   `Turn.author`, taken live from the Discord `display_name`. A user turn inlines its
   author for multi-user attribution; an image-only bot card is **flattened to a faithful

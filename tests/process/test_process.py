@@ -23,6 +23,7 @@ from petbot.domain import (
     EmbedSpec,
     Platform,
     Process,
+    Recalled,
     Role,
     Skill,
     SkillContext,
@@ -30,6 +31,7 @@ from petbot.domain import (
     StylePort,
     TextInput,
     Turn,
+    Unrecalled,
     UpstreamUnavailable,
     User,
 )
@@ -402,7 +404,7 @@ async def test_chat_compacts_and_retries_on_context_overflow() -> None:
         Turn(role=Role.USER if i % 2 == 0 else Role.ASSISTANT, author="x", text=f"t{i}")
         for i in range(6)
     )
-    result = await chat.respond(TextInput(text="now", history=history), _ctx())
+    result = await chat.respond(TextInput(text="now", history=Recalled(turns=history)), _ctx())
     assert calls["n"] == 2  # first attempt overflowed; the compacted retry succeeded
     assert result.text == "recovered"
 
@@ -419,8 +421,28 @@ async def test_chat_passes_prior_turns_as_message_history() -> None:
         Turn(role=Role.USER, author="Alice", text="what's a pony?"),
         Turn(role=Role.ASSISTANT, author="PetBot", text="a small horse"),
     )
-    await chat.respond(TextInput(text="and a foal?", history=history), _ctx())
+    await chat.respond(TextInput(text="and a foal?", history=Recalled(turns=history)), _ctx())
     seen = [text for _, text in _texts(captured)]
     assert "Alice: what's a pony?" in seen
     assert "a small horse" in seen
     assert any("and a foal?" in text for text in seen)
+
+
+async def test_chat_unrecalled_history_tells_the_agent_it_lost_the_thread() -> None:
+    # A reply whose context couldn't be read: no message_history, and the agent's run
+    # instructions gain the lost-thread note so it doesn't answer blind.
+    seen: dict[str, object] = {}
+
+    def fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        seen["instructions"] = next(
+            (m.instructions for m in messages if isinstance(m, ModelRequest) and m.instructions),
+            None,
+        )
+        seen["history"] = [t for _, t in _texts(messages)]
+        return ModelResponse(parts=[TextPart(content="meep~ I've lost the thread")])
+
+    chat = ChatProcess(_registry(), model=FunctionModel(fn))
+    result = await chat.respond(TextInput(text="and the other one?", history=Unrecalled()), _ctx())
+    assert result.text  # still answers
+    assert isinstance(seen["instructions"], str) and "lost the thread" in seen["instructions"]
+    assert seen["history"] == ["and the other one?"]  # only the current turn — no prior context

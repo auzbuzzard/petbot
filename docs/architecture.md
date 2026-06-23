@@ -35,9 +35,11 @@ Discord ⇄ [ frontend ]  --Input(JSON)-->  [ core service ]  chat(LLM) · math 
 
 1. The frontend maps an `@mention` — or a **reply to PetBot** — to a `TextInput` (and a
    slash command to a `CommandInput`) plus a neutral `SkillContext`. For a conversation,
-   it reconstructs the prior turns from the Discord reply chain into `TextInput.history`,
-   then calls `await process.respond(inp, ctx)` on its `ProcessClient` (a `Process` over
-   a transport).
+   it reconstructs the prior turns from the Discord reply chain into `TextInput.history`
+   (a `Recalled` of turns — or `Unrecalled` if it *couldn't* read the chain, e.g. a
+   missing *Read Message History* permission, so the agent can say it lost the thread
+   rather than answer blind), then calls `await process.respond(inp, ctx)` on its
+   `ProcessClient` (a `Process` over a transport).
 2. A `Dispatch` envelope carries the typed input. A remote transport
    (`HttpTransport`, `LambdaTransport`) serialises it at the boundary; `serve` decodes
    it on the compute side.
