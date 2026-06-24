@@ -13,11 +13,25 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from typing import Any
 
 from petbot.domain import Process
+from petbot.logging_setup import configure_logging
+from petbot.observability import (
+    ObservabilitySettings,
+    configure_observability,
+    flush_observability,
+)
 from petbot.platform import serve
 from petbot.services.core import build_process
+
+# Cold start, once per execution environment. The Lambda runtime installs no app logging, so
+# without this the root logger stays at WARNING and INFO records never reach CloudWatch. The
+# Lambda always targets CloudWatch, so structured JSON; the dev HTTP entrypoint stays plain.
+# Telemetry providers are installed here too, before build_process reads them.
+configure_logging(os.environ.get("LOG_LEVEL", "INFO"), "json")
+configure_observability(ObservabilitySettings())
 
 _process: Process | None = None
 _loop: asyncio.AbstractEventLoop | None = None
@@ -46,6 +60,11 @@ def handler(event: dict[str, Any], context: object = None) -> dict[str, Any]:
     itself, which the frontend parses directly.
     """
     body = event["body"] if isinstance(event, dict) and "body" in event else json.dumps(event)
-    out = _get_loop().run_until_complete(serve(_get_process(), body))
-    result: dict[str, Any] = json.loads(out)
-    return result
+    try:
+        out = _get_loop().run_until_complete(serve(_get_process(), body))
+        result: dict[str, Any] = json.loads(out)
+        return result
+    finally:
+        # Flush before the runtime freezes — the BatchSpanProcessor would otherwise lose
+        # this invocation's spans/metrics until (or unless) the next invoke resumes.
+        flush_observability()

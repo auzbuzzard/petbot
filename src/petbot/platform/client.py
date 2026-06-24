@@ -9,8 +9,14 @@ or behind HTTP/Lambda — the difference is the injected transport.
 
 from __future__ import annotations
 
+from opentelemetry import trace
+
 from petbot.domain import Input, Process, SkillContext, SkillResult
 from petbot.platform.dispatch import Dispatch, Transport
+
+# The client end of the distributed trace: the compute side parents its spans under this one,
+# so a turn is a single trace edge->core. No-op until an SDK is installed.
+_tracer = trace.get_tracer("petbot.platform.client")
 
 
 class ProcessClient(Process):
@@ -20,4 +26,8 @@ class ProcessClient(Process):
         self._transport = transport
 
     async def respond(self, inp: Input, ctx: SkillContext) -> SkillResult:
-        return await self._transport.send(Dispatch(input=inp, context=ctx))
+        with _tracer.start_as_current_span("dispatch") as span:
+            span.set_attribute("petbot.platform", ctx.platform.value)
+            span.set_attribute("petbot.conversation_id", ctx.conversation_id)
+            span.set_attribute("petbot.input_kind", type(inp).__name__)
+            return await self._transport.send(Dispatch(input=inp, context=ctx))

@@ -24,6 +24,7 @@ import discord
 from aiohttp import web
 
 from petbot.logging_setup import configure_logging
+from petbot.observability import ObservabilitySettings, configure_observability
 from petbot.platform import ToolRegistry, serve
 from petbot.process import CommandProcess, PassthroughStyle, RouterProcess
 from petbot.services.music.provider import DiscordVoiceProvider
@@ -74,5 +75,6 @@ class MusicService(discord.Client):
 def run(settings: MusicSettings) -> None:
     """Start the music service (blocking)."""
     configure_logging(settings.log_level)
+    configure_observability(ObservabilitySettings())
     logger.info("Starting PetBot music service.")
     MusicService(settings).run(settings.discord_token, log_handler=None)

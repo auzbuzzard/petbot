@@ -79,7 +79,8 @@ resource "aws_lambda_function" "this" {
   timeout       = var.timeout
 
   environment {
-    variables = local.lambda_env
+    # Observability env is empty unless var.observability_enabled (see observability.tf).
+    variables = merge(local.lambda_env, local.observability_core_env)
   }
 
   # Ensure our retention-managed log group exists before the function can be

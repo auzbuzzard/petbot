@@ -19,15 +19,22 @@ import json
 from typing import Any, Protocol
 
 import httpx
+from opentelemetry.propagate import inject
 
 from petbot.domain import SkillResult
 from petbot.platform.dispatch import Dispatch, Transport
 
 
 def _wire(dispatch: Dispatch) -> dict[str, Any]:
+    # Carry the active trace context (W3C tracecontext) alongside the payload so the
+    # compute side can re-parent its spans into the same trace. Empty when no SDK is
+    # configured; `serve` tolerates a missing/empty "trace" key.
+    carrier: dict[str, str] = {}
+    inject(carrier)
     return {
         "input": dispatch.input.model_dump(mode="json"),
         "context": dispatch.context.model_dump(mode="json"),
+        "trace": carrier,
     }
 
 

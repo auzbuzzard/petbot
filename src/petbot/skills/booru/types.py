@@ -10,8 +10,21 @@ member's ``.value`` is the wire token, whichever site it came from.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 
 from petbot.skills.booru.tags import FileType, NumericFilter, Rating, Sort
+
+
+class BooruOutcome(StrEnum):
+    """The coarse, non-content result of a search, recorded as telemetry. The skill
+    classifies each search into one of these: it can't be read off a single exception type,
+    since ``SAFE_LIMITED`` vs ``EMPTY`` turns on the request's safe-only floor and the empty
+    case is a domain ``EmptyResult`` rather than a booru error."""
+
+    OK = "ok"
+    EMPTY = "empty"
+    SAFE_LIMITED = "safe_limited"
+    ERROR = "error"
 
 
 @dataclass(frozen=True, slots=True)

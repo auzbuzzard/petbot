@@ -11,17 +11,32 @@ Served behind a transport by :mod:`petbot.services.core.handler` (Lambda) or
 
 from __future__ import annotations
 
+from pydantic_ai.models.instrumented import InstrumentationSettings
+
 from petbot.domain import Process
+from petbot.observability import ObservabilitySettings
 from petbot.platform import ToolRegistry
 from petbot.process import ChatProcess, CommandProcess, RouterProcess, Stylist
 from petbot.process.settings import ChatSettings
 
 
 def build_process() -> Process:
-    """Build the core service's process: chat + command over the installed skills."""
+    """Build the core service's process: chat + command over the installed skills.
+
+    The entrypoint has already called ``configure_observability`` (so the global OTel
+    providers exist); here we only decide whether to instrument the agent. When telemetry
+    is enabled the chat agent emits spans/metrics with ``include_content=False`` (metadata
+    only), and the chat process tags its run-outcome record with a salted user-id hash.
+    """
     settings = ChatSettings()
+    obs = ObservabilitySettings()
+    instrumentation = (
+        InstrumentationSettings(version=3, include_content=False) if obs.enabled else None
+    )
     registry = ToolRegistry.from_installed_skills()  # math, derpi, e621
-    chat = ChatProcess(registry, settings=settings)
+    chat = ChatProcess(
+        registry, settings=settings, instrumentation=instrumentation, id_salt=obs.id_salt
+    )
     command = CommandProcess(registry, Stylist(settings=settings))
     return RouterProcess(chat=chat, command=command)
 

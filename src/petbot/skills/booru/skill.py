@@ -11,19 +11,33 @@ from __future__ import annotations
 import logging
 
 import httpx
+from opentelemetry import metrics, trace
 
-from petbot.domain import Skill, SkillContext, SkillResult, UpstreamUnavailable
+from petbot.domain import EmptyResult, Skill, SkillContext, SkillResult, UpstreamUnavailable
 from petbot.skills.booru import derpibooru, e621
 from petbot.skills.booru.base import BooruProvider
 from petbot.skills.booru.engine import run_search
 from petbot.skills.booru.errors import SiteFailureStatusError
 from petbot.skills.booru.tags import NumericFilter, Sort
-from petbot.skills.booru.types import SearchRequest
+from petbot.skills.booru.types import BooruOutcome, SearchRequest
 from petbot.types import BooruArgs
 
 logger = logging.getLogger(__name__)
 
 _NETWORK_FAILURE = "uwu the booru didn't answer — please try again in a bit."
+
+# A non-content outcome signal: the coarse result status becomes a span attribute + counter.
+# The tags and the result itself are never recorded.
+_meter = metrics.get_meter("petbot.skills.booru")
+_OUTCOMES = _meter.create_counter(
+    "petbot.booru.outcome", description="Booru searches by provider + outcome status."
+)
+
+
+def _record_outcome(provider: str, outcome: BooruOutcome) -> None:
+    """Tag the active tool span with the coarse outcome and bump the counter."""
+    trace.get_current_span().set_attribute("petbot.booru.outcome", outcome.value)
+    _OUTCOMES.add(1, {"provider": provider, "status": outcome.value})
 
 
 def _default_sort(provider: BooruProvider) -> Sort | None:
@@ -58,16 +72,26 @@ async def _run(
 ) -> SkillResult:
     search = _build_search(provider, args, ctx)
     # The one place that logs a search failure (at a level matching severity) before
-    # re-raising it as a neutral SkillError the process boundary voices. An empty search
-    # raises EmptyResult from run_search and propagates untouched.
+    # re-raising it as a neutral SkillError the process boundary voices, and the one place
+    # that records the coarse outcome signal. An empty search raises EmptyResult and still
+    # propagates untouched — we only tag it on the way past.
     try:
-        return await run_search(provider, client, search)
+        result = await run_search(provider, client, search)
+    except EmptyResult:
+        empty = BooruOutcome.SAFE_LIMITED if search.safe_only else BooruOutcome.EMPTY
+        _record_outcome(provider.name, empty)
+        raise
     except SiteFailureStatusError as exc:
+        _record_outcome(provider.name, BooruOutcome.ERROR)
         logger.debug("%s rejected the search: %s", provider.name, exc.site_message)
         raise UpstreamUnavailable(exc.print_message) from exc
     except (httpx.HTTPError, ValueError) as exc:
+        _record_outcome(provider.name, BooruOutcome.ERROR)
         logger.warning("%s search failed to reach/parse the site", provider.name, exc_info=True)
         raise UpstreamUnavailable(_NETWORK_FAILURE) from exc
+    else:
+        _record_outcome(provider.name, BooruOutcome.OK)
+        return result
 
 
 class DerpiSkill(Skill[BooruArgs]):
