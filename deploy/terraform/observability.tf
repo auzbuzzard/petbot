@@ -12,12 +12,10 @@
 #     and the edge exports to it at http://localhost:4318. Its config is
 #     local.collector_config_yaml, passed inline via the collector's AOT_CONFIG_CONTENT.
 #   * Core worker: a *container-image* arm64 Lambda, so the ADOT *Lambda layer* (zip-only)
-#     does NOT apply — the collector must be baked into the worker image as an internal
-#     extension. The env (OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 +
-#     OPENTELEMETRY_COLLECTOR_CONFIG_URI) and IAM are wired here; the image bake itself is
-#     the remaining step (Dockerfile.lambda is untouched pending the hosting decision —
-#     bake the arm64 ADOT extension vs. run a standalone collector). Until then the core's
-#     *traces/metrics* don't export, but its run-outcome LOG (below) still lands.
+#     does NOT apply — the collector is baked into the worker image as an internal extension
+#     (Dockerfile.lambda, OTEL_VARIANT=otel, which CI sets when this var is on). The env
+#     (OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 + OPENTELEMETRY_COLLECTOR_CONFIG_URI
+#     pointing at the baked config) and IAM are wired here.
 #
 # Note (always-on, collector-independent): the per-turn run-outcome record ChatProcess
 # emits (tools called, tokens, finish reason) is a plain structured *log*, captured by
@@ -55,35 +53,10 @@ data "aws_ssm_parameter" "telemetry_id_salt" {
 }
 
 locals {
-  # The ADOT collector pipeline shared by both deployables' local collectors: receive OTLP
-  # over HTTP (what the SDK exports to) and fan out to X-Ray (traces) + CloudWatch EMF
-  # (metrics). Passed inline to the collector container/extension so no config file is
-  # mounted. Region is pinned so the exporters don't depend on instance metadata.
-  collector_config_yaml = <<-YAML
-    receivers:
-      otlp:
-        protocols:
-          http:
-            endpoint: 0.0.0.0:4318
-    processors:
-      batch:
-    exporters:
-      awsxray:
-        region: ${var.aws_region}
-      awsemf:
-        region: ${var.aws_region}
-        namespace: petbot
-    service:
-      pipelines:
-        traces:
-          receivers: [otlp]
-          processors: [batch]
-          exporters: [awsxray]
-        metrics:
-          receivers: [otlp]
-          processors: [batch]
-          exporters: [awsemf]
-  YAML
+  # The ADOT collector pipeline, one source of truth in deploy/collector-config.yaml. The
+  # edge sidecar takes it inline (AOT_CONFIG_CONTENT); the core worker bakes the same file
+  # into its image. Region-less — the exporters read AWS_REGION from the env.
+  collector_config_yaml = file("${path.module}/../collector-config.yaml")
 
   # Shared OTLP/OBS env for any deployable; service_name is set per process below.
   observability_common_env = var.observability_enabled ? merge(
@@ -102,8 +75,8 @@ locals {
     {
       OBS_SERVICE_NAME  = local.core_name
       OTEL_SERVICE_NAME = local.core_name
-      # Points the (to-be-baked) collector extension at its config file. Inert until the
-      # core image actually bakes the extension + writes this file — see the header note.
+      # Where the baked-in collector extension reads its config (Dockerfile.lambda writes
+      # deploy/collector-config.yaml here when built with OTEL_VARIANT=otel).
       OPENTELEMETRY_COLLECTOR_CONFIG_URI = "/var/task/collector-config.yaml"
     },
   ) : {}

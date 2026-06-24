@@ -1,0 +1,30 @@
+# ADOT collector pipeline, shared by both deployables' local collectors: receive OTLP
+# over HTTP (what the OpenTelemetry SDK exports to) and fan out to AWS X-Ray (traces) +
+# CloudWatch EMF (metrics). One source of truth — the edge sidecar passes it inline via
+# AOT_CONFIG_CONTENT (Terraform file()), and the core worker bakes it at
+# /var/task/collector-config.yaml (Dockerfile.lambda, OTEL_VARIANT=otel).
+#
+# Region is intentionally omitted: the awsxray/awsemf exporters read it from the
+# AWS_REGION env both runtimes set (Lambda sets it automatically; the edge container sets
+# it explicitly), so this config needs no templating and stays a plain static file.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+processors:
+  batch:
+exporters:
+  awsxray: {}
+  awsemf:
+    namespace: petbot
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [awsxray]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [awsemf]

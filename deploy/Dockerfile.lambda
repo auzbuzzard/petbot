@@ -12,7 +12,20 @@
 #
 # Keep the runtime in lockstep with what CI tests (pyproject requires-python,
 # mypy, ruff all target 3.12).
-FROM public.ecr.aws/lambda/python:3.12
+#
+# Observability: the collector is baked in as an internal Lambda extension only when built
+# with --build-arg OTEL_VARIANT=otel (CI sets this when observability is enabled). The
+# default "plain" variant is byte-identical to before — BuildKit never even pulls the ADOT
+# layer image, since no built stage references it.
+ARG OTEL_VARIANT=plain
+# arm64 ADOT *collector* Lambda layer (extension only — PetBot instruments in-app via the
+# OTel SDK, so we deliberately do NOT set AWS_LAMBDA_EXEC_WRAPPER / auto-instrument).
+# Verify the version tag against the latest ADOT release before enabling.
+ARG OTEL_COLLECTOR_IMAGE=public.ecr.aws/aws-observability/aws-otel-lambda-collector-arm64-ver-0-117-0:latest
+
+FROM ${OTEL_COLLECTOR_IMAGE} AS otel-layer
+
+FROM public.ecr.aws/lambda/python:3.12 AS base
 
 # uv resolves + installs far faster than pip and reuses a build-cache mount.
 # Pulled from the published static binary, pinned to an immutable version tag.
@@ -32,3 +45,16 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # module.function the Lambda runtime invokes per request.
 CMD ["petbot.services.core.handler.handler"]
+
+# --- Variant selection -------------------------------------------------------
+# "plain": the base image unchanged. "otel": adds the ADOT collector extension (under /opt)
+# plus the baked collector config the runtime points at via OPENTELEMETRY_COLLECTOR_CONFIG_URI
+# (set by Terraform). The extension auto-registers from /opt/extensions and runs alongside
+# the handler. The final stage resolves to one of these by OTEL_VARIANT.
+FROM base AS variant-plain
+
+FROM base AS variant-otel
+COPY --from=otel-layer /opt /opt
+COPY deploy/collector-config.yaml ${LAMBDA_TASK_ROOT}/collector-config.yaml
+
+FROM variant-${OTEL_VARIANT} AS final
