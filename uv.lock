@@ -1532,6 +1532,7 @@ dependencies = [
 
 [package.optional-dependencies]
 compute-core = [
+    { name = "botocore" },
     { name = "httpx" },
     { name = "numexpr" },
     { name = "numpy" },
@@ -1542,6 +1543,7 @@ compute-core = [
     { name = "pydantic-settings" },
 ]
 compute-music = [
+    { name = "botocore" },
     { name = "discord-py", extra = ["voice"] },
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
@@ -1551,6 +1553,7 @@ compute-music = [
 ]
 dev = [
     { name = "boto3" },
+    { name = "botocore" },
     { name = "discord-py", extra = ["voice"] },
     { name = "httpx" },
     { name = "import-linter" },
@@ -1571,6 +1574,7 @@ dev = [
     { name = "yt-dlp" },
 ]
 discord = [
+    { name = "botocore" },
     { name = "discord-py" },
     { name = "httpx" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
@@ -1582,6 +1586,7 @@ lambda = [
     { name = "boto3" },
 ]
 observability = [
+    { name = "botocore" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
     { name = "opentelemetry-sdk-extension-aws" },
@@ -1590,6 +1595,7 @@ observability = [
 [package.metadata]
 requires-dist = [
     { name = "boto3", marker = "extra == 'lambda'", specifier = ">=1.43" },
+    { name = "botocore", marker = "extra == 'observability'", specifier = ">=1.40" },
     { name = "discord-py", marker = "extra == 'discord'", specifier = ">=2.7,<2.8" },
     { name = "discord-py", extras = ["voice"], marker = "extra == 'compute-music'", specifier = ">=2.7,<2.8" },
     { name = "httpx", marker = "extra == 'compute-core'", specifier = ">=0.28" },

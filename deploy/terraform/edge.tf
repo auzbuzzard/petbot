@@ -91,27 +91,6 @@ resource "aws_lightsail_container_service_deployment_version" "edge" {
     }, local.observability_edge_env)
   }
 
-  # ADOT collector sidecar — only when observability is on. Lightsail runs the
-  # deployment's containers in one network namespace, so the edge reaches it on
-  # localhost:4318 (OTEL_EXPORTER_OTLP_ENDPOINT, from local.observability_edge_env). It
-  # forwards OTLP to X-Ray + CloudWatch EMF (local.collector_config_yaml, inline via
-  # AOT_CONFIG_CONTENT). The collector needs its own AWS creds: Lightsail has no instance
-  # role, so it reuses the edge's scoped static key (xray/cloudwatch granted in
-  # observability.tf). Image is amd64 to match the Lightsail platform.
-  dynamic "container" {
-    for_each = var.observability_enabled ? toset(["collector"]) : toset([])
-    content {
-      container_name = "aws-otel-collector"
-      image          = "public.ecr.aws/aws-observability/aws-otel-collector:latest"
-      environment = {
-        AOT_CONFIG_CONTENT    = local.collector_config_yaml
-        AWS_REGION            = var.aws_region
-        AWS_ACCESS_KEY_ID     = aws_iam_access_key.edge.id
-        AWS_SECRET_ACCESS_KEY = aws_iam_access_key.edge.secret
-      }
-    }
-  }
-
   depends_on = [aws_ecr_repository_policy.edge]
 }
 

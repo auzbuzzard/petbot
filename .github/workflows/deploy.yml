@@ -102,10 +102,6 @@ jobs:
           platforms: linux/arm64
           tags: ${{ env.ECR_REPO }}:${{ env.IMAGE_TAG }}
           push: true
-          # Bake the ADOT collector extension only when observability is on; otherwise the
-          # default "plain" variant builds (identical image, no ADOT pull).
-          build-args: |
-            OTEL_VARIANT=${{ vars.OBSERVABILITY_ENABLED == 'true' && 'otel' || 'plain' }}
           # provenance=false: buildx otherwise pushes an OCI image *index*, which
           # Lambda rejects; this pushes a single image manifest Lambda accepts.
           provenance: false

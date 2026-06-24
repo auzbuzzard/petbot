@@ -2,22 +2,36 @@
 
 Library code instruments with the OpenTelemetry **API** (a no-op until a provider is
 installed); this module wires the **SDK** in one place. ``configure_observability`` installs
-the global tracer/meter providers that export over OTLP to an ADOT collector (X-Ray +
-CloudWatch EMF); ``flush_observability`` force-flushes them (Lambda needs it); the agent's
-``InstrumentationSettings`` is built in the core composition root with ``include_content=False``.
+the global tracer/meter providers, which export over OTLP **straight to AWS's collector-less
+endpoints** — traces to the X-Ray OTLP endpoint, metrics to the CloudWatch (monitoring) OTLP
+endpoint — with no collector to run or bake in. ``flush_observability`` force-flushes them
+(Lambda needs it); the agent's ``InstrumentationSettings`` is built in the core composition
+root with ``include_content=False``.
+
+Collector-less export: the AWS OTLP endpoints authenticate with SigV4, so each export POST is
+signed (:func:`_aws_sigv4_session`) using the runtime's own AWS credentials — the Lambda
+execution role for the core, the edge's scoped IAM user for the frontend. Both deployables
+already run inside AWS with credentials on hand, so there is nothing to deploy alongside them.
+A non-AWS ``OTEL_*`` endpoint (a plain OTLP collector in dev) is left unsigned, so the SDK
+stays a drop-in for any backend. **Traces require CloudWatch Transaction Search to be enabled
+once per account/Region** (the X-Ray OTLP endpoint rejects spans until its trace-segment
+destination is CloudWatch Logs); see ``docs/adr/0011-agent-observability.md``.
 
 Telemetry is metadata-only: message bodies, tags, and replies are never recorded, and the one
 user identifier is a salted hash (:func:`hash_user_id`). Trace context crosses the edge->core
 :class:`~petbot.platform.dispatch.Dispatch` wire as W3C tracecontext;
-:class:`AwsXRayIdGenerator` keeps trace ids X-Ray-valid. The OTLP endpoint comes from the
-standard ``OTEL_*`` env; the SDK imports are lazy, so a process without the ``observability``
-extra (or telemetry off) never pays for them. See ``docs/adr/0011-agent-observability.md``.
+:class:`AwsXRayIdGenerator` keeps trace ids X-Ray-valid. The endpoints come from the standard
+``OTEL_*`` env; the SDK imports are lazy, so a process without the ``observability`` extra (or
+telemetry off) never pays for them.
 """
 
 from __future__ import annotations
 
 import hashlib
 import logging
+import os
+from typing import Any
+from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -32,8 +46,8 @@ __all__ = [
 
 
 class ObservabilitySettings(BaseSettings):
-    """Whether and how to emit telemetry (``OBS_*``); the OTLP endpoint itself is the
-    SDK's standard ``OTEL_*`` env, so it is not duplicated here.
+    """Whether and how to emit telemetry (``OBS_*``); the OTLP endpoints themselves are the
+    SDK's standard ``OTEL_*`` env, so they are not duplicated here.
 
     Off by default: a process emits nothing until ``OBS_ENABLED=true``, so dev and tests
     stay zero-config and the privacy posture is opt-in for an operator.
@@ -57,9 +71,58 @@ class ObservabilitySettings(BaseSettings):
     id_salt: str = ""
 
 
+def _aws_sigv4_session(service: str, region: str) -> Any:
+    """A ``requests`` session that SigV4-signs every OTLP POST, so the OTel SDK can export
+    directly to an AWS ``*.amazonaws.com`` OTLP endpoint with no collector in between.
+
+    The signature is computed from the runtime's ambient AWS credentials (the Lambda role or
+    the edge's IAM-user key) over the request's exact body, so it works for both the
+    uncompressed-protobuf default and a gzipped payload. Imported lazily: only the enabled,
+    AWS-endpoint path pulls ``requests``/``botocore`` in.
+    """
+    import requests
+    from botocore.auth import SigV4Auth
+    from botocore.awsrequest import AWSRequest
+    from botocore.session import Session
+
+    credentials = Session().get_credentials()
+
+    class _SigV4Session(requests.Session):
+        def send(self, request: Any, **kwargs: Any) -> Any:
+            body = request.body or b""
+            if isinstance(body, str):
+                body = body.encode()
+            signed = AWSRequest(method=request.method, url=request.url, data=body)
+            signed.headers["Content-Type"] = request.headers.get(
+                "Content-Type", "application/x-protobuf"
+            )
+            encoding = request.headers.get("Content-Encoding")
+            if encoding:
+                signed.headers["Content-Encoding"] = encoding
+            SigV4Auth(credentials, service, region).add_auth(signed)
+            request.headers.update(signed.headers)
+            return super().send(request, **kwargs)
+
+    return _SigV4Session()
+
+
+def _otlp_aws_kwargs(signal: str) -> dict[str, Any]:
+    """Exporter kwargs for one signal (``TRACES``/``METRICS``): when its ``OTEL_*`` endpoint is
+    an AWS OTLP endpoint, sign it (deriving the service + Region from the host, e.g.
+    ``xray.us-east-1.amazonaws.com`` ⇒ service ``xray``); otherwise return nothing and let the
+    exporter use its plain default (a non-AWS collector in dev)."""
+    endpoint = os.environ.get(f"OTEL_EXPORTER_OTLP_{signal}_ENDPOINT")
+    host = urlparse(endpoint).hostname or "" if endpoint else ""
+    if host.endswith(".amazonaws.com"):
+        service, region, *_ = host.split(".")
+        return {"endpoint": endpoint, "session": _aws_sigv4_session(service, region)}
+    return {}
+
+
 def configure_observability(settings: ObservabilitySettings) -> bool:
-    """Install global tracer + meter providers exporting over OTLP. Idempotent-enough for
-    a single entrypoint call; returns whether telemetry was actually enabled.
+    """Install global tracer + meter providers exporting over OTLP to AWS's collector-less
+    endpoints. Idempotent-enough for a single entrypoint call; returns whether telemetry was
+    actually enabled.
 
     The SDK is imported lazily so this is import-safe without the ``observability`` extra.
     The model/agent ``InstrumentationSettings`` is built by the caller (the core service)
@@ -88,12 +151,14 @@ def configure_observability(settings: ObservabilitySettings) -> bool:
         id_generator=AwsXRayIdGenerator(),  # X-Ray-valid trace ids; W3C propagation carries them
         sampler=ParentBased(TraceIdRatioBased(settings.sample_ratio)),
     )
-    tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+    span_exporter = OTLPSpanExporter(**_otlp_aws_kwargs("TRACES"))
+    tracer_provider.add_span_processor(BatchSpanProcessor(span_exporter))
     trace.set_tracer_provider(tracer_provider)
 
+    metric_exporter = OTLPMetricExporter(**_otlp_aws_kwargs("METRICS"))
     meter_provider = MeterProvider(
         resource=resource,
-        metric_readers=[PeriodicExportingMetricReader(OTLPMetricExporter())],
+        metric_readers=[PeriodicExportingMetricReader(metric_exporter)],
     )
     metrics.set_meter_provider(meter_provider)
 

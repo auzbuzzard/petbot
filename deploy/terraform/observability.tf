@@ -1,37 +1,30 @@
 # --- Agent observability (OpenTelemetry) — OFF by default ---------------------
 #
-# Gated entirely by var.observability_enabled. When off (the default) this file adds
-# no env, IAM, or data sources, so applying it changes nothing for an existing deploy.
-# When on, each deployable exports OTLP to the collector at var.otel_otlp_endpoint,
-# which forwards to AWS X-Ray (traces) + CloudWatch EMF (metrics). The app reads the
-# standard OTEL_* env plus OBS_* (see petbot.observability.ObservabilitySettings).
+# Gated entirely by var.observability_enabled. When off (the default) this file adds no env,
+# IAM, or data sources, so applying it changes nothing for an existing deploy. When on, each
+# deployable exports OTLP *directly to AWS's collector-less endpoints* — traces to the X-Ray
+# OTLP endpoint, metrics to the CloudWatch (monitoring) OTLP endpoint — each POST SigV4-signed
+# by the runtime's own credentials (see petbot.observability). No collector runs anywhere: the
+# core worker image is unchanged and the edge has no sidecar. The app reads the standard OTEL_*
+# env plus OBS_* (see petbot.observability.ObservabilitySettings).
 #
-# Collector placement:
-#   * Edge (Lightsail container service, always-on): an `aws-otel-collector` sidecar
-#     container is added to the deployment in edge.tf (gated on observability_enabled)
-#     and the edge exports to it at http://localhost:4318. Its config is
-#     local.collector_config_yaml, passed inline via the collector's AOT_CONFIG_CONTENT.
-#   * Core worker: a *container-image* arm64 Lambda, so the ADOT *Lambda layer* (zip-only)
-#     does NOT apply — the collector is baked into the worker image as an internal extension
-#     (Dockerfile.lambda, OTEL_VARIANT=otel, which CI sets when this var is on). The env
-#     (OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 + OPENTELEMETRY_COLLECTOR_CONFIG_URI
-#     pointing at the baked config) and IAM are wired here.
+# PREREQUISITE (traces only, one-time per account + Region): enable CloudWatch Transaction
+# Search by pointing the X-Ray trace-segment destination at CloudWatch Logs. Until then the
+# X-Ray OTLP endpoint rejects spans with InvalidRequestException. There is no first-class
+# Terraform resource yet (hashicorp/terraform-provider-aws#44994), so enable it once with:
 #
-# Note (always-on, collector-independent): the per-turn run-outcome record ChatProcess
-# emits (tools called, tokens, finish reason) is a plain structured *log*, captured by
-# CloudWatch Logs straight off the Lambda's stdout regardless of this collector or
-# OBS_ENABLED. The collector here is only for X-Ray traces + CloudWatch EMF metrics.
+#   aws xray update-trace-segment-destination --destination CloudWatchLogs --region <region>
+#
+# Metrics (the monitoring endpoint) need no such step. See docs/adr/0011-agent-observability.md.
+#
+# Note (always-on, telemetry-independent): the per-turn run-outcome record ChatProcess emits
+# (tools called, tokens, finish reason) is a plain structured *log*, captured by CloudWatch
+# Logs straight off the Lambda's stdout regardless of OBS_ENABLED.
 
 variable "observability_enabled" {
   type        = bool
-  description = "Emit OpenTelemetry telemetry (traces/metrics) over OTLP. Off by default."
+  description = "Emit OpenTelemetry telemetry (traces/metrics) over OTLP to AWS's collector-less endpoints. Off by default."
   default     = false
-}
-
-variable "otel_otlp_endpoint" {
-  type        = string
-  description = "OTLP HTTP endpoint of the collector the app exports to. Defaults to the local sidecar/extension collector both deployables now run."
-  default     = "http://localhost:4318"
 }
 
 variable "observability_sample_ratio" {
@@ -53,17 +46,18 @@ data "aws_ssm_parameter" "telemetry_id_salt" {
 }
 
 locals {
-  # The ADOT collector pipeline, one source of truth in deploy/collector-config.yaml. The
-  # edge sidecar takes it inline (AOT_CONFIG_CONTENT); the core worker bakes the same file
-  # into its image. Region-less — the exporters read AWS_REGION from the env.
-  collector_config_yaml = file("${path.module}/../collector-config.yaml")
+  # AWS's collector-less OTLP endpoints (SigV4). The app derives the signing service + Region
+  # from each host (xray | monitoring.<region>.amazonaws.com), so the Region lives only here.
+  otlp_traces_endpoint  = "https://xray.${var.aws_region}.amazonaws.com/v1/traces"
+  otlp_metrics_endpoint = "https://monitoring.${var.aws_region}.amazonaws.com/v1/metrics"
 
   # Shared OTLP/OBS env for any deployable; service_name is set per process below.
   observability_common_env = var.observability_enabled ? merge(
     {
-      OBS_ENABLED                 = "true"
-      OBS_SAMPLE_RATIO            = tostring(var.observability_sample_ratio)
-      OTEL_EXPORTER_OTLP_ENDPOINT = var.otel_otlp_endpoint
+      OBS_ENABLED                         = "true"
+      OBS_SAMPLE_RATIO                    = tostring(var.observability_sample_ratio)
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT  = local.otlp_traces_endpoint
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT = local.otlp_metrics_endpoint
     },
     length(data.aws_ssm_parameter.telemetry_id_salt) > 0
     ? { OBS_ID_SALT = data.aws_ssm_parameter.telemetry_id_salt[0].value }
@@ -72,13 +66,7 @@ locals {
 
   observability_core_env = var.observability_enabled ? merge(
     local.observability_common_env,
-    {
-      OBS_SERVICE_NAME  = local.core_name
-      OTEL_SERVICE_NAME = local.core_name
-      # Where the baked-in collector extension reads its config (Dockerfile.lambda writes
-      # deploy/collector-config.yaml here when built with OTEL_VARIANT=otel).
-      OPENTELEMETRY_COLLECTOR_CONFIG_URI = "/var/task/collector-config.yaml"
-    },
+    { OBS_SERVICE_NAME = local.core_name, OTEL_SERVICE_NAME = local.core_name },
   ) : {}
 
   observability_edge_env = var.observability_enabled ? merge(
@@ -87,7 +75,8 @@ locals {
   ) : {}
 }
 
-# X-Ray + CloudWatch publishing for the core worker role. (PutMetricData has no
+# Publishing rights for the core worker role: exactly the actions the X-Ray (/v1/traces) and
+# CloudWatch monitoring (/v1/metrics) OTLP endpoints authorize against. (PutMetricData has no
 # resource-level scoping, so "*" is the only valid resource for it.)
 resource "aws_iam_role_policy" "core_observability" {
   count = var.observability_enabled ? 1 : 0
