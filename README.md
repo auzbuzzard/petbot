@@ -89,3 +89,17 @@ uv run pytest                                         # tests (fully offline)
 CI runs all of the above on every push and pull request. It needs **no
 secrets** — every test is offline (mocked APIs, pydantic-ai `TestModel`, no
 Discord login).
+
+## Observability
+
+Optional OpenTelemetry telemetry (off by default; `OBS_ENABLED=true`) exports one
+edge→core trace per turn plus token/latency/tool metrics over OTLP to an AWS-native
+backend (X-Ray + CloudWatch). It is **metadata-only** — no message content is ever
+recorded. See [ADR 0011](docs/adr/0011-agent-observability.md) and the exact
+[telemetry schema](docs/telemetry.md).
+
+## License & privacy
+
+PetBot is licensed under the **Apache License 2.0** — see [LICENSE](LICENSE) and
+[NOTICE](NOTICE). The hosted-service privacy policy (Discord Message-Content intent +
+GDPR) is in [PRIVACY.md](PRIVACY.md); self-hosters become their own data controller.

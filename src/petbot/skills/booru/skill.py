@@ -11,8 +11,9 @@ from __future__ import annotations
 import logging
 
 import httpx
+from opentelemetry import metrics, trace
 
-from petbot.domain import Skill, SkillContext, SkillResult, UpstreamUnavailable
+from petbot.domain import EmptyResult, Skill, SkillContext, SkillResult, UpstreamUnavailable
 from petbot.skills.booru import derpibooru, e621
 from petbot.skills.booru.base import BooruProvider
 from petbot.skills.booru.engine import run_search
@@ -24,6 +25,21 @@ from petbot.types import BooruArgs
 logger = logging.getLogger(__name__)
 
 _NETWORK_FAILURE = "uwu the booru didn't answer — please try again in a bit."
+
+# A non-content outcome signal: the exact failure class behind the e621 incident ("called
+# the tool, got nothing back, why?") becomes a span attribute + counter. The tags/result are
+# never recorded — only the coarse status.
+_meter = metrics.get_meter("petbot.skills.booru")
+_OUTCOMES = _meter.create_counter(
+    "petbot.booru.outcome", description="Booru searches by provider + outcome status."
+)
+
+
+def _record_outcome(provider: str, status: str) -> None:
+    """Tag the active tool span with the coarse outcome and bump the counter.
+    ``status`` ∈ ``ok | empty | safe_limited | error``."""
+    trace.get_current_span().set_attribute("petbot.booru.outcome", status)
+    _OUTCOMES.add(1, {"provider": provider, "status": status})
 
 
 def _default_sort(provider: BooruProvider) -> Sort | None:
@@ -58,16 +74,25 @@ async def _run(
 ) -> SkillResult:
     search = _build_search(provider, args, ctx)
     # The one place that logs a search failure (at a level matching severity) before
-    # re-raising it as a neutral SkillError the process boundary voices. An empty search
-    # raises EmptyResult from run_search and propagates untouched.
+    # re-raising it as a neutral SkillError the process boundary voices, and the one place
+    # that records the coarse outcome signal. An empty search raises EmptyResult and still
+    # propagates untouched — we only tag it on the way past.
     try:
-        return await run_search(provider, client, search)
+        result = await run_search(provider, client, search)
+    except EmptyResult:
+        _record_outcome(provider.name, "safe_limited" if search.safe_only else "empty")
+        raise
     except SiteFailureStatusError as exc:
+        _record_outcome(provider.name, "error")
         logger.debug("%s rejected the search: %s", provider.name, exc.site_message)
         raise UpstreamUnavailable(exc.print_message) from exc
     except (httpx.HTTPError, ValueError) as exc:
+        _record_outcome(provider.name, "error")
         logger.warning("%s search failed to reach/parse the site", provider.name, exc_info=True)
         raise UpstreamUnavailable(_NETWORK_FAILURE) from exc
+    else:
+        _record_outcome(provider.name, "ok")
+        return result
 
 
 class DerpiSkill(Skill[BooruArgs]):

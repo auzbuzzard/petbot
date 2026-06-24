@@ -15,6 +15,9 @@ For the module map, the calling pattern, and the invariants, see
 - [ADR 0010](adr/0010-conversational-memory-reply-to-continue.md) — reply-to-continue
   conversational memory (`TextInput.history`, reconstructed from the Discord reply
   chain) and reactive context-window compaction.
+- [ADR 0011](adr/0011-agent-observability.md) — agent observability: pydantic-ai
+  OpenTelemetry spans + metrics, one edge→core trace, an AWS-native (X-Ray + CloudWatch)
+  backend, and a metadata-only (no message content) privacy stance.
 - [ADR 0006](adr/0006-gateway-edge-microservice-skills.md) — the original frontend +
   compute split and why music is its own service (vocabulary reshaped by 0009).
 - [ADR 0007](adr/0007-llm-agent-pydantic-ai.md) — the chat agent (pydantic-ai),
