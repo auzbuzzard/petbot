@@ -14,9 +14,8 @@ from opentelemetry import trace
 from petbot.domain import Input, Process, SkillContext, SkillResult
 from petbot.platform.dispatch import Dispatch, Transport
 
-# The client end of the distributed trace: this span is the root the compute side parents
-# its server + agent spans under, so one Discord turn is a single trace edge->core. A no-op
-# until a process installs an OTel SDK (petbot.observability.configure_observability).
+# The client end of the distributed trace: the compute side parents its spans under this one,
+# so a turn is a single trace edge->core. No-op until an SDK is installed.
 _tracer = trace.get_tracer("petbot.platform.client")
 
 

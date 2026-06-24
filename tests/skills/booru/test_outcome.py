@@ -1,8 +1,5 @@
-"""The booru outcome signal: a coarse, non-content status tagged on the active tool span.
-
-This is the metadata that recovers the e621 incident's lost answer ("called the tool, got
-nothing — why?") without ever recording the tags or the result.
-"""
+"""The booru outcome signal: a coarse, non-content status tagged on the active tool span,
+recorded without the tags or the result."""
 
 from __future__ import annotations
 

@@ -58,11 +58,9 @@ compute-music = [
 ]
 # Dispatch to a Lambda compute service (boto3) — used by the frontend in production.
 lambda = ["boto3>=1.43"]
-# Offline agent-quality evals (pydantic-evals) — CI/dev only, no runtime use.
-eval = ["pydantic-evals>=1"]
 # Everything, for development and CI (so type-check and tests see all code).
 dev = [
-    "petbot[discord,compute-core,compute-music,lambda,eval]",
+    "petbot[discord,compute-core,compute-music,lambda]",
     "ruff>=0.15",
     "mypy>=2.1",
     "import-linter>=2.11",

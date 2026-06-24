@@ -1,28 +1,17 @@
 """OpenTelemetry setup — configured once, at each entrypoint, like ``configure_logging``.
 
-PetBot instruments with the OpenTelemetry **API** everywhere (it is a no-op until a
-provider is installed), and wires the **SDK** here, in one place, called by each process
-entrypoint after :func:`~petbot.logging_setup.configure_logging`. The model/agent spans
-come free from pydantic-ai's own instrumentation (see
-:mod:`petbot.services.core`); this module owns the provider/exporter plumbing and the two
-tiny helpers the rest of the code needs.
+Library code instruments with the OpenTelemetry **API** (a no-op until a provider is
+installed); this module wires the **SDK** in one place. ``configure_observability`` installs
+the global tracer/meter providers that export over OTLP to an ADOT collector (X-Ray +
+CloudWatch EMF); ``flush_observability`` force-flushes them (Lambda needs it); the agent's
+``InstrumentationSettings`` is built in the core composition root with ``include_content=False``.
 
-Telemetry is **metadata-only**: pydantic-ai is told ``include_content=False`` (built in the
-core composition root, not here — the edge has no pydantic-ai), so message bodies, tags, and
-replies are never recorded. The single user identifier we attach is a salted hash
-(:func:`hash_user_id`), never the raw id or a display name. See
-``docs/adr/0011-agent-observability.md``.
-
-Export is **AWS-native**: spans/metrics go out over OTLP to a co-located ADOT collector,
-which fans them to X-Ray + CloudWatch EMF. Trace context crosses the edge->core
-:class:`~petbot.platform.dispatch.Dispatch` wire as plain **W3C tracecontext** (the default
-global propagator); :class:`AwsXRayIdGenerator` makes the trace ids X-Ray-valid, so no
-AWS-specific propagator is needed (we never cross an ``X-Amzn-Trace-Id`` hop). Endpoint and
-headers come from the standard ``OTEL_*`` environment, read by the SDK.
-
-Nothing here reads the environment except :class:`ObservabilitySettings`; the SDK imports
-are lazy so a process without the ``observability`` extra (or with telemetry disabled) never
-pays for them.
+Telemetry is metadata-only: message bodies, tags, and replies are never recorded, and the one
+user identifier is a salted hash (:func:`hash_user_id`). Trace context crosses the edge->core
+:class:`~petbot.platform.dispatch.Dispatch` wire as W3C tracecontext;
+:class:`AwsXRayIdGenerator` keeps trace ids X-Ray-valid. The OTLP endpoint comes from the
+standard ``OTEL_*`` env; the SDK imports are lazy, so a process without the ``observability``
+extra (or telemetry off) never pays for them. See ``docs/adr/0011-agent-observability.md``.
 """
 
 from __future__ import annotations

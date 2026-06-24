@@ -19,27 +19,25 @@ from petbot.skills.booru.base import BooruProvider
 from petbot.skills.booru.engine import run_search
 from petbot.skills.booru.errors import SiteFailureStatusError
 from petbot.skills.booru.tags import NumericFilter, Sort
-from petbot.skills.booru.types import SearchRequest
+from petbot.skills.booru.types import BooruOutcome, SearchRequest
 from petbot.types import BooruArgs
 
 logger = logging.getLogger(__name__)
 
 _NETWORK_FAILURE = "uwu the booru didn't answer — please try again in a bit."
 
-# A non-content outcome signal: the exact failure class behind the e621 incident ("called
-# the tool, got nothing back, why?") becomes a span attribute + counter. The tags/result are
-# never recorded — only the coarse status.
+# A non-content outcome signal: the coarse result status becomes a span attribute + counter.
+# The tags and the result itself are never recorded.
 _meter = metrics.get_meter("petbot.skills.booru")
 _OUTCOMES = _meter.create_counter(
     "petbot.booru.outcome", description="Booru searches by provider + outcome status."
 )
 
 
-def _record_outcome(provider: str, status: str) -> None:
-    """Tag the active tool span with the coarse outcome and bump the counter.
-    ``status`` ∈ ``ok | empty | safe_limited | error``."""
-    trace.get_current_span().set_attribute("petbot.booru.outcome", status)
-    _OUTCOMES.add(1, {"provider": provider, "status": status})
+def _record_outcome(provider: str, outcome: BooruOutcome) -> None:
+    """Tag the active tool span with the coarse outcome and bump the counter."""
+    trace.get_current_span().set_attribute("petbot.booru.outcome", outcome.value)
+    _OUTCOMES.add(1, {"provider": provider, "status": outcome.value})
 
 
 def _default_sort(provider: BooruProvider) -> Sort | None:
@@ -80,18 +78,19 @@ async def _run(
     try:
         result = await run_search(provider, client, search)
     except EmptyResult:
-        _record_outcome(provider.name, "safe_limited" if search.safe_only else "empty")
+        empty = BooruOutcome.SAFE_LIMITED if search.safe_only else BooruOutcome.EMPTY
+        _record_outcome(provider.name, empty)
         raise
     except SiteFailureStatusError as exc:
-        _record_outcome(provider.name, "error")
+        _record_outcome(provider.name, BooruOutcome.ERROR)
         logger.debug("%s rejected the search: %s", provider.name, exc.site_message)
         raise UpstreamUnavailable(exc.print_message) from exc
     except (httpx.HTTPError, ValueError) as exc:
-        _record_outcome(provider.name, "error")
+        _record_outcome(provider.name, BooruOutcome.ERROR)
         logger.warning("%s search failed to reach/parse the site", provider.name, exc_info=True)
         raise UpstreamUnavailable(_NETWORK_FAILURE) from exc
     else:
-        _record_outcome(provider.name, "ok")
+        _record_outcome(provider.name, BooruOutcome.OK)
         return result
 
 

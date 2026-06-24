@@ -26,11 +26,10 @@ from petbot.observability import (
 from petbot.platform import serve
 from petbot.services.core import build_process
 
-# Cold start, once per execution environment. The Lambda runtime installs no app logging,
-# so without this the root logger stays at WARNING and every INFO record — including the
-# run-outcome line — is dropped (the original blind spot). The Lambda always targets
-# CloudWatch, so structured JSON; the dev HTTP entrypoint stays plain. Telemetry providers
-# are installed here too, before build_process reads them.
+# Cold start, once per execution environment. The Lambda runtime installs no app logging, so
+# without this the root logger stays at WARNING and INFO records never reach CloudWatch. The
+# Lambda always targets CloudWatch, so structured JSON; the dev HTTP entrypoint stays plain.
+# Telemetry providers are installed here too, before build_process reads them.
 configure_logging(os.environ.get("LOG_LEVEL", "INFO"), "json")
 configure_observability(ObservabilitySettings())
 

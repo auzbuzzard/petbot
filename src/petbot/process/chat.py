@@ -55,8 +55,8 @@ _LOST_CONTEXT_NOTE = (
     "otherwise just answer normally."
 )
 
-# Metadata-only telemetry: a run's tool decisions are also counters, so a dashboard can
-# alarm on a zero-tool-call spike (the exact e621 failure mode) without parsing logs.
+# Tool decisions are also counters, so a dashboard can alarm on a zero-tool-call spike
+# without parsing logs.
 _meter = metrics.get_meter("petbot.process.chat")
 _TOOL_CALLS = _meter.create_counter(
     "petbot.agent.tool_calls", description="Agent tool calls, by tool name."
@@ -133,11 +133,11 @@ class ChatProcess(Process):
     def _log_outcome(
         self, result: AgentRunResult[str], ctx: SkillContext, *, recalled: bool
     ) -> None:
-        """Emit one **metadata-only** record per agent run: which tools were called, token
-        usage, finish reason, and whether the reply context was read (``recalled``) or lost
-        (``unrecalled``) — the always-on signal that fixes the e621 blind spot and works even
-        with the trace backend down. No prompt, tags, or reply text ever; the only identifier
-        is a salted hash. Also drives the tool-call / zero-tool / lost-context counters."""
+        """Emit one metadata-only record per agent run: tools called, token usage, finish
+        reason, and whether the reply context was recalled or lost. Independent of the trace
+        backend, so it survives the collector being down. No prompt, tags, or reply text; the
+        only identifier is a salted hash. Also drives the tool-call / zero-tool / lost-context
+        counters."""
         responses = [m for m in result.new_messages() if isinstance(m, ModelResponse)]
         tools = [p.tool_name for m in responses for p in m.parts if isinstance(p, ToolCallPart)]
         last = responses[-1] if responses else None
