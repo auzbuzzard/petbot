@@ -19,7 +19,7 @@ from petbot.skills.booru.base import BooruProvider
 from petbot.skills.booru.engine import run_search
 from petbot.skills.booru.errors import SiteFailureStatusError
 from petbot.skills.booru.tags import NumericFilter, Sort
-from petbot.skills.booru.types import BooruOutcome, SearchRequest
+from petbot.skills.booru.types import BooruOutcome, EmptyReason, SearchRequest
 from petbot.types import BooruArgs
 
 logger = logging.getLogger(__name__)
@@ -77,8 +77,11 @@ async def _run(
     # propagates untouched — we only tag it on the way past.
     try:
         result = await run_search(provider, client, search)
-    except EmptyResult:
-        empty = BooruOutcome.SAFE_LIMITED if search.safe_only else BooruOutcome.EMPTY
+    except EmptyResult as exc:
+        # SAFE_LIMITED only when the engine *verified* the safe floor is the cause
+        # (its probe found matches beyond it); a bare safe_only flag is not enough.
+        safe_limited = exc.reason == EmptyReason.SAFE_FLOOR
+        empty = BooruOutcome.SAFE_LIMITED if safe_limited else BooruOutcome.EMPTY
         _record_outcome(provider.name, empty)
         raise
     except SiteFailureStatusError as exc:

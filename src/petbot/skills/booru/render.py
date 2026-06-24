@@ -13,38 +13,34 @@ process's stylist), never shipped from here.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from enum import StrEnum
 
 from petbot.domain import EmbedSpec, EmptyResult, SkillResult
-from petbot.skills.booru.types import Post, SearchRequest
-
-
-class EmptyReason(StrEnum):
-    """Why a search came back empty — the fact the persona layer relays."""
-
-    #: A safe-only search (the channel isn't age-gated) found nothing.
-    SAFE_FLOOR = "safe_floor"
-    #: A search that looked at everything available found nothing.
-    NO_MATCH = "no_match"
-
+from petbot.skills.booru.types import EmptyReason, Post, SearchRequest
 
 #: One factual note per reason. Stated plainly so whoever voices it (chat agent or
-#: stylist) relays the real reason instead of inventing one (a typo, etc.).
+#: stylist) relays the real reason instead of inventing one (a typo, etc.). The
+#: ``SAFE_FLOOR`` note promises an NSFW channel has matches only because the engine has
+#: *verified* that (a rating-agnostic probe), so the bot never claims a cause it guessed.
 _EMPTY_NOTE: dict[EmptyReason, str] = {
     EmptyReason.SAFE_FLOOR: (
-        "No results. This channel isn't age-gated, so only safe-rated posts were "
-        "searched — there may be more in an NSFW channel."
+        "No safe-rated results for those tags. This channel isn't age-gated, so only "
+        "safe posts were searched — an NSFW channel has matches for these tags."
     ),
     EmptyReason.NO_MATCH: "No results found for those tags.",
 }
 
 
-def render(post: Post | None, *, request: SearchRequest) -> SkillResult:
+def render(
+    post: Post | None,
+    *,
+    request: SearchRequest,
+    empty_reason: EmptyReason = EmptyReason.NO_MATCH,
+) -> SkillResult:
     """Render a found post. An empty search **raises** :class:`EmptyResult`, whose factual
-    note the process output boundary voices in persona."""
+    note (selected by the engine-verified ``empty_reason``) the process output boundary
+    voices in persona."""
     if post is None:
-        reason = EmptyReason.SAFE_FLOOR if request.safe_only else EmptyReason.NO_MATCH
-        raise EmptyResult(_EMPTY_NOTE[reason])
+        raise EmptyResult(_EMPTY_NOTE[empty_reason], reason=empty_reason.value)
 
     if post.total is not None:
         title = f"{post.total} result{'s' if post.total != 1 else ''}: {tags_label(request.tags)}"
