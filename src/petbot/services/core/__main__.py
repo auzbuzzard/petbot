@@ -16,6 +16,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from petbot.logging_setup import configure_logging
+from petbot.observability import ObservabilitySettings, configure_observability
 from petbot.platform import serve
 from petbot.services.core import build_process
 
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
+    configure_observability(ObservabilitySettings())
     process = build_process()
 
     loop = asyncio.new_event_loop()

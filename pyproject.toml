@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,49 +8,67 @@ version = "2.1.0"
 description = "A chatbot: a thin Discord frontend that dispatches to a compute service."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "auzbuzzard" }]
 # Base install is the shared kernel only. The runtime dependencies of each
 # deployable live in an extra below, so a process installs just what it runs
 # (the edge never pulls pydantic-ai; a worker never pulls discord.py).
+# opentelemetry-api is the one always-present telemetry dep: it is a no-op until a
+# process wires the SDK (the `observability` extra) in its entrypoint, so library
+# code can instrument unconditionally.
 dependencies = [
-    "pydantic>=2",
+    "pydantic>=2.13",
+    "opentelemetry-api>=1.42",
 ]
 
 [project.optional-dependencies]
+# OpenTelemetry SDK + OTLP exporter, wired once per entrypoint by
+# `petbot.observability.configure_observability`. The AWS extension supplies the
+# X-Ray id generator + propagator so an edge->core trace joins in X-Ray. Pulled by
+# every deployable that emits telemetry (the frontend and the compute core).
+observability = [
+    "opentelemetry-sdk>=1.42",
+    "opentelemetry-exporter-otlp-proto-http>=1.42",
+    "opentelemetry-sdk-extension-aws>=2.0",
+]
 # The always-on Discord frontend: holds the gateway, dispatches to a compute
 # service over HTTP (or a Lambda, with the `lambda` extra).
 discord = [
+    "petbot[observability]",
     "discord.py>=2.7,<2.8",
-    "httpx>=0.27",
-    "pydantic-settings>=2.14.2",
+    "httpx>=0.28",
+    "pydantic-settings>=2.14",
 ]
 # The core compute service: math + booru search + the chat process.
 compute-core = [
-    "httpx>=0.27",
-    "pydantic-settings>=2.14.2",
-    "numexpr>=2.8",
-    "numpy>=1.26",
-    "pydantic-ai-slim[bedrock,openai]>=0.0.30",
+    "petbot[observability]",
+    "httpx>=0.28",
+    "pydantic-settings>=2.14",
+    "numexpr>=2.14",
+    "numpy>=2.4",
+    "pydantic-ai-slim[bedrock,openai]>=1.107",
 ]
 # The music compute service: its own gateway plus voice playback.
 compute-music = [
+    "petbot[observability]",
     "discord.py[voice]>=2.7,<2.8",
-    "yt-dlp>=2024.0.0",
-    "pydantic-settings>=2.14.2",
+    "yt-dlp>=2026.6",
+    "pydantic-settings>=2.14",
 ]
 # Dispatch to a Lambda compute service (boto3) — used by the frontend in production.
-lambda = ["boto3>=1.34"]
+lambda = ["boto3>=1.43"]
 # Everything, for development and CI (so type-check and tests see all code).
 dev = [
     "petbot[discord,compute-core,compute-music,lambda]",
-    "ruff>=0.5",
-    "mypy>=1.10",
-    "import-linter>=2.0",
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
-    "pytest-cov>=5.0",
-    "respx>=0.21",
-    "pre-commit>=3.7",
+    "ruff>=0.15",
+    "mypy>=2.1",
+    "import-linter>=2.11",
+    "pytest>=9.1",
+    "pytest-asyncio>=1.4",
+    "pytest-cov>=7.1",
+    "respx>=0.23",
+    "pre-commit>=4.6",
 ]
 
 [project.scripts]

@@ -25,6 +25,7 @@ from petbot.frontends.discord.render import SERVICE_UNREACHABLE, respond
 from petbot.frontends.discord.settings import DiscordSettings, HttpService, LambdaService
 from petbot.frontends.discord.slash import build_commands
 from petbot.logging_setup import configure_logging
+from petbot.observability import ObservabilitySettings, configure_observability
 from petbot.platform import HttpTransport, LambdaTransport, ProcessClient
 
 logger = logging.getLogger(__name__)
@@ -139,5 +140,8 @@ class PetBot(commands.Bot):
 def run(settings: DiscordSettings) -> None:
     """Start the Discord frontend (blocking)."""
     configure_logging(settings.log_level)
+    # The edge end of the trace: its "dispatch" client span exports to the same backend so a
+    # Discord turn is one trace edge->core. No-op unless OBS_ENABLED is set.
+    configure_observability(ObservabilitySettings())
     logger.info("Starting PetBot Discord frontend (service=%s).", settings.service.kind)
     PetBot(settings).run(settings.discord_token, log_handler=None)

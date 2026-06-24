@@ -72,7 +72,9 @@ resource "aws_lightsail_container_service_deployment_version" "edge" {
     container_name = "edge"
     image          = "${aws_ecr_repository.edge.repository_url}:${var.edge_image_tag}"
 
-    environment = {
+    # Observability env (OBS_*/OTEL_*) is empty unless var.observability_enabled
+    # (see observability.tf); merged so the edge exports its dispatch spans too.
+    environment = merge({
       LOG_LEVEL              = var.log_level
       ENV                    = var.lambda_environment
       SERVICE__KIND          = "lambda"
@@ -86,7 +88,7 @@ resource "aws_lightsail_container_service_deployment_version" "edge" {
       AWS_ACCESS_KEY_ID     = aws_iam_access_key.edge.id
       AWS_SECRET_ACCESS_KEY = aws_iam_access_key.edge.secret
       DISCORD_TOKEN         = data.aws_ssm_parameter.discord_token.value
-    }
+    }, local.observability_edge_env)
   }
 
   depends_on = [aws_ecr_repository_policy.edge]
