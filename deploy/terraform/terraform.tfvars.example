@@ -35,6 +35,17 @@ edge_power                  = "nano" # 0.25 vCPU / 512 MB; bump to "micro" (1 GB
 edge_scale                  = 1
 # edge_image_tag is supplied by CI (the git SHA) after pushing the edge image to ECR.
 
+# --- Observability (OpenTelemetry; off by default) ---
+# When true: app emits OTLP, a collector is deployed (edge sidecar; core needs the
+# Dockerfile.lambda OTEL build arg set too), forwarding to X-Ray + CloudWatch EMF. The
+# always-on run-outcome CloudWatch *log* needs none of this. In CI these map to the
+# OBSERVABILITY_ENABLED / OBSERVABILITY_SAMPLE_RATIO / TELEMETRY_ID_SALT_SSM_PARAMETER
+# GitHub Variables.
+# observability_enabled            = true
+# observability_sample_ratio       = 1.0
+# otel_otlp_endpoint               = "http://localhost:4318" # default; the local collector
+# telemetry_id_salt_ssm_parameter  = "/petbot/core/telemetry_id_salt"
+
 # --- Retention / cost (sensible defaults; override to taste) ---
 # log_retention_days       = 30
 # ecr_keep_last_images     = 10

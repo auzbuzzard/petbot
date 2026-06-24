@@ -6,15 +6,23 @@
 # which forwards to AWS X-Ray (traces) + CloudWatch EMF (metrics). The app reads the
 # standard OTEL_* env plus OBS_* (see petbot.observability.ObservabilitySettings).
 #
-# Collector placement (the one piece that needs a real plan/apply to validate):
-#   * Edge (Lightsail container service, always-on): add an `aws-otel-collector`
-#     sidecar container to the deployment in edge.tf and point the edge's
-#     OTEL_EXPORTER_OTLP_ENDPOINT at http://localhost:4318.
-#   * Core worker: it is a *container-image* arm64 Lambda, so the ADOT *Lambda layer*
-#     (a zip-only extension) does NOT apply. Either bake the ADOT collector extension
-#     into the worker image (then endpoint = http://localhost:4318) or point the
-#     endpoint at a reachable shared collector. Plumbing (env + IAM) is here; the
-#     collector image/extension wiring is the remaining deploy step.
+# Collector placement:
+#   * Edge (Lightsail container service, always-on): an `aws-otel-collector` sidecar
+#     container is added to the deployment in edge.tf (gated on observability_enabled)
+#     and the edge exports to it at http://localhost:4318. Its config is
+#     local.collector_config_yaml, passed inline via the collector's AOT_CONFIG_CONTENT.
+#   * Core worker: a *container-image* arm64 Lambda, so the ADOT *Lambda layer* (zip-only)
+#     does NOT apply — the collector must be baked into the worker image as an internal
+#     extension. The env (OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 +
+#     OPENTELEMETRY_COLLECTOR_CONFIG_URI) and IAM are wired here; the image bake itself is
+#     the remaining step (Dockerfile.lambda is untouched pending the hosting decision —
+#     bake the arm64 ADOT extension vs. run a standalone collector). Until then the core's
+#     *traces/metrics* don't export, but its run-outcome LOG (below) still lands.
+#
+# Note (always-on, collector-independent): the per-turn run-outcome record ChatProcess
+# emits (tools called, tokens, finish reason) is a plain structured *log*, captured by
+# CloudWatch Logs straight off the Lambda's stdout regardless of this collector or
+# OBS_ENABLED. The collector here is only for X-Ray traces + CloudWatch EMF metrics.
 
 variable "observability_enabled" {
   type        = bool
@@ -24,8 +32,8 @@ variable "observability_enabled" {
 
 variable "otel_otlp_endpoint" {
   type        = string
-  description = "OTLP HTTP endpoint of the collector the app exports to (e.g. http://localhost:4318)."
-  default     = ""
+  description = "OTLP HTTP endpoint of the collector the app exports to. Defaults to the local sidecar/extension collector both deployables now run."
+  default     = "http://localhost:4318"
 }
 
 variable "observability_sample_ratio" {
@@ -47,6 +55,36 @@ data "aws_ssm_parameter" "telemetry_id_salt" {
 }
 
 locals {
+  # The ADOT collector pipeline shared by both deployables' local collectors: receive OTLP
+  # over HTTP (what the SDK exports to) and fan out to X-Ray (traces) + CloudWatch EMF
+  # (metrics). Passed inline to the collector container/extension so no config file is
+  # mounted. Region is pinned so the exporters don't depend on instance metadata.
+  collector_config_yaml = <<-YAML
+    receivers:
+      otlp:
+        protocols:
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      batch:
+    exporters:
+      awsxray:
+        region: ${var.aws_region}
+      awsemf:
+        region: ${var.aws_region}
+        namespace: petbot
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [awsxray]
+        metrics:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [awsemf]
+  YAML
+
   # Shared OTLP/OBS env for any deployable; service_name is set per process below.
   observability_common_env = var.observability_enabled ? merge(
     {
@@ -61,7 +99,13 @@ locals {
 
   observability_core_env = var.observability_enabled ? merge(
     local.observability_common_env,
-    { OBS_SERVICE_NAME = local.core_name, OTEL_SERVICE_NAME = local.core_name },
+    {
+      OBS_SERVICE_NAME  = local.core_name
+      OTEL_SERVICE_NAME = local.core_name
+      # Points the (to-be-baked) collector extension at its config file. Inert until the
+      # core image actually bakes the extension + writes this file — see the header note.
+      OPENTELEMETRY_COLLECTOR_CONFIG_URI = "/var/task/collector-config.yaml"
+    },
   ) : {}
 
   observability_edge_env = var.observability_enabled ? merge(
