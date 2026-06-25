@@ -8,14 +8,16 @@
 # core worker image is unchanged and the edge has no sidecar. The app reads the standard OTEL_*
 # env plus OBS_* (see petbot.observability.ObservabilitySettings).
 #
-# PREREQUISITE (traces only, one-time per account + Region): enable CloudWatch Transaction
-# Search by pointing the X-Ray trace-segment destination at CloudWatch Logs. Until then the
-# X-Ray OTLP endpoint rejects spans with InvalidRequestException. There is no first-class
-# Terraform resource yet (hashicorp/terraform-provider-aws#44994), so enable it once with:
-#
-#   aws xray update-trace-segment-destination --destination CloudWatchLogs --region <region>
-#
-# Metrics (the monitoring endpoint) need no such step. See docs/adr/0011-agent-observability.md.
+# PREREQUISITE (traces only): CloudWatch Transaction Search must be on, which is two parts —
+#   1. a CloudWatch Logs resource policy letting X-Ray write spans to the aws/spans log group
+#      (aws_cloudwatch_log_resource_policy.xray_transaction_search below, created with this
+#      stack when the var is on); and
+#   2. pointing the X-Ray trace-segment *destination* at CloudWatch Logs — an account + Region
+#      toggle with no Terraform resource yet (hashicorp/terraform-provider-aws#44994), so run it
+#      once after an observability-on deploy:
+#        aws xray update-trace-segment-destination --destination CloudWatchLogs --region <region>
+# Until both are done the X-Ray OTLP endpoint rejects spans (InvalidRequestException). Metrics
+# (the monitoring endpoint) need neither step. See docs/adr/0011-agent-observability.md.
 #
 # Note (always-on, telemetry-independent): the per-turn run-outcome record ChatProcess emits
 # (tools called, tokens, finish reason) is a plain structured *log*, captured by CloudWatch
@@ -113,6 +115,30 @@ resource "aws_iam_user_policy" "edge_observability" {
         "cloudwatch:PutMetricData",
       ]
       Resource = "*"
+    }]
+  })
+}
+
+# Transaction Search (step 1 of the header prerequisite): X-Ray itself needs permission to
+# write spans into the aws/spans CloudWatch log group. The console's "enable Transaction
+# Search" flow creates this resource policy implicitly; here it is as code. PutResourcePolicy
+# is an upsert, so it is safe to (re)apply. The destination toggle (step 2) has no TF resource.
+resource "aws_cloudwatch_log_resource_policy" "xray_transaction_search" {
+  count       = var.observability_enabled ? 1 : 0
+  policy_name = "${var.name_prefix}-xray-transaction-search"
+
+  policy_document = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "TransactionSearchXRayAccess"
+      Effect    = "Allow"
+      Principal = { Service = "xray.amazonaws.com" }
+      Action    = ["logs:CreateLogStream", "logs:PutLogEvents"]
+      Resource  = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:aws/spans:*"
+      Condition = {
+        StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id }
+        ArnLike      = { "aws:SourceArn" = "arn:aws:xray:${var.aws_region}:${data.aws_caller_identity.current.account_id}:*" }
+      }
     }]
   })
 }

@@ -43,8 +43,9 @@ edge_scale                  = 1
 # to the OBSERVABILITY_ENABLED / OBSERVABILITY_SAMPLE_RATIO / TELEMETRY_ID_SALT_SSM_PARAMETER
 # GitHub Variables.
 #
-# Traces prerequisite (one-time per account + Region): enable CloudWatch Transaction Search, or
-# the X-Ray OTLP endpoint rejects spans (metrics need no such step):
+# Traces prerequisite — CloudWatch Transaction Search (metrics need none): the stack creates the
+# X-Ray -> aws/spans CloudWatch Logs resource policy when enabled; then toggle the trace-segment
+# destination once per account + Region (no Terraform resource for that part yet):
 #   aws xray update-trace-segment-destination --destination CloudWatchLogs --region <region>
 # observability_enabled            = true
 # observability_sample_ratio       = 1.0

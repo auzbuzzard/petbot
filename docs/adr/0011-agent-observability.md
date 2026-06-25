@@ -44,9 +44,12 @@ token metrics — and it was entirely unused.
   (the Lambda role for the core, the edge's scoped IAM key for the frontend). Nothing runs
   alongside the app: the core worker image is unchanged and the edge has no sidecar. The wire
   is vendor-neutral OTLP, so a non-AWS `OTEL_*` endpoint (a plain collector in dev) is left
-  unsigned and works as a drop-in. **Traces require CloudWatch Transaction Search enabled once
-  per account/Region** — `aws xray update-trace-segment-destination --destination
-  CloudWatchLogs` — or the X-Ray OTLP endpoint rejects spans; metrics need no such step.
+  unsigned and works as a drop-in. **Traces require CloudWatch Transaction Search** (metrics
+  don't), which is two parts: a CloudWatch Logs resource policy letting X-Ray write to the
+  `aws/spans` log group (managed in `observability.tf` when enabled) plus a one-time
+  per-account/Region destination toggle that has no TF resource yet — `aws xray
+  update-trace-segment-destination --destination CloudWatchLogs`. Until both, the X-Ray OTLP
+  endpoint rejects spans.
   (An earlier draft baked an ADOT collector into the worker image + an edge sidecar; AWS's
   collector-less OTLP endpoints removed all of that machinery.)
 
