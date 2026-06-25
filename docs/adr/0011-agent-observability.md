@@ -42,7 +42,7 @@ token metrics — and it was entirely unused.
   AWS's endpoints** — traces to the X-Ray OTLP endpoint, metrics to the CloudWatch
   (`monitoring`) OTLP endpoint — each POST SigV4-signed with the runtime's own credentials
   (the Lambda role for the core, the edge's scoped IAM key for the frontend). Nothing runs
-  alongside the app: the core worker image is unchanged and the edge has no sidecar. The wire
+  alongside the app — the worker image bakes in no extension and the edge has no sidecar. The wire
   is vendor-neutral OTLP, so a non-AWS `OTEL_*` endpoint (a plain collector in dev) is left
   unsigned and works as a drop-in. **Traces require CloudWatch Transaction Search** (metrics
   don't), which is two parts: a CloudWatch Logs resource policy letting X-Ray write to the
@@ -50,8 +50,6 @@ token metrics — and it was entirely unused.
   per-account/Region destination toggle that has no TF resource yet — `aws xray
   update-trace-segment-destination --destination CloudWatchLogs`. Until both, the X-Ray OTLP
   endpoint rejects spans.
-  (An earlier draft baked an ADOT collector into the worker image + an edge sidecar; AWS's
-  collector-less OTLP endpoints removed all of that machinery.)
 
 - **Telemetry is metadata-only — privacy by construction.** `include_content=False` means
   pydantic-ai never records message bodies or tool arguments/results; there is nothing to

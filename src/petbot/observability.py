@@ -1,28 +1,21 @@
 """OpenTelemetry setup — configured once, at each entrypoint, like ``configure_logging``.
 
 Library code instruments with the OpenTelemetry **API** (a no-op until a provider is
-installed); this module wires the **SDK** in one place. ``configure_observability`` installs
-the global tracer/meter providers, which export over OTLP **straight to AWS's collector-less
-endpoints** — traces to the X-Ray OTLP endpoint, metrics to the CloudWatch (monitoring) OTLP
-endpoint — with no collector to run or bake in. ``flush_observability`` force-flushes them
-(Lambda needs it); the agent's ``InstrumentationSettings`` is built in the core composition
-root with ``include_content=False``.
+installed); ``configure_observability`` wires the **SDK** in one place, exporting OTLP
+collector-less to AWS's endpoints — traces to the X-Ray OTLP endpoint, metrics to the
+CloudWatch (monitoring) OTLP endpoint, each POST SigV4-signed from the runtime's own
+credentials (:func:`_aws_sigv4_session`). A non-AWS ``OTEL_*`` endpoint (a dev collector) is
+left unsigned. ``flush_observability`` force-flushes (the Lambda freezes between invocations);
+the agent's ``InstrumentationSettings`` is built in the core composition root.
 
-Collector-less export: the AWS OTLP endpoints authenticate with SigV4, so each export POST is
-signed (:func:`_aws_sigv4_session`) using the runtime's own AWS credentials — the Lambda
-execution role for the core, the edge's scoped IAM user for the frontend. Both deployables
-already run inside AWS with credentials on hand, so there is nothing to deploy alongside them.
-A non-AWS ``OTEL_*`` endpoint (a plain OTLP collector in dev) is left unsigned, so the SDK
-stays a drop-in for any backend. **Traces require CloudWatch Transaction Search to be enabled
-once per account/Region** (the X-Ray OTLP endpoint rejects spans until its trace-segment
-destination is CloudWatch Logs); see ``docs/adr/0011-agent-observability.md``.
+Traces require CloudWatch Transaction Search, or the X-Ray OTLP endpoint rejects spans; see
+``docs/adr/0011-agent-observability.md``.
 
-Telemetry is metadata-only: message bodies, tags, and replies are never recorded, and the one
-user identifier is a salted hash (:func:`hash_user_id`). Trace context crosses the edge->core
-:class:`~petbot.platform.dispatch.Dispatch` wire as W3C tracecontext;
-:class:`AwsXRayIdGenerator` keeps trace ids X-Ray-valid. The endpoints come from the standard
-``OTEL_*`` env; the SDK imports are lazy, so a process without the ``observability`` extra (or
-telemetry off) never pays for them.
+Telemetry is metadata-only: bodies, tags, and replies are never recorded; the one user
+identifier is a salted hash (:func:`hash_user_id`). :class:`AwsXRayIdGenerator` keeps trace ids
+X-Ray-valid across the W3C-tracecontext edge->core hop. The endpoints come from the standard
+``OTEL_*`` env, and the SDK imports are lazy, so a process without the ``observability`` extra
+(or with telemetry off) never pays for them.
 """
 
 from __future__ import annotations

@@ -13,10 +13,8 @@
 # Keep the runtime in lockstep with what CI tests (pyproject requires-python,
 # mypy, ruff all target 3.12).
 #
-# Observability needs nothing in this image: telemetry exports collector-less, straight to
-# AWS's OTLP endpoints signed with the Lambda role's credentials (deploy/terraform/
-# observability.tf), so there is no collector/extension to bake in — the image is identical
-# whether or not observability is enabled.
+# Observability is collector-less — the app exports OTLP to AWS's endpoints (see deploy/
+# terraform/observability.tf), so nothing observability-specific is baked into this image.
 FROM public.ecr.aws/lambda/python:3.12
 
 # uv resolves + installs far faster than pip and reuses a build-cache mount.

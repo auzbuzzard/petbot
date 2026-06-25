@@ -4,9 +4,9 @@
 # IAM, or data sources, so applying it changes nothing for an existing deploy. When on, each
 # deployable exports OTLP *directly to AWS's collector-less endpoints* — traces to the X-Ray
 # OTLP endpoint, metrics to the CloudWatch (monitoring) OTLP endpoint — each POST SigV4-signed
-# by the runtime's own credentials (see petbot.observability). No collector runs anywhere: the
-# core worker image is unchanged and the edge has no sidecar. The app reads the standard OTEL_*
-# env plus OBS_* (see petbot.observability.ObservabilitySettings).
+# by the runtime's own credentials (see petbot.observability). No collector runs anywhere — the
+# worker image bakes in no extension and the edge has no sidecar. The app reads the standard
+# OTEL_* env plus OBS_* (see petbot.observability.ObservabilitySettings).
 #
 # PREREQUISITE (traces only): CloudWatch Transaction Search must be on, which is two parts —
 #   1. a CloudWatch Logs resource policy letting X-Ray write spans to the aws/spans log group

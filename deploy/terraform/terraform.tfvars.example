@@ -38,8 +38,9 @@ edge_scale                  = 1
 # --- Observability (OpenTelemetry; off by default) ---
 # When true: the app exports OTLP straight to AWS's collector-less endpoints — traces to the
 # X-Ray OTLP endpoint, metrics to the CloudWatch (monitoring) OTLP endpoint — each POST
-# SigV4-signed by the runtime's own credentials. No collector is deployed and the worker image
-# is unchanged. The always-on run-outcome CloudWatch *log* needs none of this. In CI these map
+# SigV4-signed by the runtime's own credentials. No collector is deployed; the worker image
+# carries nothing observability-specific. The always-on run-outcome CloudWatch *log* needs none
+# of this. In CI these map
 # to the OBSERVABILITY_ENABLED / OBSERVABILITY_SAMPLE_RATIO / TELEMETRY_ID_SALT_SSM_PARAMETER
 # GitHub Variables.
 #
