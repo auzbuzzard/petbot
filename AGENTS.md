@@ -66,6 +66,13 @@ First-party classes that exist to implement a Protocol **explicitly subclass** i
 conformance at the definition. Structural (no inheritance) is reserved for foreign
 types and test fakes.
 
+## Comments
+
+Comments are **time-invariant**: they describe the code as it is, not how it got there. No
+change history ("now", "previously", "was X", "an earlier draft"), no narrating what a diff
+replaced — git holds that. Explain *why* when it isn't obvious from the code; don't restate
+*what*. Keep them short. (Commit messages, not comments, are where change rationale lives.)
+
 ## Adding a skill
 
 1. Add the `*Args` model in `petbot.types.args` and a `Command` entry in

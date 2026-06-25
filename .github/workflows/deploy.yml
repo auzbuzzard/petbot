@@ -28,6 +28,13 @@ env:
   TF_VAR_chat_llm_model: ${{ vars.CHAT_LLM_MODEL }}
   TF_VAR_chat_llm_base_url: ${{ vars.CHAT_LLM_BASE_URL }}
   TF_VAR_chat_llm_api_key_ssm_parameter: ${{ vars.CHAT_LLM_API_KEY_SSM_PARAMETER }}
+  # Observability (off unless OBSERVABILITY_ENABLED is set to "true"). The `|| 'default'`
+  # fallbacks matter: an unset GitHub Variable renders as an empty string, and Terraform
+  # would reject "" for a bool/number var — so unset must resolve to a valid default,
+  # keeping a deploy without these Variables byte-identical to before.
+  TF_VAR_observability_enabled: ${{ vars.OBSERVABILITY_ENABLED || 'false' }}
+  TF_VAR_observability_sample_ratio: ${{ vars.OBSERVABILITY_SAMPLE_RATIO || '1.0' }}
+  TF_VAR_telemetry_id_salt_ssm_parameter: ${{ vars.TELEMETRY_ID_SALT_SSM_PARAMETER }}
 
 jobs:
   deploy:

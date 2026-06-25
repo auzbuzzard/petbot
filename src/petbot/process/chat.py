@@ -135,9 +135,9 @@ class ChatProcess(Process):
     ) -> None:
         """Emit one metadata-only record per agent run: tools called, token usage, finish
         reason, and whether the reply context was recalled or lost. Independent of the trace
-        backend, so it survives the collector being down. No prompt, tags, or reply text; the
-        only identifier is a salted hash. Also drives the tool-call / zero-tool / lost-context
-        counters."""
+        backend, so it survives telemetry export being off or unavailable. No prompt, tags, or
+        reply text; the only identifier is a salted hash. Also drives the tool-call /
+        zero-tool / lost-context counters."""
         responses = [m for m in result.new_messages() if isinstance(m, ModelResponse)]
         tools = [p.tool_name for m in responses for p in m.parts if isinstance(p, ToolCallPart)]
         last = responses[-1] if responses else None

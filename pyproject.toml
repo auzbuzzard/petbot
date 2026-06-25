@@ -25,12 +25,14 @@ dependencies = [
 [project.optional-dependencies]
 # OpenTelemetry SDK + OTLP exporter, wired once per entrypoint by
 # `petbot.observability.configure_observability`. The AWS extension supplies the
-# X-Ray id generator + propagator so an edge->core trace joins in X-Ray. Pulled by
-# every deployable that emits telemetry (the frontend and the compute core).
+# X-Ray id generator + propagator so an edge->core trace joins in X-Ray; botocore
+# SigV4-signs the collector-less export to AWS's OTLP endpoints. Pulled by every
+# deployable that emits telemetry (the frontend and the compute core).
 observability = [
     "opentelemetry-sdk>=1.42",
     "opentelemetry-exporter-otlp-proto-http>=1.42",
     "opentelemetry-sdk-extension-aws>=2.0",
+    "botocore>=1.40",
 ]
 # The always-on Discord frontend: holds the gateway, dispatches to a compute
 # service over HTTP (or a Lambda, with the `lambda` extra).
@@ -113,7 +115,7 @@ files = ["src", "tests"]
 exclude = ["tests/conftest\\.py$"]
 
 [[tool.mypy.overrides]]
-module = ["numexpr.*", "yt_dlp.*", "nacl.*", "boto3.*", "conftest"]
+module = ["numexpr.*", "yt_dlp.*", "nacl.*", "boto3.*", "botocore.*", "requests.*", "conftest"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
