@@ -35,6 +35,23 @@ edge_power                  = "nano" # 0.25 vCPU / 512 MB; bump to "micro" (1 GB
 edge_scale                  = 1
 # edge_image_tag is supplied by CI (the git SHA) after pushing the edge image to ECR.
 
+# --- Observability (OpenTelemetry; off by default) ---
+# When true: the app exports OTLP straight to AWS's collector-less endpoints — traces to the
+# X-Ray OTLP endpoint, metrics to the CloudWatch (monitoring) OTLP endpoint — each POST
+# SigV4-signed by the runtime's own credentials. No collector is deployed; the worker image
+# carries nothing observability-specific. The always-on run-outcome CloudWatch *log* needs none
+# of this. In CI these map
+# to the OBSERVABILITY_ENABLED / OBSERVABILITY_SAMPLE_RATIO / TELEMETRY_ID_SALT_SSM_PARAMETER
+# GitHub Variables.
+#
+# Traces prerequisite — CloudWatch Transaction Search (metrics need none): the stack creates the
+# X-Ray -> aws/spans CloudWatch Logs resource policy when enabled; then toggle the trace-segment
+# destination once per account + Region (no Terraform resource for that part yet):
+#   aws xray update-trace-segment-destination --destination CloudWatchLogs --region <region>
+# observability_enabled            = true
+# observability_sample_ratio       = 1.0
+# telemetry_id_salt_ssm_parameter  = "/petbot/core/telemetry_id_salt"
+
 # --- Retention / cost (sensible defaults; override to taste) ---
 # log_retention_days       = 30
 # ecr_keep_last_images     = 10

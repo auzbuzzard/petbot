@@ -29,7 +29,7 @@ Attributes we set (beyond pydantic-ai's GenAI-semconv span data, which carries
 | `gen_ai.usage.input_tokens` / `output_tokens` | model/agent | `412` / `28` | from pydantic-ai |
 | `gen_ai.response.finish_reasons` | model | `["stop"]` | from pydantic-ai |
 
-## Metrics (OTLP → CloudWatch EMF)
+## Metrics (OTLP → CloudWatch)
 
 | Metric | Type | Attributes | Meaning |
 |---|---|---|---|

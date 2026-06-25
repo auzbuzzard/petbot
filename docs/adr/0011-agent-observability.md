@@ -38,10 +38,18 @@ token metrics — and it was entirely unused.
   `InstrumentationSettings(version=3, include_content=False)` from the global providers and
   injects it into `ChatProcess` → `build_agent`; tests pass an in-memory provider.
 
-- **Backend is AWS-native.** Spans/metrics export over OTLP to a co-located ADOT collector
-  (a Lambda layer for the core, a sidecar container for the edge), which fans out to X-Ray
-  (traces) and CloudWatch EMF (metrics). The wire is vendor-neutral OTLP, so the backend is
-  swappable via the standard `OTEL_*` env.
+- **Backend is AWS-native, collector-less.** Spans/metrics export over OTLP **straight to
+  AWS's endpoints** — traces to the X-Ray OTLP endpoint, metrics to the CloudWatch
+  (`monitoring`) OTLP endpoint — each POST SigV4-signed with the runtime's own credentials
+  (the Lambda role for the core, the edge's scoped IAM key for the frontend). Nothing runs
+  alongside the app — the worker image bakes in no extension and the edge has no sidecar. The wire
+  is vendor-neutral OTLP, so a non-AWS `OTEL_*` endpoint (a plain collector in dev) is left
+  unsigned and works as a drop-in. **Traces require CloudWatch Transaction Search** (metrics
+  don't), which is two parts: a CloudWatch Logs resource policy letting X-Ray write to the
+  `aws/spans` log group (managed in `observability.tf` when enabled) plus a one-time
+  per-account/Region destination toggle that has no TF resource yet — `aws xray
+  update-trace-segment-destination --destination CloudWatchLogs`. Until both, the X-Ray OTLP
+  endpoint rejects spans.
 
 - **Telemetry is metadata-only — privacy by construction.** `include_content=False` means
   pydantic-ai never records message bodies or tool arguments/results; there is nothing to
@@ -59,9 +67,11 @@ token metrics — and it was entirely unused.
 ## Consequences
 
 - The next "did it call e621, and what came back?" is answerable from one trace + one log
-  line, even with the collector down.
-- New deployables (`observability` extra) ship the OTel SDK; the edge exports too, so its
-  previously ephemeral Lightsail logs are no longer the only record.
+  line; the outcome **log** is always-on (CloudWatch, off the Lambda's stdout), independent of
+  whether the OTLP **export** is enabled, so it survives even with telemetry off entirely.
+- New deployables (`observability` extra) ship the OTel SDK + botocore (to SigV4-sign the
+  export); the edge exports directly too, so its previously ephemeral Lightsail logs are no
+  longer the only record.
 - The Lambda now configures logging at cold start (JSON in prod), closing the gap that hid
   every INFO record.
 - A documented, minimal telemetry schema ([`docs/telemetry.md`](../telemetry.md)) states
