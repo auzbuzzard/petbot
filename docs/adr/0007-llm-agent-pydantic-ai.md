@@ -21,9 +21,12 @@ Implement chat as a normal skill — `petbot.skills.chat` — built on **pydanti
   declaration feeds the typed client, the worker's validation, and the LLM tool
   schema. Tool bodies dispatch through a `Skills` client (`SkillsClient` over a
   local transport in the core worker — an in-process hop, no wire round-trip).
-- The model is **provider-agnostic**, chosen by `CHAT_PROVIDER`: Amazon Bedrock
-  for prod (a real, cheap on-Bedrock model — note Bedrock does *not* host Gemma),
-  an OpenAI-compatible endpoint (OpenRouter, with free models like Gemma) for dev.
+- The model is **provider-agnostic**, chosen by `CHAT_LLM__KIND`. (Correction,
+  2026-06: an earlier draft of this line said "Bedrock does *not* host Gemma" and
+  framed Gemma as dev-only. That is **wrong** — see [ADR 0006](0006-gateway-edge-microservice-skills.md) §4:
+  **Gemma 4 is the prod default**, served on Bedrock via the OpenAI-compatible
+  `bedrock-mantle` endpoint (`openai_compatible`), with OpenRouter's free Gemma as
+  the dev scaffold and Bedrock Converse — `bedrock` — available for Nova/Claude.)
   Model ids are configuration, never code.
 - The chat skill folds the model's prose plus any rich card a tool produced (a
   booru image) into a single neutral `SkillResult`, so the edge renders it
