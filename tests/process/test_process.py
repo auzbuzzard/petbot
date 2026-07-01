@@ -168,6 +168,61 @@ def test_build_model_from_config_builds_each_role() -> None:
     assert isinstance(build_model_from_config(cfg), OpenAIChatModel)
 
 
+# --- Gemma schema parity: dev (OpenRouter) and prod (mantle) drive Gemma identically -------
+# Gemma emits tool calls in its own format and only accepts the Gemini subset of JSON Schema.
+# pydantic-ai picks the schema handling from the *provider*, so the same Gemma model would get
+# Gemma-aware schemas on OpenRouter but raw OpenAI schemas on a generic endpoint (Bedrock
+# mantle) — Gemma then can't see the tools and narrates a free-text call that leaks to the user.
+# We pin the profile by model identity so both paths send Gemma the same, parseable schemas.
+
+
+def test_gemma_pins_gemini_schema_transformer_on_mantle() -> None:
+    from petbot.process.model import _GeminiToolSchema
+
+    cfg = OpenAICompatibleModel(
+        model="google.gemma-4-26b-a4b",
+        base_url="https://bedrock-mantle.us-east-1.api.aws/openai/v1",
+        api_key="k",
+    )
+    model = build_model_from_config(cfg)
+    assert model.profile is not None
+    assert model.profile.json_schema_transformer is _GeminiToolSchema
+
+
+def test_gemma_schema_handling_is_identical_dev_and_prod() -> None:
+    # OpenRouter (dev scaffold) and mantle (prod) must end up with the *same* transformer for
+    # the same model — no silent per-provider divergence.
+    dev = build_model_from_config(OpenRouterModel(model="google/gemma-3-27b-it:free", api_key="k"))
+    prod = build_model_from_config(
+        OpenAICompatibleModel(model="google.gemma-4-26b-a4b", base_url="https://x/v1", api_key="k")
+    )
+    assert dev.profile.json_schema_transformer is prod.profile.json_schema_transformer
+
+
+def test_non_gemma_openai_compatible_keeps_provider_default() -> None:
+    # A non-Gemma OpenAI-compatible endpoint (e.g. a self-hosted GPT-ish model) must not get
+    # the Gemini transformer forced on it.
+    from petbot.process.model import _GeminiToolSchema
+
+    model = build_model_from_config(
+        OpenAICompatibleModel(model="some-llama-3", base_url="https://x/v1", api_key="k")
+    )
+    assert model.profile.json_schema_transformer is not _GeminiToolSchema
+
+
+def test_gemini_tool_schema_makes_args_gemma_parseable() -> None:
+    # The transformer must actually fix a real *Args schema: drop `title`, inline `$defs`, and
+    # collapse `str | None` (an anyOf-with-null) to a plain nullable field Gemma accepts.
+    from petbot.process.model import _GeminiToolSchema
+
+    raw = BooruArgs.model_json_schema()
+    transformed = _GeminiToolSchema(raw).walk()
+    sort = transformed["properties"]["sort"]
+    assert "anyOf" not in sort and sort.get("nullable") is True
+    assert "title" not in sort
+    assert "$defs" not in transformed and "$ref" not in str(transformed)
+
+
 # --- the stylist (the persona voice) ------------------------------------------
 
 

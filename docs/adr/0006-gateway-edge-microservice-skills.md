@@ -98,6 +98,17 @@ is consolidated** until scale justifies splitting:
   variants: `bedrock` (Converse + IAM: Nova/Claude), `openai_compatible` (base URL
   + key: Gemma 4 mantle today, a self-hosted Ollama/vLLM later), and `openrouter`.
   Gemma 4 prod uses `openai_compatible`.
+- Correction (2026-06): "the model is the same across both, so the provider is a
+  config flip" is **not free** — it was a leaky abstraction. pydantic-ai derives a
+  model's *profile* (which shapes the tool JSON-schema sent to the model) from the
+  **provider**, not the model: `OpenRouterProvider` recognises the `google/` prefix
+  and sends Gemma the Gemini schema subset, but the generic `OpenAIProvider` (how we
+  reach mantle) cannot know the model behind a custom base URL is Gemma, so it sent
+  raw OpenAI schemas. Gemma then couldn't parse the tools and **narrated tool calls
+  as plain text**, which leaked to users. Fixed by pinning the profile *by model
+  identity* in `petbot.process.model` (`_openai_compatible_profile`), so dev and prod
+  drive the same model identically. The "config flip" holds only because the builder
+  now enforces it; it is not automatic.
 
 ### 5. Repository structure — uv workspace, hexagonal
 
