@@ -113,6 +113,18 @@ def replying_to_self(message: discord.Message, bot_user_id: int) -> bool:
     return resolved.author.id == bot_user_id
 
 
+def is_conversational_trigger(message: discord.Message, bot_user_id: int) -> bool:
+    """Whether ``message`` should start or continue a conversation with PetBot.
+
+    A DM is always addressed to the bot, so every DM triggers with no @mention. In a guild
+    it takes an explicit @mention or a reply to one of the bot's own messages (a follow-up
+    needs no re-mention). ``message.guild is None`` is the DM discriminator."""
+    if message.guild is None:
+        return True
+    mentioned = any(user.id == bot_user_id for user in message.mentions)
+    return mentioned or replying_to_self(message, bot_user_id)
+
+
 async def resolve_parent(message: discord.Message) -> discord.Message | None:
     """The valid parent ``message`` replies to, or ``None`` if it isn't a reply or the parent
     was deleted (a ``NotFound`` is the reply chain's natural end).

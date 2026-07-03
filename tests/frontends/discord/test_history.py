@@ -18,12 +18,16 @@ from petbot.frontends.discord.history import (
     _describe_card,
     aiter_until_none,
     atake,
+    is_conversational_trigger,
     reconstruct,
     replying_to_self,
     resolve_parent,
     strip_self_mention,
     to_turns,
 )
+
+#: Sentinel for "this message is in a guild" (``message.guild is None`` marks a DM).
+_A_GUILD = object()
 
 
 class _FakeResp:
@@ -77,12 +81,17 @@ class FakeMessage:
         embeds: tuple[discord.Embed, ...] = (),
         reference: FakeRef | None = None,
         channel: FakeChannel | None = None,
+        guild: object | None = _A_GUILD,
+        mentions: tuple[FakeAuthor, ...] = (),
     ) -> None:
         self.author = author
         self.content = content
         self.embeds = list(embeds)
         self.reference = reference
         self.channel = channel or FakeChannel()
+        # `guild is None` marks a DM; `mentions` are the users the message pings.
+        self.guild = guild
+        self.mentions = list(mentions)
 
 
 # --- generic async combinators ------------------------------------------------
@@ -169,6 +178,34 @@ def test_replying_to_self_reads_only_the_inlined_copy() -> None:
     assert replying_to_self(FakeMessage(author=FakeAuthor(2, "Alice")), 1) is False  # type: ignore[arg-type]
     plain_reply = FakeMessage(author=FakeAuthor(2, "Alice"), reference=FakeRef(100))
     assert replying_to_self(plain_reply, 1) is False  # type: ignore[arg-type]
+
+
+def test_dm_always_triggers_without_a_mention() -> None:
+    # A DM (guild is None) is addressed to the bot even with no @mention — the fix for a
+    # DM that was silently dropped for lacking a mention.
+    dm = FakeMessage(author=FakeAuthor(2, "Alice"), content="hey", guild=None)
+    assert is_conversational_trigger(dm, 1) is True  # type: ignore[arg-type]
+
+
+def test_guild_message_triggers_only_on_mention_or_reply_to_self() -> None:
+    plain = FakeMessage(author=FakeAuthor(2, "Alice"), content="just chatting")
+    assert is_conversational_trigger(plain, 1) is False  # type: ignore[arg-type]  # no ping, no reply
+
+    mentioned = FakeMessage(
+        author=FakeAuthor(2, "Alice"), content="<@1> hi", mentions=(FakeAuthor(1, "PetBot"),)
+    )
+    assert is_conversational_trigger(mentioned, 1) is True  # type: ignore[arg-type]
+
+    other_ping = FakeMessage(
+        author=FakeAuthor(2, "Alice"), content="<@3> hi", mentions=(FakeAuthor(3, "Bob"),)
+    )
+    assert is_conversational_trigger(other_ping, 1) is False  # type: ignore[arg-type]  # not us
+
+    bot_reply = FakeMessage(author=FakeAuthor(1, "PetBot"), content="hi")
+    reply_to_self = FakeMessage(
+        author=FakeAuthor(2, "Alice"), content="thanks", reference=FakeRef(100, resolved=bot_reply)
+    )
+    assert is_conversational_trigger(reply_to_self, 1) is True  # type: ignore[arg-type]  # follow-up
 
 
 # --- resolving one hop --------------------------------------------------------

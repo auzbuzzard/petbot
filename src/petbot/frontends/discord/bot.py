@@ -20,7 +20,11 @@ from discord.ext import commands
 
 from petbot.domain import History, Process, Recalled, SkillResult, TextInput, Unrecalled
 from petbot.frontends.discord.context import build_context
-from petbot.frontends.discord.history import reconstruct, replying_to_self, strip_self_mention
+from petbot.frontends.discord.history import (
+    is_conversational_trigger,
+    reconstruct,
+    strip_self_mention,
+)
 from petbot.frontends.discord.render import SERVICE_UNREACHABLE, respond
 from petbot.frontends.discord.settings import DiscordSettings, HttpService, LambdaService
 from petbot.frontends.discord.slash import build_commands
@@ -81,12 +85,12 @@ class PetBot(commands.Bot):
             logger.info("Logged in as %s (discord.py %s).", self.user, discord.__version__)
 
     async def on_message(self, message: discord.Message) -> None:
-        # Conversational entry: an @mention, OR a reply to one of PetBot's own messages
-        # (so a follow-up needs no re-mention). Other bots and our own messages are ignored.
+        # Conversational entry — see `is_conversational_trigger`: a DM (always), or a guild
+        # @mention / reply-to-self. Other bots and our own messages are ignored.
         if message.author.bot or self.user is None:
             return
         bot_user_id = self.user.id
-        if self.user not in message.mentions and not replying_to_self(message, bot_user_id):
+        if not is_conversational_trigger(message, bot_user_id):
             return
         text = strip_self_mention(message.content, bot_user_id).strip()
         if not text:
