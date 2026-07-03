@@ -49,7 +49,10 @@ compute-core = [
     "pydantic-settings>=2.14",
     "numexpr>=2.14",
     "numpy>=2.4",
-    "pydantic-ai-slim[bedrock,openai]>=1.107",
+    # Capped below the next major: 2.x changed `openai_model_profile` to return a
+    # non-dataclass, breaking the `dataclasses.replace` in process/model.py. A rebuilt
+    # image must not pull a new major out from under the pinned lock.
+    "pydantic-ai-slim[bedrock,openai]>=1.107,<2",
 ]
 # The music compute service: its own gateway plus voice playback.
 compute-music = [
