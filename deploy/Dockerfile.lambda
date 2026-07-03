@@ -24,14 +24,19 @@ COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /bin/uv
 # ${LAMBDA_TASK_ROOT} is /var/task, already the WORKDIR and on sys.path. PetBot is
 # one package; install only the core-worker extra so the image carries the chat +
 # booru + math deps and not discord.py.
-COPY pyproject.toml README.md ./
+COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 
-# `.[compute-core]` is the core compute dependency set; no frontend/music deps land.
+# Install the *locked* dependency set, so a rebuild resolves exactly what CI tested
+# rather than re-floating every `>=` to its latest (which once pulled pydantic-ai 2.x
+# and broke the chat model build in prod while CI stayed green). `uv export` emits the
+# lock's pins for the compute-core extra; the project itself is then installed --no-deps.
 # The cache mount persists wheel downloads between builds. No secrets are baked
 # in — Terraform supplies booru creds + the chat model config as env vars.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --compile-bytecode ".[compute-core]"
+    uv export --frozen --no-emit-project --extra compute-core -o /tmp/requirements.txt \
+    && uv pip install --system --compile-bytecode -r /tmp/requirements.txt \
+    && uv pip install --system --compile-bytecode --no-deps .
 
 # module.function the Lambda runtime invokes per request.
 CMD ["petbot.services.core.handler.handler"]
