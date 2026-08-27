@@ -6,6 +6,8 @@ by inspecting the ``httpx.Request`` that a provider builds (no network needed).
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import httpx
 import pytest
 import respx
@@ -256,18 +258,50 @@ async def test_e621_skill_empty_raises_empty_result() -> None:
             await skill.run(BooruArgs(tags="asdfqwer"), make_context())
 
 
+def _safe_floor_mock(*, unfiltered_has_results: bool) -> Callable[[httpx.Request], httpx.Response]:
+    """A respx side-effect that models the safe floor honestly: the safe-only request
+    (``rating:s`` in its tags) is empty, while the engine's rating-agnostic probe returns
+    a hit iff ``unfiltered_has_results``. Distinguishing the two requests is the whole
+    point — it's what lets the skill tell a floor-suppressed search from a true blank."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        tags_param = request.url.params.get("tags", "")
+        is_safe_request = "rating:s" in tags_param
+        if not is_safe_request and unfiltered_has_results:
+            return httpx.Response(200, json=load_fixture("e621_success"))
+        return httpx.Response(200, json=load_fixture("e621_empty"))
+
+    return handler
+
+
 @respx.mock
-async def test_e621_skill_empty_sfw_explains_rating_floor() -> None:
-    # An empty search in a SFW channel must state *why* (the safe-rating floor), so the
-    # voice layer relays the real reason instead of inventing one (a typo, etc.).
+async def test_e621_skill_empty_sfw_blames_floor_only_when_probe_confirms() -> None:
+    # SFW channel, safe search empty, but the same tags DO have (non-safe) matches: the
+    # engine's probe confirms the safe floor is the real cause, so the note may point the
+    # user at an NSFW channel. This is the only case where that advice is true.
     respx.get("https://e621.net/posts.json").mock(
-        return_value=httpx.Response(200, json=load_fixture("e621_empty"))
+        side_effect=_safe_floor_mock(unfiltered_has_results=True)
     )
     async with httpx.AsyncClient() as client:
         skill = E621Skill(client=client, user_agent="PetBot/2.1 (test)")
         with pytest.raises(EmptyResult) as exc:
             await skill.run(BooruArgs(tags="auzbuzzard"), make_context(allows_explicit=False))
     assert "age-gated" in exc.value.message
+
+
+@respx.mock
+async def test_e621_skill_empty_sfw_no_floor_blame_when_truly_empty() -> None:
+    # SFW channel, and the tags have NO matches at any rating (the probe also comes back
+    # empty). The bot must NOT blame the safe floor or suggest an NSFW channel — that would
+    # be a lie. It reports a plain no-result instead.
+    respx.get("https://e621.net/posts.json").mock(
+        side_effect=_safe_floor_mock(unfiltered_has_results=False)
+    )
+    async with httpx.AsyncClient() as client:
+        skill = E621Skill(client=client, user_agent="PetBot/2.1 (test)")
+        with pytest.raises(EmptyResult) as exc:
+            await skill.run(BooruArgs(tags="auzbuzzard"), make_context(allows_explicit=False))
+    assert "age-gated" not in exc.value.message
 
 
 @respx.mock

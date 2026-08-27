@@ -10,6 +10,7 @@ body still raises rather than silently looking like "no results".
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
 import httpx
 
@@ -17,7 +18,7 @@ from petbot.domain import SkillResult
 from petbot.skills.booru.base import BooruProvider
 from petbot.skills.booru.errors import SiteFailureStatusError
 from petbot.skills.booru.render import render
-from petbot.skills.booru.types import SearchRequest
+from petbot.skills.booru.types import EmptyReason, SearchRequest
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,40 @@ async def run_search(
             print_message=_site_unreadable(provider.name),
         )
 
-    return render(provider.parse(body), request=search)
+    post = provider.parse(body)
+    if post is not None:
+        return render(post, request=search)
+    empty_reason = await _classify_empty(provider, client, search)
+    return render(None, request=search, empty_reason=empty_reason)
+
+
+async def _classify_empty(
+    provider: BooruProvider,
+    client: httpx.AsyncClient,
+    search: SearchRequest,
+) -> EmptyReason:
+    """Decide *why* a search came back empty, so the bot states a cause it can stand behind.
+
+    A non-safe search already looked at everything: it's a plain ``NO_MATCH``. For a
+    safe-only search the emptiness might be the safe floor *or* genuinely no posts — and
+    the renderer must not guess. So we probe: re-run the same search rating-agnostic and
+    see if anything exists. The probe's result is **discarded** (a SFW channel never shows
+    an explicit post); we only learn whether matches exist beyond the floor. Only then is
+    ``SAFE_FLOOR`` ("try an NSFW channel") true. If the probe finds nothing — or can't run
+    — we fall back to ``NO_MATCH`` rather than claim a cause we didn't verify.
+    """
+    if not search.safe_only:
+        return EmptyReason.NO_MATCH
+    probe = replace(search, safe_only=False)
+    try:
+        response = await client.send(provider.build_request(client, probe))
+        body = _json_body(response)
+    except httpx.HTTPError:
+        logger.debug("%s empty-result probe failed; reporting no_match", provider.name)
+        return EmptyReason.NO_MATCH
+    if body is not None and provider.error(body) is None and provider.parse(body) is not None:
+        return EmptyReason.SAFE_FLOOR
+    return EmptyReason.NO_MATCH
 
 
 def _json_body(response: httpx.Response) -> object | None:

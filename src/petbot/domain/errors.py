@@ -29,7 +29,16 @@ class InvalidInput(SkillError):
 
 
 class EmptyResult(SkillError):
-    """A search or lookup that ran cleanly but found nothing."""
+    """A search or lookup that ran cleanly but found nothing.
+
+    ``reason`` is an optional machine-readable tag (a plain string so the domain stays
+    provider-agnostic) letting the skill layer classify *why* it was empty for telemetry,
+    without re-deriving it. ``None`` when the caller has no finer signal than the message.
+    """
+
+    def __init__(self, message: str, *, reason: str | None = None) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 class UpstreamUnavailable(SkillError):
