@@ -3,9 +3,12 @@ all without a live LLM (``TestModel``) or live skills (fakes in a real ToolRegis
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
+import httpx
 import pytest
+import respx
 from pydantic import BaseModel, ValidationError
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import (
@@ -17,6 +20,7 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.profiles.openai import OpenAIModelProfile
 
 from petbot.domain import (
     CommandInput,
@@ -37,6 +41,7 @@ from petbot.domain import (
 )
 from petbot.platform import ToolRegistry
 from petbot.process import ChatProcess, CommandProcess, PassthroughStyle, RouterProcess, Stylist
+from petbot.process.agent import ChatDeps, build_agent
 from petbot.process.context import (
     SlidingWindow,
     Summarizer,
@@ -208,6 +213,76 @@ def test_non_gemma_openai_compatible_keeps_provider_default() -> None:
         OpenAICompatibleModel(model="some-llama-3", base_url="https://x/v1", api_key="k")
     )
     assert model.profile.json_schema_transformer is not _GeminiToolSchema
+
+
+def test_gemma_does_not_advertise_strict_tool_definitions() -> None:
+    # Strict tool definitions and the Gemini subset disagree about optional arguments: strict
+    # wants every property in `required`, the Gemini dialect leaves optionals out and marks
+    # them nullable. Sending the Google dialect under a strict flag is what an enforcing
+    # endpoint rejects, so the flag must be off wherever we pin the transformer.
+    prod = build_model_from_config(
+        OpenAICompatibleModel(
+            model="google.gemma-4-26b-a4b",
+            base_url="https://bedrock-mantle.us-east-1.api.aws/openai/v1",
+            api_key="k",
+        )
+    )
+    dev = build_model_from_config(OpenRouterModel(model="google/gemma-3-27b-it:free", api_key="k"))
+    for model in (prod, dev):
+        assert isinstance(model.profile, OpenAIModelProfile)
+        assert model.profile.openai_supports_strict_tool_definition is False
+
+
+def test_non_gemma_openai_compatible_keeps_strict_default() -> None:
+    # The strict opt-out rides with the Gemini transformer; a model we don't special-case keeps
+    # whatever the provider's own profile says.
+    model = build_model_from_config(
+        OpenAICompatibleModel(model="some-llama-3", base_url="https://x/v1", api_key="k")
+    )
+    assert isinstance(model.profile, OpenAIModelProfile)
+    assert model.profile.openai_supports_strict_tool_definition is True
+
+
+@respx.mock
+async def test_gemma_tool_payload_carries_no_strict_flag() -> None:
+    # The regression that took prod down: every tool with an optional argument (BooruArgs has
+    # four) went out as `strict: true` with `required: ["tags"]`, and mantle answered 400
+    # `invalid_function_parameters` — failing *every* chat turn, tool-calling or not. Assert the
+    # wire payload, since the flag is only visible once pydantic-ai renders the tool.
+    base_url = "https://bedrock-mantle.us-east-1.api.aws/openai/v1"
+    route = respx.post(f"{base_url}/chat/completions").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "google.gemma-4-26b-a4b",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "hi"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            },
+        )
+    )
+    model = build_model_from_config(
+        OpenAICompatibleModel(model="google.gemma-4-26b-a4b", base_url=base_url, api_key="k")
+    )
+    deps = ChatDeps(registry=_registry(), ctx=_ctx())
+    await build_agent("persona").run("hi", deps=deps, model=model)
+
+    tools = json.loads(route.calls.last.request.content)["tools"]
+    booru = [t["function"] for t in tools if t["function"]["name"] in {"derpi", "e621"}]
+    assert booru, "the booru tools should be offered to the model"
+    for function in booru:
+        assert function.get("strict") is not True
+        # The schema itself stays Gemini-shaped: optionals nullable, not in `required`.
+        assert function["parameters"]["properties"]["sort"]["nullable"] is True
+        assert function["parameters"]["required"] == ["tags"]
 
 
 def test_gemini_tool_schema_makes_args_gemma_parseable() -> None:

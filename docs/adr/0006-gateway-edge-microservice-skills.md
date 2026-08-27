@@ -109,6 +109,22 @@ is consolidated** until scale justifies splitting:
   identity* in `petbot.process.model` (`_openai_compatible_profile`), so dev and prod
   drive the same model identically. The "config flip" holds only because the builder
   now enforces it; it is not automatic.
+- Follow-on (2026-08): pinning the Gemini transformer was necessary but not
+  sufficient — the pinned profile still inherited `openai_supports_strict_tool_definition`
+  from the OpenAI profile, so every tool went out flagged `strict: true` while carrying a
+  *Google-dialect* schema. The two dialects disagree about optional arguments: strict
+  requires every declared property to appear in `required` (an optional is
+  required-and-nullable), while the Gemini subset leaves optionals out of `required` and
+  marks them `"nullable": true`. mantle initially ignored the flag; once it began
+  enforcing it, `BooruArgs`' four optional fields made it reject the request outright
+  (`400 invalid_function_parameters: Invalid schema for function 'derpi': 'sort' is
+  required by being declared in 'properties' but not present in 'required'`) — and since
+  tools are sent on *every* request, that failed every chat turn, not only tool-calling
+  ones. The tool schema Gemma needs is the constraint that binds, so
+  `_openai_compatible_profile` now also turns strict tool definitions **off**. Two
+  lessons: a provider-side validation change can break a frozen deployment with no
+  deploy of ours, and a profile assembled from another provider's defaults carries that
+  provider's promises with it.
 
 ### 5. Repository structure — uv workspace, hexagonal
 

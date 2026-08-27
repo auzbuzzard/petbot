@@ -14,7 +14,7 @@ from typing import Any, assert_never
 from pydantic_ai.models import Model
 from pydantic_ai.profiles import ModelProfile
 from pydantic_ai.profiles.google import GoogleJsonSchemaTransformer
-from pydantic_ai.profiles.openai import openai_model_profile
+from pydantic_ai.profiles.openai import OpenAIModelProfile, openai_model_profile
 
 from petbot.process.settings import (
     BedrockModel,
@@ -56,11 +56,27 @@ def _openai_compatible_profile(model_name: str) -> ModelProfile | None:
     sends Gemma schemas it rejects. We pin the profile here so dev (OpenRouter) and prod
     (mantle) drive the *same* model identically — the "config flip" the architecture intends.
 
+    Strict tool definitions are switched *off* on this path. They are an OpenAI-platform
+    feature whose validator requires every declared property to appear in ``required`` (an
+    optional argument is expressed as required-and-nullable). A Gemini-subset schema says the
+    opposite: optionals stay out of ``required`` and carry ``"nullable": true``. Advertising
+    strict while sending the Google dialect makes an endpoint that enforces it reject the whole
+    request — ``invalid_function_parameters: Invalid schema for function 'derpi': 'sort' is
+    required by being declared in 'properties' but not present in 'required'`` — which fails
+    every chat turn, not just one that would call the tool. The dialect Gemma needs is the one
+    we keep; strict is what gives.
+
     Returns ``None`` (defer to the provider default) for models we don't special-case.
     """
     name = model_name.lower()
     if "gemma" in name or "gemini" in name:
-        return replace(openai_model_profile(model_name), json_schema_transformer=_GeminiToolSchema)
+        # `from_profile` re-types the provider's profile as the OpenAI one, so the strict flag
+        # (an `openai_`-prefixed field) is settable and type-checked rather than smuggled in.
+        return replace(
+            OpenAIModelProfile.from_profile(openai_model_profile(model_name)),
+            json_schema_transformer=_GeminiToolSchema,
+            openai_supports_strict_tool_definition=False,
+        )
     return None
 
 
