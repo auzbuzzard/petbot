@@ -64,9 +64,10 @@ reuses the agent's model.
   a result with a fenced code block keeps its text verbatim under a one-line voiced
   introduction, and a restatement that loses any number or link from the original is
   discarded for the original text. The "[Name]" came from the persona's "address people
-  by name" with no name given. Both the stylist and the chat agent are now told the
-  requesting user's display name, sanitized (control characters and newlines stripped,
-  capped at Discord's 32 characters) because it is user-chosen text in a prompt.
+  by name" with no name given. The chat agent gets the speaker's quoted name in its
+  per-run context (#89); the stylist is now told it too, sanitized (control characters and
+  newlines stripped, capped at Discord's 32 characters) because it is user-chosen text in
+  a prompt. The persona forbids placeholder names.
 
 ## Open issue — the pipeline does not yet match the intended DDD layering
 
