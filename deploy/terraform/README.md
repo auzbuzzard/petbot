@@ -59,6 +59,11 @@ scraping.
   # aws ssm put-parameter --type SecureString \
   #   --name /petbot/core/openrouter_api_key --value "<key>"
 
+  # Optional web search key (Tavily, 1,000 free searches/month). Without it the
+  # chat agent's web_search runs on the keyless ddgs fallback alone:
+  # aws ssm put-parameter --type SecureString \
+  #   --name /petbot/core/tavily_api_key --value "tvly-..."
+
   # Optional booru auth:
   # aws ssm put-parameter --type SecureString --name /petbot/core/derpibooru_api_key --value "..."
   ```
@@ -90,9 +95,10 @@ referenced here only by parameter name). The deploy reads them as `TF_VAR_*`:
 | `AWS_REGION` | e.g. `us-east-1` | your choice (match `backend.hcl` / SSM region) |
 | `TF_STATE_BUCKET` | the state bucket name | the `state_bucket` you chose above |
 | `CHAT_LLM_KIND` | `bedrock` \| `openai_compatible` \| `openrouter` | your choice of provider |
-| `CHAT_LLM_MODEL` | the model id | e.g. `google.gemma-4-26b-a4b` (Gemma 4 via mantle), a Bedrock Converse model, or an OpenRouter model |
+| `CHAT_LLM_MODEL` | the model id | e.g. `google.gemma-4-31b` (Gemma 4 via mantle), a Bedrock Converse model, or an OpenRouter model |
 | `CHAT_LLM_BASE_URL` | endpoint URL | **only** for `openai_compatible`, e.g. `https://bedrock-mantle.us-east-1.api.aws/openai/v1`; unset otherwise |
 | `CHAT_LLM_API_KEY_SSM_PARAMETER` | e.g. `/petbot/core/bedrock_api_key` | for `openai_compatible` + `openrouter`; **unset** for `bedrock` |
+| `TAVILY_API_KEY_SSM_PARAMETER` | e.g. `/petbot/core/tavily_api_key` | optional; the web search key. Unset ⇒ keyless `ddgs` search only |
 
 **Provider notes.** `bedrock` = the Converse API with IAM auth (no key) — Nova /
 Claude. **Gemma 4 is served only via Bedrock's OpenAI-compatible "mantle"

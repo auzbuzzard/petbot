@@ -1,6 +1,6 @@
 # PetBot Privacy Policy
 
-_Last updated: 2026-06-22_
+_Last updated: 2026-10-19_
 
 > **Operators:** before publishing a hosted instance, replace every **[BRACKETED]**
 > placeholder below (controller name, contact email, jurisdiction). If you self-host, see
@@ -21,12 +21,15 @@ The data controller for the hosted instance is **[CONTROLLER NAME]**, contactabl
 PetBot replies when you @mention it or reply to one of its messages.
 
 - **Message content (processed, not stored).** To generate a reply, PetBot reads the text of
-  the message that mentions or replies to it, plus the immediate reply-chain it is part of.
+  the message that mentions or replies to it, plus the immediate reply-chain it is part of,
+  along with the display names of the people in it and of the server and channel it was
+  sent in (so the reply knows who and where it is talking to).
   This content is used **in memory to produce the response and then discarded**. We do **not**
   write message content to any database, log, or telemetry system.
-- **Search queries.** A message may ask PetBot to search an image board (Derpibooru, e621).
-  The query is sent to that third-party site to fetch a result. The query text is **not**
-  stored by us.
+- **Search queries.** A message may ask PetBot to search an image board (Derpibooru, e621),
+  search the web, read a linked page, or check the weather. To answer, PetBot sends a search
+  query, the page's URL, or the place name to the matching third-party service (see
+  [Sub-processors](#sub-processors-and-storage)). These are **not** stored by us.
 
 We rely on **Discord's privileged Message Content intent** to receive this text; its use is
 limited to producing replies, as described above.
@@ -57,8 +60,11 @@ you asked for, and is not retained.
 
 Telemetry is sent to **Amazon Web Services** (AWS X-Ray for traces, Amazon CloudWatch for
 metrics and logs) in the controller's own AWS account, region **[AWS REGION]**. Model
-inference is performed by **[MODEL PROVIDER]** to generate replies. We use no other
-sub-processors and do not sell or share data for advertising.
+inference is performed by **[MODEL PROVIDER]** to generate replies. To answer a request
+that needs them, search queries go to **Tavily** (web search; with **DuckDuckGo** or
+**Startpage** as fallbacks), place names to **Open-Meteo** (weather), and a requested URL to
+the website it names. We use no other sub-processors and do not sell or share data for
+advertising.
 
 ## Retention
 
