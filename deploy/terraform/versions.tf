@@ -12,6 +12,6 @@ terraform {
   # Terraform 1.11 — no DynamoDB table needed). The concrete bucket/key are
   # supplied at init time via `-backend-config=backend.hcl` (see README), so no
   # account-specific values are hard-coded here and `init -backend=false` works
-  # in CI. Bootstrap the bucket once with deploy/terraform/bootstrap.
+  # in CI. The bucket is managed by deploy/terraform/bootstrap.
   backend "s3" {}
 }

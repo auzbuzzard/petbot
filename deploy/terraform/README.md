@@ -10,7 +10,7 @@ Infrastructure-as-code for PetBot 2.1: two deployables over one neutral core.
   WebSocket, maps each `@mention` to a dispatched call, and invokes the worker.
 
 ```
-bootstrap/        one-time: S3 state bucket + GitHub OIDC deploy role
+bootstrap/        root of trust: S3 state bucket + GitHub OIDC + CI deploy role (admin-applied)
 *.tf              the core worker (Lambda + ECR + IAM) and edge (Lightsail) stack
 backend.hcl.example       remote-state backend config (copy -> backend.hcl)
 terraform.tfvars.example  inputs (copy -> terraform.tfvars); no secrets here
@@ -28,7 +28,9 @@ Discord ⇄ [ edge ]  --boto3 invoke (IAM)-->  [ core worker Lambda ]  math · b
 
 The edge carries a **scoped IAM user** whose only permissions are
 `lambda:InvokeFunction` and `lambda:GetFunctionConfiguration` (to wait out an
-Inactive/Pending function) on the core worker. Its access key is injected into the
+Inactive/Pending function) on the core worker, and `dynamodb:PutItem` /
+`dynamodb:UpdateItem` on its `petbot-edge-claims` table (one copy answers each
+message; see `claims.tf`). Its access key is injected into the
 container's environment (Lightsail container services have no IAM instance roles).
 No public, unauthenticated surface exists, so there is no LLM cost-abuse vector.
 
@@ -73,18 +75,44 @@ scraping.
   > The state bucket is encrypted, versioned, and private to contain this;
   > runtime SSM fetch (state stays secret-free) is a future hardening (#17).
 
-## One-time: bootstrap remote state + OIDC
+## Bootstrap (root of trust)
+
+`bootstrap/` holds what CI cannot create for itself: the remote-state bucket, the
+**GitHub Actions OIDC provider** and the **`petbot-github-deploy` IAM role** the CI
+pipeline assumes (no static AWS keys). An admin applies it; CI never does, so CI
+can never widen its own permissions. Its state lives in the same bucket, under
+`bootstrap/terraform.tfstate`.
+
+The deploy role is scoped by naming convention: it may manage resources named
+`<name_prefix>-*` (ECR repos, the Lambda and its log group, DynamoDB tables, IAM
+roles and users) and is explicitly denied the CI roles themselves
+(`<name_prefix>-github-*`). Every role and user it creates must carry the
+**`<name_prefix>-workload-boundary`** permissions boundary, so no policy CI writes
+can grant a workload more than that ceiling (no IAM; data-plane access to the
+stack's own resources). Adding resources to the root stack therefore needs **no
+bootstrap change**; only a new AWS service does. Then the PR edits
+`bootstrap/main.tf`, and an admin applies it **before** merging (CI's deploy would
+otherwise fail with `AccessDenied`):
 
 ```sh
 cd bootstrap
-terraform init
+cp backend.hcl.example backend.hcl   # once; fill in the bucket name
+terraform init -backend-config=backend.hcl
+terraform plan  -var "state_bucket=petbot-tfstate-<your-account-id>"
 terraform apply -var "state_bucket=petbot-tfstate-<your-account-id>"
-cd ..
-cp backend.hcl.example backend.hcl   # fill in the bucket name
 ```
 
-The bootstrap stack also creates the **GitHub Actions OIDC provider** and the
-**`petbot-github-deploy` IAM role** the CI pipeline assumes (no static AWS keys).
+**First run in a new account.** The bucket that will hold the state doesn't exist
+yet, so create it, then let Terraform adopt it:
+
+```sh
+aws s3api create-bucket --bucket petbot-tfstate-<your-account-id> --region us-east-1   # outside us-east-1 also pass --create-bucket-configuration LocationConstraint=<region>
+cd bootstrap && cp backend.hcl.example backend.hcl   # fill in the bucket name
+terraform init -backend-config=backend.hcl
+terraform import -var "state_bucket=petbot-tfstate-<your-account-id>" aws_s3_bucket.state petbot-tfstate-<your-account-id>
+terraform apply  -var "state_bucket=petbot-tfstate-<your-account-id>"
+cd .. && cp backend.hcl.example backend.hcl   # root stack backend
+```
 Set the following repo **Variables** (Settings → Secrets and variables → Actions
 → Variables — these are non-secret; the actual secret *values* live in SSM,
 referenced here only by parameter name). The deploy reads them as `TF_VAR_*`:
@@ -172,8 +200,13 @@ role in the console). Nothing imports from the old state.
 
 ```sh
 terraform destroy
-cd bootstrap && terraform destroy -var "state_bucket=petbot-tfstate-<your-account-id>"
+cd bootstrap && terraform init -backend-config=backend.hcl
 ```
+
+Bootstrap's state lives in the bucket it destroys, so move it off first: delete the
+`backend "s3" {}` block from `bootstrap/main.tf`, run `terraform init -migrate-state`,
+empty the versioned bucket (console → *Empty*), then
+`terraform destroy -var "state_bucket=petbot-tfstate-<your-account-id>"`.
 
 ## CI checks
 

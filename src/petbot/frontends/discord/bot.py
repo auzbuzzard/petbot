@@ -31,7 +31,7 @@ from petbot.frontends.discord.slash import build_commands
 from petbot.frontends.discord.thinking import think
 from petbot.logging_setup import configure_logging
 from petbot.observability import ObservabilitySettings, configure_observability
-from petbot.platform import HttpTransport, LambdaTransport, ProcessClient
+from petbot.platform import ClaimStore, DynamoClaims, HttpTransport, LambdaTransport, ProcessClient
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,7 @@ class PetBot(commands.Bot):
         self.settings = settings
         self._http: httpx.AsyncClient | None = None
         self.process: Process | None = None
+        self.claims: ClaimStore | None = None
 
     async def setup_hook(self) -> None:
         service = self.settings.service
@@ -64,6 +65,8 @@ class PetBot(commands.Bot):
                 self.process = ProcessClient(HttpTransport(url, self._http))
             case _:
                 assert_never(service)
+        if self.settings.claims_table:
+            self.claims = DynamoClaims.from_table_name(self.settings.claims_table)
         # Build the slash commands once the process client is wired; the closure
         # captures it. Each command rides the shared CommandInput dispatch path.
         for command in build_commands(self.process):
@@ -96,6 +99,8 @@ class PetBot(commands.Bot):
         text = strip_self_mention(message.content, bot_user_id).strip()
         if not text:
             return
+        if not await self._claim(message):
+            return
         result = await think(
             message,
             self._turn(text, message, bot_user_id),
@@ -108,6 +113,22 @@ class PetBot(commands.Bot):
         the typing indicator covers the history walk too."""
         history = await self._reply_context(message, bot_user_id)
         return await self._respond(text, message, history)
+
+    async def _claim(self, message: discord.Message) -> bool:
+        """Whether this copy of the frontend handles ``message``.
+
+        Discord delivers every message to every gateway session on the bot's token (a
+        deployment rolling over, or any second copy), so each copy claims the message id
+        first and only the winner types, dispatches and answers: one compute call per
+        message. A failing claim store handles the message anyway; a rare duplicate beats
+        a dropped message."""
+        if self.claims is None:
+            return True
+        try:
+            return await self.claims.claim(f"discord:message:{message.id}")
+        except Exception:
+            logger.warning("claim store failed; handling the message anyway", exc_info=True)
+            return True
 
     async def _reply_context(self, message: discord.Message, bot_user_id: int) -> History:
         """Reconstruct the reply-chain history into a :class:`Recalled` — the single boundary

@@ -25,6 +25,7 @@ import httpx
 from opentelemetry.propagate import inject
 
 from petbot.domain import SkillResult
+from petbot.platform._aws import aws_error_code
 from petbot.platform.dispatch import Dispatch, Transport
 from petbot.platform.progress import Phase, report
 
@@ -124,7 +125,7 @@ class LambdaTransport(Transport):
         try:
             return await self._call(payload)
         except Exception as exc:
-            code = _error_code(exc)
+            code = aws_error_code(exc)
             if code not in _NOT_READY:
                 raise
             logger.warning(
@@ -150,13 +151,3 @@ class LambdaTransport(Transport):
                 "MaxAttempts": max(1, math.ceil(self._ready_timeout / _READY_POLL_SECONDS)),
             },
         )
-
-
-def _error_code(exc: Exception) -> str | None:
-    """The AWS error code of a botocore ``ClientError`` (read structurally, so botocore stays
-    a lazy import), or ``None`` for anything else."""
-    response = getattr(exc, "response", None)
-    if not isinstance(response, dict):
-        return None
-    code = response.get("Error", {}).get("Code")
-    return code if isinstance(code, str) else None
