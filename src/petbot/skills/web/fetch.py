@@ -138,4 +138,7 @@ class WebFetchSkill(Skill[WebFetchArgs]):
             raise InvalidInput(f"That link is a {media_type} file, not a readable page.")
         title, content = to_markdown(media_type, body.decode("utf-8", errors="replace"))
         heading = f"Title: {title}\n" if title else ""
-        return SkillResult.message(f"Page <{final_url}>\n{heading}\n{content}")
+        return SkillResult.message(
+            f"Page <{final_url}>\n{heading}\n{content}\n\n"
+            f"Answer from this page and cite it as <{final_url}>."
+        )

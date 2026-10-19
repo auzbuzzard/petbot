@@ -124,6 +124,7 @@ def test_format_hits_numbers_results_and_clips_snippets() -> None:
     lines = text.splitlines()
     assert lines[1] == "1. A — <https://a.test>"
     assert len(lines[2].strip()) <= 400 and lines[2].endswith("…")
+    assert "end your reply with the links you used" in lines[-1]
 
 
 async def test_search_asks_for_safe_results_outside_age_gated_channels() -> None:
@@ -214,6 +215,7 @@ async def test_fetch_converts_html_and_sends_the_original_host() -> None:
     )
     text = await _fetch("https://a.test/p")
     assert "<https://a.test/p>" in text and "Title: Hello" in text
+    assert text.endswith("cite it as <https://a.test/p>.")
     assert "# Hi" in text or "Hi\n==" in text
     assert route.calls.last.request.headers["host"] == "a.test"
 
