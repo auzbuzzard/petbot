@@ -21,7 +21,15 @@ from petbot.domain import (
     SkillResult,
     User,
 )
-from petbot.platform import HttpTransport, LambdaTransport, ProcessClient, ToolRegistry, serve
+from petbot.platform import (
+    HttpTransport,
+    LambdaTransport,
+    Phase,
+    ProcessClient,
+    ToolRegistry,
+    observe,
+    serve,
+)
 from petbot.types import MathArgs
 
 
@@ -229,3 +237,20 @@ def test_lambda_client_never_re_sends_an_invocation(monkeypatch: pytest.MonkeyPa
     config = LambdaTransport.from_function_name("petbot-core")._client.meta.config  # type: ignore[attr-defined]
     assert config.retries["total_max_attempts"] == 1
     assert config.read_timeout > 900  # Lambda's maximum function timeout
+
+
+async def test_lambda_transport_reports_waking_then_thinking_to_the_turn() -> None:
+    # The frontend can only say "waking up" if the transport tells it the worker is down.
+    phases: list[Phase] = []
+    client = _FakeLambda(active=False)
+    with observe(phases.append):
+        result = await _send(client, ready_timeout=10)
+    assert result.text == "ran"
+    assert phases == [Phase.WAKING, Phase.THINKING]
+
+
+async def test_lambda_transport_reports_nothing_for_a_ready_function() -> None:
+    phases: list[Phase] = []
+    with observe(phases.append):
+        await _send(_FakeLambda())
+    assert phases == []

@@ -26,6 +26,7 @@ from opentelemetry.propagate import inject
 
 from petbot.domain import SkillResult
 from petbot.platform.dispatch import Dispatch, Transport
+from petbot.platform.progress import Phase, report
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +84,10 @@ class LambdaTransport(Transport):
     A function that isn't ``Active`` rejects an invoke without running it (see
     :data:`_NOT_READY`). On that rejection the transport waits, for up to ``ready_timeout``
     seconds, until boto3's ``function_active`` waiter sees the function ``Active``, then
-    invokes once more. A ``FunctionError`` response (the handler crashed, timed out, or ran
-    out of memory) is raised with the runtime's own error payload; only a clean response is
-    parsed as a ``SkillResult``.
+    invokes once more, reporting :attr:`~Phase.WAKING` then :attr:`~Phase.THINKING` to the
+    turn's observer (see :mod:`petbot.platform.progress`). A ``FunctionError`` response (the
+    handler crashed, timed out, or ran out of memory) is raised with the runtime's own error
+    payload; only a clean response is parsed as a ``SkillResult``.
     """
 
     def __init__(
@@ -128,7 +130,9 @@ class LambdaTransport(Transport):
             logger.warning(
                 "%s not ready (%s); waiting for it to become Active", self._function_name, code
             )
+        report(Phase.WAKING)
         await asyncio.to_thread(self._wait_until_active)
+        report(Phase.THINKING)
         return await self._call(payload)
 
     async def _call(self, payload: bytes) -> Any:

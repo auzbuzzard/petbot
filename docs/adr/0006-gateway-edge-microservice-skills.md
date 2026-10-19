@@ -140,12 +140,27 @@ is consolidated** until scale justifies splitting:
   maximum), since a re-send would run the whole turn twice. A `FunctionError` response is
   raised with the runtime's own message instead of mis-parsed as a `SkillResult`. A
   deploy's brief `Pending` window is covered too. Letting the function go `Inactive` is
-  accepted: no keep-warm ping. The wait is made visible instead. A message turn (DM, @mention or reply) runs
-  under the typing indicator, and past 10 s (`THINKING_AFTER_SECONDS`) the edge also posts
-  a `-# 💭 thinking…` placeholder reply, deleted once the answer is sent. Ten seconds is
-  Nielsen's attention limit and one typing trigger's life, and it clears a normal cold
-  start (~9 s end to end), so only abnormal waits get the placeholder. Slash commands
-  already show Discord's own "thinking…" from their deferred response.
+  accepted: no keep-warm ping. The wait is made visible instead. A message turn (DM,
+  @mention or reply) runs under the typing indicator, and the edge posts a `-#` subtext
+  placeholder reply, deleted once the answer is sent, that says what the turn is doing.
+  The transport reports the turn's phase through `petbot.platform.progress` (a context
+  variable, so concurrent turns stay separate). `💤 waking up…` shows at once when the
+  transport reports the worker isn't up, since that wait is known to be long. `💭
+  thinking…` shows past 10 s (`THINKING_AFTER_SECONDS`) or replaces the waking line once
+  the worker is up. Ten seconds is Nielsen's attention limit and one typing trigger's
+  life, and it clears a normal cold start (~9 s end to end), so routine turns never get a
+  placeholder. Slash commands already show Discord's own "thinking…" from their deferred
+  response.
+- Follow-on (2026-10): the agent can reason before answering (`CHAT_THINKING`, set to
+  `high` in prod by Terraform's `chat_thinking`). The reasoning only improves the answer:
+  it is never shown and never replayed. That means `openai_chat_send_back_thinking_parts`
+  is off, as AWS advises for Gemma. The pinned Gemma profile declares `supports_thinking`,
+  without which pydantic-ai silently drops the setting. Measured on mantle, Gemma 4 thinks
+  only at `high` (lower levels return no reasoning). On PetBot prompts it took chat p50 from
+  1.6 s to 5.8 s and a tool call from 0.8 s to 2.5 s, with 4-8x the output tokens and one
+  41.6 s outlier. Live display of the reasoning is out of reach of this architecture: the
+  edge gets one finished `SkillResult` per synchronous invoke, with no stream to carry
+  partial output.
 
 ### 5. Repository structure — uv workspace, hexagonal
 

@@ -8,7 +8,8 @@ from typing import Any
 import discord
 import pytest
 
-from petbot.frontends.discord.thinking import THINKING, clear, think
+from petbot.frontends.discord.thinking import THINKING, WAKING, clear, think
+from petbot.platform import Phase, report
 
 
 class _FakeResp:
@@ -33,9 +34,21 @@ class _FakeChannel:
 
 
 class _FakePlaceholder:
-    def __init__(self, channel: _FakeChannel, *, delete_error: Exception | None) -> None:
+    def __init__(
+        self,
+        channel: _FakeChannel,
+        *,
+        delete_error: Exception | None,
+        edit_error: Exception | None = None,
+    ) -> None:
         self._channel = channel
         self._delete_error = delete_error
+        self._edit_error = edit_error
+
+    async def edit(self, *, content: str) -> None:
+        if self._edit_error is not None:
+            raise self._edit_error
+        self._channel.events.append(f"edit:{content}")
 
     async def delete(self) -> None:
         if self._delete_error is not None:
@@ -50,10 +63,12 @@ class _FakeMessage:
         reply_error: Exception | None = None,
         delete_error: Exception | None = None,
         typing_error: Exception | None = None,
+        edit_error: Exception | None = None,
     ) -> None:
         self.channel = _FakeChannel(typing_error=typing_error)
         self._reply_error = reply_error
         self._delete_error = delete_error
+        self._edit_error = edit_error
         self.reply_kwargs: dict[str, Any] = {}
 
     async def reply(self, content: str, **kwargs: Any) -> _FakePlaceholder:
@@ -61,7 +76,9 @@ class _FakeMessage:
             raise self._reply_error
         self.channel.events.append(f"reply:{content}")
         self.reply_kwargs = kwargs
-        return _FakePlaceholder(self.channel, delete_error=self._delete_error)
+        return _FakePlaceholder(
+            self.channel, delete_error=self._delete_error, edit_error=self._edit_error
+        )
 
 
 async def _answer(delay: float) -> str:
@@ -115,3 +132,29 @@ async def test_a_failed_turn_retires_its_placeholder() -> None:
 
 async def test_clear_without_a_placeholder_is_a_no_op() -> None:
     await clear(None)
+
+
+async def _wakes_then_answers() -> str:
+    # What the Lambda transport reports for an Inactive worker: waking, then running.
+    await asyncio.sleep(0.01)
+    report(Phase.WAKING)
+    await asyncio.sleep(0.05)
+    report(Phase.THINKING)
+    await asyncio.sleep(0.05)
+    return "answer"
+
+
+async def test_a_waking_worker_gets_the_waking_line_at_once_then_thinking() -> None:
+    # The threshold is far off (10 s), yet "waking up" shows as soon as it is reported:
+    # that wait is known to be long. It becomes "thinking" when the worker is up.
+    message = _FakeMessage()
+    result, placeholder = await think(message, _wakes_then_answers(), after=10)  # type: ignore[arg-type]
+    assert result == "answer"
+    assert placeholder is not None
+    assert message.channel.events == ["typing", f"reply:{WAKING}", "typing", f"edit:{THINKING}"]
+
+
+async def test_a_failed_edit_never_sinks_the_turn() -> None:
+    message = _FakeMessage(edit_error=OSError("connection reset"))
+    result, _ = await think(message, _wakes_then_answers(), after=10)  # type: ignore[arg-type]
+    assert result == "answer"
