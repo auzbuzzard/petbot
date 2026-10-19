@@ -1,7 +1,7 @@
 """The Discord slash-command frontend: catalog -> app commands, over the gateway.
 
-Each entry in :data:`petbot.types.CATALOG` becomes one slash command whose body builds a
-:class:`~petbot.domain.input.CommandInput` and dispatches it through the injected
+Each slash-exposed entry in :data:`petbot.types.CATALOG` becomes one slash command whose body
+builds a :class:`~petbot.domain.input.CommandInput` and dispatches it through the injected
 :class:`~petbot.domain.process.Process` (a :class:`~petbot.platform.ProcessClient`). The
 interaction's 3-second-ack rule is the one frontend-specific wrapper
 (:func:`_with_defer`); :func:`_as_app_command` renders a skill's ``args_model`` into
@@ -115,10 +115,11 @@ def _as_app_command(
 
 
 def build_commands(process: Process) -> list[app_commands.Command[Any, ..., None]]:
-    """One slash command per catalog entry, all dispatching through ``process``. Call
-    once the process client is wired (in ``setup_hook``); the closure captures it."""
+    """One slash command per slash-exposed catalog entry, all dispatching through
+    ``process``. Call once the process client is wired (in ``setup_hook``); the closure
+    captures it."""
     commands: list[app_commands.Command[Any, ..., None]] = []
-    for spec in CATALOG:
+    for spec in (s for s in CATALOG if s.slash):
         handle = _with_defer(_make_handler(process, spec))
         commands.append(_as_app_command(spec, handle))
     return commands

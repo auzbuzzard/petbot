@@ -45,6 +45,26 @@ class BooruArgs(Frozen):
     descending: bool = Field(default=True, description="Highest-scoring first.")
 
 
+class WebSearchArgs(Frozen):
+    """Arguments for the ``web_search`` skill."""
+
+    query: str = Field(description="What to search the web for, as a search-engine query.")
+
+
+class WebFetchArgs(Frozen):
+    """Arguments for the ``web_fetch`` skill."""
+
+    url: str = Field(description="The full http(s) URL of the page to read.")
+
+
+class WeatherArgs(Frozen):
+    """Arguments for the ``weather`` skill."""
+
+    location: str = Field(
+        description="A place name, optionally with region or country (e.g. 'Paris, France')."
+    )
+
+
 class MusicArgs(Frozen):
     """Arguments for the ``music`` skill."""
 

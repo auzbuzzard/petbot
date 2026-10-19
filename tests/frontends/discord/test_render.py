@@ -58,10 +58,16 @@ class FakeAuthor:
         self.bot = False
 
 
+class FakeGuild:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
 class FakeMessage:
-    def __init__(self, channel: FakeChannel) -> None:
+    def __init__(self, channel: FakeChannel, guild: FakeGuild | None = None) -> None:
         self.author = FakeAuthor()
         self.channel = channel
+        self.guild = guild
 
 
 def test_to_embed_maps_fields() -> None:
@@ -112,6 +118,15 @@ def test_build_context_reads_nsfw_and_ids() -> None:
     assert nsfw.user.display_name == "Rex"
     sfw = build_context(FakeMessage(FakeChannel(nsfw=False)))  # type: ignore[arg-type]
     assert sfw.allows_explicit is False
+
+
+def test_build_context_carries_server_and_channel_names() -> None:
+    channel = FakeChannel()
+    channel.name = "general"  # type: ignore[attr-defined]
+    ctx = build_context(FakeMessage(channel, FakeGuild("Hyena Den")))  # type: ignore[arg-type]
+    assert (ctx.community_name, ctx.channel_name) == ("Hyena Den", "general")
+    dm = build_context(FakeMessage(FakeChannel()))  # type: ignore[arg-type]
+    assert (dm.community_name, dm.channel_name) == (None, None)
 
 
 class _RaisingProcess(Process):
@@ -167,6 +182,11 @@ def test_build_interaction_context_reads_nsfw_and_ids() -> None:
     assert ctx.user.display_name == "Rex"
     sfw = build_interaction_context(FakeInteraction(nsfw=False))  # type: ignore[arg-type]
     assert sfw.allows_explicit is False
+
+
+def test_slash_surface_skips_agent_only_tools() -> None:
+    names = {c.name for c in build_commands(_RaisingProcess())}
+    assert names == {"math", "derpi", "e621"}
 
 
 async def test_respond_interaction_sends_card_as_followup() -> None:

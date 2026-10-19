@@ -1,10 +1,11 @@
 """The core compute service: chat + command over the stateless skills.
 
 Composes the process core for everything that isn't voice: a
-:class:`~petbot.platform.registry.ToolRegistry` of the installed skills (math + booru,
-from their entry points), a :class:`~petbot.process.ChatProcess` (its agent calls those
-tools in-process), and a :class:`~petbot.process.CommandProcess` voiced by a
-:class:`~petbot.process.Stylist`, behind one :class:`~petbot.process.RouterProcess`.
+:class:`~petbot.platform.registry.ToolRegistry` of the installed skills (math, booru, web
+search/fetch and weather, from their entry points), a
+:class:`~petbot.process.ChatProcess` (its agent calls those tools in-process), and a
+:class:`~petbot.process.CommandProcess` voiced by a :class:`~petbot.process.Stylist`,
+behind one :class:`~petbot.process.RouterProcess`.
 Served behind a transport by :mod:`petbot.services.core.handler` (Lambda) or
 ``python -m petbot.services.core`` (dev HTTP).
 """
@@ -33,7 +34,7 @@ def build_process() -> Process:
     instrumentation = (
         InstrumentationSettings(version=3, include_content=False) if obs.enabled else None
     )
-    registry = ToolRegistry.from_installed_skills()  # math, derpi, e621
+    registry = ToolRegistry.from_installed_skills()
     chat = ChatProcess(
         registry, settings=settings, instrumentation=instrumentation, id_salt=obs.id_salt
     )

@@ -6,7 +6,15 @@ dependencies. See :mod:`petbot.types.args` and :mod:`petbot.types.catalog`.
 
 from __future__ import annotations
 
-from petbot.types.args import BooruArgs, MathArgs, MusicAction, MusicArgs
+from petbot.types.args import (
+    BooruArgs,
+    MathArgs,
+    MusicAction,
+    MusicArgs,
+    WeatherArgs,
+    WebFetchArgs,
+    WebSearchArgs,
+)
 from petbot.types.catalog import CATALOG, Command
 
 __all__ = [
@@ -16,4 +24,7 @@ __all__ = [
     "MathArgs",
     "MusicAction",
     "MusicArgs",
+    "WeatherArgs",
+    "WebFetchArgs",
+    "WebSearchArgs",
 ]
