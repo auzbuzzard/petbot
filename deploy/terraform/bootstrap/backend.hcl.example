@@ -1,0 +1,9 @@
+# Copy to backend.hcl and fill in, then:
+#   terraform init -backend-config=backend.hcl
+# The bucket is the one this stack manages; see README "Bootstrap" for the first-ever
+# run in a new account, when it doesn't exist yet.
+bucket       = "petbot-tfstate-<your-account-id>"
+key          = "bootstrap/terraform.tfstate"
+region       = "us-east-1"
+encrypt      = true
+use_lockfile = true
