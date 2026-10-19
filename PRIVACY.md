@@ -18,7 +18,8 @@ The data controller for the hosted instance is **[CONTROLLER NAME]**, contactabl
 
 ## What PetBot processes, and why
 
-PetBot replies when you @mention it or reply to one of its messages.
+PetBot replies when you message it directly (DM), @mention it, or reply to one of its
+messages.
 
 - **Message content (processed, not stored).** To generate a reply, PetBot reads the text of
   the message that mentions or replies to it, plus the immediate reply-chain it is part of,
