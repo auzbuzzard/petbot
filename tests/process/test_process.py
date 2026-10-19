@@ -215,6 +215,89 @@ def test_non_gemma_openai_compatible_keeps_provider_default() -> None:
     assert model.profile.json_schema_transformer is not _GeminiToolSchema
 
 
+_MANTLE = "https://bedrock-mantle.us-east-1.api.aws/openai/v1"
+
+
+def _completion(message: dict[str, Any], finish_reason: str = "stop") -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "id": "x",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "google.gemma-4-26b-a4b",
+            "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        },
+    )
+
+
+def _gemma_chat(registry: ToolRegistry, **settings: object) -> ChatProcess:
+    llm = OpenAICompatibleModel(model="google.gemma-4-26b-a4b", base_url=_MANTLE, api_key="k")
+    return ChatProcess(
+        registry,
+        model=build_model_from_config(llm),
+        settings=ChatSettings(llm=llm, _env_file=None, **settings),  # type: ignore[arg-type]
+    )
+
+
+def test_gemma_profile_supports_thinking_but_never_replays_it() -> None:
+    model = build_model_from_config(
+        OpenAICompatibleModel(model="google.gemma-4-26b-a4b", base_url=_MANTLE, api_key="k")
+    )
+    assert isinstance(model.profile, OpenAIModelProfile)
+    # Without supports_thinking pydantic-ai silently drops CHAT_THINKING for this model.
+    assert model.profile.supports_thinking is True
+    assert model.profile.openai_chat_send_back_thinking_parts is False
+
+
+@respx.mock
+async def test_chat_thinking_asks_mantle_for_reasoning() -> None:
+    route = respx.post(f"{_MANTLE}/chat/completions").mock(
+        return_value=_completion({"role": "assistant", "content": "hi"})
+    )
+    await _gemma_chat(_registry(), thinking="high").respond(TextInput(text="hi"), _ctx())
+    assert json.loads(route.calls.last.request.content)["reasoning_effort"] == "high"
+
+
+@respx.mock
+async def test_no_chat_thinking_leaves_reasoning_unset() -> None:
+    route = respx.post(f"{_MANTLE}/chat/completions").mock(
+        return_value=_completion({"role": "assistant", "content": "hi"})
+    )
+    await _gemma_chat(_registry()).respond(TextInput(text="hi"), _ctx())
+    assert "reasoning_effort" not in json.loads(route.calls.last.request.content)
+
+
+@respx.mock
+async def test_reasoning_is_neither_shown_nor_replayed_in_a_tool_loop() -> None:
+    # Turn 1 reasons and calls a tool; turn 2 answers. The reasoning must not reach the
+    # user, and must not go back to the model on the tool loop's second request.
+    tool_call = {
+        "role": "assistant",
+        "content": None,
+        "reasoning": "secret chain of thought",
+        "tool_calls": [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "math", "arguments": '{"expression": "6 * 7"}'},
+            }
+        ],
+    }
+    answer = {"role": "assistant", "content": "it's 42", "reasoning": "more thoughts"}
+    route = respx.post(f"{_MANTLE}/chat/completions").mock(
+        side_effect=[_completion(tool_call, "tool_calls"), _completion(answer)]
+    )
+    registry = _registry(_FakeSkill("math", MathArgs, SkillResult.message("42")))
+    result = await _gemma_chat(registry, thinking="high").respond(
+        TextInput(text="what is 6 * 7?"), _ctx()
+    )
+    assert result.text == "it's 42"
+    second = json.loads(route.calls.last.request.content)
+    assert "secret chain of thought" not in json.dumps(second["messages"])
+
+
 def test_gemma_does_not_advertise_strict_tool_definitions() -> None:
     # Strict tool definitions and the Gemini subset disagree about optional arguments: strict
     # wants every property in `required`, the Gemini dialect leaves optionals out and marks

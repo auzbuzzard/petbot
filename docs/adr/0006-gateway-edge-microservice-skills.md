@@ -125,6 +125,42 @@ is consolidated** until scale justifies splitting:
   lessons: a provider-side validation change can break a frozen deployment with no
   deploy of ours, and a profile assembled from another provider's defaults carries that
   provider's promises with it.
+- Follow-on (2026-10): the core worker is a **container-image** Lambda, and Lambda
+  marks such a function `Inactive` after about two weeks with no invocations (CloudTrail
+  shows it re-pulling the image from ECR every ~1.5 days after the last invoke, then
+  stopping). The next invoke is **rejected without running**: the function goes `Pending`
+  while Lambda re-pulls the image (~20 s), then `Active`. The edge turned that rejection
+  into "couldn't reach my brain". So the *first* message after a quiet spell always
+  failed and the next one worked. That looked like a DM-vs-guild bug, because the first
+  try was in a guild and the retry was a DM. On `ResourceConflictException` /
+  `ResourceNotReadyException`, `LambdaTransport` now waits (boto3's `function_active`
+  waiter, up to 120 s; the edge may `lambda:GetFunctionConfiguration`) and invokes once
+  more. Re-invoking is safe because the function never ran. The boto3 client is configured
+  never to re-send an invocation (no SDK retries, read timeout above Lambda's 900 s
+  maximum), since a re-send would run the whole turn twice. A `FunctionError` response is
+  raised with the runtime's own message instead of mis-parsed as a `SkillResult`. A
+  deploy's brief `Pending` window is covered too. Letting the function go `Inactive` is
+  accepted: no keep-warm ping. The wait is made visible instead. A message turn (DM,
+  @mention or reply) runs under the typing indicator, and the edge posts a `-#` subtext
+  placeholder reply, deleted once the answer is sent, that says what the turn is doing.
+  The transport reports the turn's phase through `petbot.platform.progress` (a context
+  variable, so concurrent turns stay separate). `💤 waking up…` shows at once when the
+  transport reports the worker isn't up, since that wait is known to be long. `💭
+  thinking…` shows past 10 s (`THINKING_AFTER_SECONDS`) or replaces the waking line once
+  the worker is up. Ten seconds is Nielsen's attention limit and one typing trigger's
+  life, and it clears a normal cold start (~9 s end to end), so routine turns never get a
+  placeholder. Slash commands already show Discord's own "thinking…" from their deferred
+  response.
+- Follow-on (2026-10): the agent can reason before answering (`CHAT_THINKING`, set to
+  `high` in prod by Terraform's `chat_thinking`). The reasoning only improves the answer:
+  it is never shown and never replayed. That means `openai_chat_send_back_thinking_parts`
+  is off, as AWS advises for Gemma. The pinned Gemma profile declares `supports_thinking`,
+  without which pydantic-ai silently drops the setting. Measured on mantle, Gemma 4 thinks
+  only at `high` (lower levels return no reasoning). On PetBot prompts it took chat p50 from
+  1.6 s to 5.8 s and a tool call from 0.8 s to 2.5 s, with 4-8x the output tokens and one
+  41.6 s outlier. Live display of the reasoning is out of reach of this architecture: the
+  edge gets one finished `SkillResult` per synchronous invoke, with no stream to carry
+  partial output.
 
 ### 5. Repository structure — uv workspace, hexagonal
 
@@ -243,7 +279,7 @@ that for the actual deploy:
 - **Edge → worker transport = boto3 `invoke` + IAM** (private; no public Function
   URL, so no unauthenticated LLM-cost surface). Lightsail container services have
   no IAM instance role, so the edge carries a **scoped IAM user** (`petbot-edge`,
-  `lambda:InvokeFunction` on the core worker only); its key is injected as env and
+  `lambda:InvokeFunction` + `lambda:GetFunctionConfiguration` on the core worker only); its key is injected as env and
   consumed by boto3's default credential chain (zero app code).
 - **Worker brain stays AWS Lambda** (arm64 image), with Bedrock access via the
   exec role (or OpenRouter via an env key).

@@ -100,7 +100,8 @@ data "aws_ssm_parameter" "discord_token" {
 }
 
 # --- The edge's scoped AWS identity -------------------------------------------
-# Least privilege: invoke exactly the core worker Lambda, nothing else.
+# Least privilege: invoke exactly the core worker Lambda and read its state (so the
+# transport can wait for an Inactive/Pending function to become Active), nothing else.
 
 resource "aws_iam_user" "edge" {
   name = local.edge_name
@@ -118,7 +119,7 @@ resource "aws_iam_user_policy" "edge_invoke" {
     Version = "2012-10-17"
     Statement = [{
       Effect   = "Allow"
-      Action   = "lambda:InvokeFunction"
+      Action   = ["lambda:InvokeFunction", "lambda:GetFunctionConfiguration"]
       Resource = aws_lambda_function.this.arn
     }]
   })
