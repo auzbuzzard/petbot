@@ -28,6 +28,7 @@ from petbot.frontends.discord.history import (
 from petbot.frontends.discord.render import SERVICE_UNREACHABLE, respond
 from petbot.frontends.discord.settings import DiscordSettings, HttpService, LambdaService
 from petbot.frontends.discord.slash import build_commands
+from petbot.frontends.discord.thinking import clear, think
 from petbot.logging_setup import configure_logging
 from petbot.observability import ObservabilitySettings, configure_observability
 from petbot.platform import HttpTransport, LambdaTransport, ProcessClient
@@ -95,10 +96,21 @@ class PetBot(commands.Bot):
         text = strip_self_mention(message.content, bot_user_id).strip()
         if not text:
             return
-        history = await self._reply_context(message, bot_user_id)
-        await respond(
-            message.channel, await self._respond(text, message, history), reference=message
+        result, placeholder = await think(
+            message,
+            self._turn(text, message, bot_user_id),
+            after=self.settings.thinking_after_seconds,
         )
+        try:
+            await respond(message.channel, result, reference=message)
+        finally:
+            await clear(placeholder)
+
+    async def _turn(self, text: str, message: discord.Message, bot_user_id: int) -> SkillResult:
+        """Recall the reply chain, then dispatch — the whole turn :func:`think` waits on, so
+        the typing indicator covers the history walk too."""
+        history = await self._reply_context(message, bot_user_id)
+        return await self._respond(text, message, history)
 
     async def _reply_context(self, message: discord.Message, bot_user_id: int) -> History:
         """Reconstruct the reply-chain history into a :class:`Recalled` — the single boundary
@@ -127,10 +139,9 @@ class PetBot(commands.Bot):
         on the far side of the unreachable connection, so this fallback is static."""
         assert self.process is not None
         try:
-            async with message.channel.typing():
-                return await self.process.respond(
-                    TextInput(text=text, history=history), build_context(message)
-                )
+            return await self.process.respond(
+                TextInput(text=text, history=history), build_context(message)
+            )
         except Exception:
             logger.exception("dispatch failed")
             return SkillResult.message(SERVICE_UNREACHABLE)

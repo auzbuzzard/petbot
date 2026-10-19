@@ -26,8 +26,9 @@ Discord ⇄ [ edge ]  --boto3 invoke (IAM)-->  [ core worker Lambda ]  math · b
           Lightsail container service          private, no public endpoint
 ```
 
-The edge carries a **scoped IAM user** whose only permission is
-`lambda:InvokeFunction` on the core worker. Its access key is injected into the
+The edge carries a **scoped IAM user** whose only permissions are
+`lambda:InvokeFunction` and `lambda:GetFunctionConfiguration` (to wait out an
+Inactive/Pending function) on the core worker. Its access key is injected into the
 container's environment (Lightsail container services have no IAM instance roles).
 No public, unauthenticated surface exists, so there is no LLM cost-abuse vector.
 

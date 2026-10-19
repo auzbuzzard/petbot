@@ -18,6 +18,7 @@ from importlib import resources
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
+from pydantic_ai.settings import ThinkingLevel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -127,6 +128,12 @@ class ChatSettings(BaseSettings):
     #: How to compact an over-long conversation when the model rejects it for length
     #: (``CHAT_CONTEXT__KIND``); defaults to the zero-cost sliding window.
     context: ContextConfig = Field(default_factory=SlidingWindowContext)
+    #: Whether the tool-calling agent reasons before it answers (``CHAT_THINKING``): unset
+    #: leaves the model's default, else ``true``/``false`` or an effort level. The reasoning
+    #: is never shown or replayed; it only improves the answer. Gemma 4 on Bedrock mantle
+    #: thinks only at ``high``; lower levels are accepted and change nothing. The agent role
+    #: only: the stylizer and summarizer never think.
+    thinking: ThinkingLevel | None = None
 
     def stylizer_llm(self) -> LLMConfig:
         """The stylizer's model config: its own if set, else the agent's (one tier)."""
