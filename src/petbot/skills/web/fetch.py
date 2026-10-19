@@ -7,6 +7,10 @@ listens on localhost. pydantic-ai's own ``safe_download`` reads the whole body i
 memory, so the request loop is ours: it streams with a byte cap and an overall deadline.
 The ``_ssrf`` helpers are private, but the dependency is pinned below its next major and
 the guard is covered by tests.
+
+An HTML page is reduced to its main content (``trafilatura``) before it reaches the model:
+a whole-page conversion is mostly navigation, link markup and embedded schema JSON, which
+crowds the article out of the text cap and leaves the model reasoning over boilerplate.
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ import re
 from urllib.parse import urlparse
 
 import httpx
-from markdownify import markdownify
+import trafilatura
 from pydantic_ai._ssrf import build_url_with_ip, resolve_redirect_url, validate_and_resolve_url
 
 from petbot.domain import (
@@ -92,13 +96,27 @@ async def fetch_page(
     raise ValueError("too many redirects")
 
 
-def to_markdown(media_type: str, text: str) -> tuple[str, str]:
-    """``(title, content)`` of a fetched page, HTML converted to markdown."""
+def to_markdown(media_type: str, text: str, url: str) -> tuple[str, str]:
+    """``(title, content)`` of a fetched page: an HTML page's main content as markdown,
+    any other text as-is. CPU-bound; call it off the event loop.
+
+    A page with no recognisable main content (an app shell, a link hub) falls back to the
+    page's visible text, still without markup.
+    """
     title = ""
     if not media_type or media_type in ("text/html", "application/xhtml+xml"):
         match = _TITLE_RE.search(text)
         title = " ".join(match.group(1).split()) if match else ""
-        text = markdownify(text, strip=["img", "script", "style"])
+        main = trafilatura.extract(
+            text,
+            url=url,
+            output_format="markdown",
+            include_links=False,
+            include_images=False,
+            include_tables=True,
+            include_comments=False,
+        )
+        text = main or trafilatura.html2txt(text)
     text = _BLANK_LINES_RE.sub("\n\n", text).strip()
     if len(text) > MAX_CONTENT:
         text = text[:MAX_CONTENT] + "\n\n[Content truncated]"
@@ -136,7 +154,9 @@ class WebFetchSkill(Skill[WebFetchArgs]):
             raise UpstreamUnavailable("That page couldn't be opened.") from exc
         if body is None:
             raise InvalidInput(f"That link is a {media_type} file, not a readable page.")
-        title, content = to_markdown(media_type, body.decode("utf-8", errors="replace"))
+        title, content = await asyncio.to_thread(
+            to_markdown, media_type, body.decode("utf-8", errors="replace"), final_url
+        )
         heading = f"Title: {title}\n" if title else ""
         return SkillResult.message(
             f"Page <{final_url}>\n{heading}\n{content}\n\n"
