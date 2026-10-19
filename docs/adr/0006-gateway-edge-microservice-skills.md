@@ -162,6 +162,21 @@ is consolidated** until scale justifies splitting:
   edge gets one finished `SkillResult` per synchronous invoke, with no stream to carry
   partial output.
 
+- Follow-on (2026-10): **one copy answers each message.** Discord delivers every gateway
+  event to every session connected with the bot's token, and a Lightsail deployment
+  starts the new edge container, which connects to the gateway, before it stops the old
+  one. For that window every message is answered twice. Observed in the edge logs on
+  2026-10-19: deployment v17's container connected at 04:44:39 while v16's (connected
+  since 04:19:16) was still up. Lightsail reported v17 steady at 04:45:38, and DMs at
+  04:45:45 and 04:46:22 each produced two core invocations 30 ms apart. A DM at 08:36:22,
+  9 s before v18 connected, produced one. Lightsail doesn't log the old container's stop,
+  so the window's length is unknown; it lasted at least 1 min 43 s here. The edge now
+  claims each message id with a conditional put to the `petbot-edge-claims` DynamoDB
+  table (TTL-expired) before it types or dispatches. Only the winning copy goes on, so
+  the core is invoked once per message. A losing copy adds its hostname to the item and
+  bumps `duplicate_deliveries`, which shows when two copies were connected. If the store
+  fails, the message is handled anyway (a rare duplicate beats a dropped message).
+
 ### 5. Repository structure — uv workspace, hexagonal
 
 A uv workspace (one `uv.lock`, one venv, shared tool config at root). Group by
@@ -279,7 +294,8 @@ that for the actual deploy:
 - **Edge → worker transport = boto3 `invoke` + IAM** (private; no public Function
   URL, so no unauthenticated LLM-cost surface). Lightsail container services have
   no IAM instance role, so the edge carries a **scoped IAM user** (`petbot-edge`,
-  `lambda:InvokeFunction` + `lambda:GetFunctionConfiguration` on the core worker only); its key is injected as env and
+  `lambda:InvokeFunction` + `lambda:GetFunctionConfiguration` on the core worker, and
+  `dynamodb:PutItem` + `dynamodb:UpdateItem` on its message-claims table); its key is injected as env and
   consumed by boto3's default credential chain (zero app code).
 - **Worker brain stays AWS Lambda** (arm64 image), with Bedrock access via the
   exec role (or OpenRouter via an env key).

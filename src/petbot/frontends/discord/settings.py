@@ -56,6 +56,9 @@ class DiscordSettings(BaseSettings):
     thinking_after_seconds: float = Field(default=THINKING_AFTER_SECONDS, gt=0)
     #: The compute service to dispatch to (required; see ``SERVICE__*``).
     service: ServiceTarget
+    #: DynamoDB table of claimed message ids (``CLAIMS_TABLE``), so that of every copy of
+    #: the frontend on the gateway exactly one handles each message. Unset ⇒ no claiming.
+    claims_table: str | None = None
 
     @field_validator("dev_guild_id", mode="before")
     @classmethod

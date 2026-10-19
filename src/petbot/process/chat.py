@@ -11,6 +11,7 @@ styling stays uniform across processes without a second LLM pass.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -35,7 +36,7 @@ from petbot.domain import (
     Unrecalled,
 )
 from petbot.observability import hash_user_id
-from petbot.platform import ToolRegistry
+from petbot.platform import ToolRegistry, remaining
 from petbot.process.agent import ChatDeps, build_agent
 from petbot.process.context import (
     MAX_COMPACTION_RETRIES,
@@ -56,6 +57,14 @@ _LOST_CONTEXT_NOTE = (
     "The user is replying to earlier messages you can no longer see. If their message "
     "relies on that lost context, tell them you've lost the thread and ask them to recap; "
     "otherwise just answer normally."
+)
+
+
+#: The reply when a turn runs out of its time budget (see :mod:`petbot.platform.deadline`):
+#: an answer in persona instead of the host killing the turn mid-run.
+_OUT_OF_TIME = (
+    "Ehh, that one took me too long to work out, sorry! >w< Could you ask again, maybe a "
+    "little narrower?"
 )
 
 
@@ -106,6 +115,10 @@ _TOOL_CALLS = _meter.create_counter(
 )
 _ZERO_TOOL_RUNS = _meter.create_counter(
     "petbot.agent.zero_tool_runs", description="Agent runs that called no tool."
+)
+_OUT_OF_TIME_RUNS = _meter.create_counter(
+    "petbot.agent.out_of_time_runs",
+    description="Agent runs stopped at the turn's time budget and answered with a fallback.",
 )
 _LOST_CONTEXT_RUNS = _meter.create_counter(
     "petbot.agent.lost_context_runs",
@@ -170,7 +183,22 @@ class ChatProcess(Process):
         notes = [run_context(ctx, self._clock())]
         if not recalled:
             notes.append(_LOST_CONTEXT_NOTE)
-        result = await self._run(inp.text, history, deps, instructions="\n\n".join(notes))
+        # Finish inside the host's budget for this turn (None: no budget, no timeout).
+        scope = asyncio.timeout(remaining())
+        try:
+            async with scope:
+                result = await self._run(inp.text, history, deps, instructions="\n\n".join(notes))
+        except TimeoutError:
+            if not scope.expired():
+                raise  # a TimeoutError from inside the run, not the budget
+            logger.warning(
+                "agent run out of time",
+                extra={"user": hash_user_id(ctx.user.id, self._id_salt)},
+            )
+            _OUT_OF_TIME_RUNS.add(1)
+            # Already in persona, and the budget is spent: no restyling pass, which could be
+            # another model call.
+            return SkillResult.message(_OUT_OF_TIME)
         self._log_outcome(result, ctx, recalled=recalled)
         card = next((a for a in deps.attachments if a.embed is not None), None)
         files = tuple(f for a in deps.attachments for f in a.files)

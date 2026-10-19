@@ -1,14 +1,20 @@
-# One-time bootstrap for the remote state backend: an encrypted, versioned S3
-# bucket for state. State locking is handled natively by S3 (`use_lockfile`,
-# Terraform >= 1.11), so no DynamoDB table is needed. Uses LOCAL state itself
-# (chicken-and-egg), so just keep the small state file it produces.
+# The root of trust for CI: the remote-state bucket, the GitHub OIDC provider and the
+# deploy role CI assumes. CI cannot grant itself trust or permissions, so an admin
+# applies this stack, and only when it changes: the deploy role is scoped by the stack's
+# naming convention (<name_prefix>-*), so adding resources to the root stack never needs
+# a bootstrap change; only adding a new AWS service does. See README "Bootstrap".
 #
-#   cd deploy/terraform/bootstrap
-#   terraform init
+# Its own state lives in the bucket it manages (key bootstrap/terraform.tfstate),
+# locked natively by S3 (`use_lockfile`, Terraform >= 1.11):
+#
+#   terraform init -backend-config=backend.hcl
 #   terraform apply -var "state_bucket=petbot-tfstate-<your-account-id>"
 
 terraform {
   required_version = ">= 1.11"
+
+  # Partial configuration: bucket/key/region come from backend.hcl.
+  backend "s3" {}
 
   required_providers {
     aws = {
@@ -40,7 +46,7 @@ variable "github_repo" {
 
 variable "name_prefix" {
   type        = string
-  description = "Must match var.name_prefix in the root stack; used to scope the deploy role's permissions to exactly that stack's resources (<name_prefix>-core / -edge)."
+  description = "Must match var.name_prefix in the root stack; the deploy role may manage resources named <name_prefix>-*."
   default     = "petbot"
 }
 
@@ -81,8 +87,7 @@ output "state_bucket" {
 
 # --- GitHub Actions OIDC: the one irreducible bit of trust --------------------
 # CI cannot bootstrap its own trust: AWS must already trust GitHub before any
-# workflow can assume a role. This (and the SSM secrets) is the single manual,
-# in-browser CloudShell step; after it, 100% of deploys are CI.
+# workflow can assume a role, so an admin applies this stack (see the header).
 
 data "aws_caller_identity" "current" {}
 
@@ -119,41 +124,115 @@ data "aws_iam_policy_document" "deploy_trust" {
 }
 
 resource "aws_iam_role" "github_deploy" {
-  name               = "petbot-github-deploy"
+  name               = "${var.name_prefix}-github-deploy"
   assume_role_policy = data.aws_iam_policy_document.deploy_trust.json
 }
 
 locals {
   account_id = data.aws_caller_identity.current.account_id
-  core_name  = "${var.name_prefix}-core"
-  edge_name  = "${var.name_prefix}-edge"
-
-  # Every resource the deploy role may touch is one of the named stack resources
-  # below; scoping to these ARNs means a stolen CI token can't reach anything
-  # else in the account.
-  lambda_arn        = "arn:aws:lambda:${var.aws_region}:${local.account_id}:function:${local.core_name}"
-  ecr_repo_arn      = "arn:aws:ecr:${var.aws_region}:${local.account_id}:repository/${local.core_name}"
-  edge_ecr_repo_arn = "arn:aws:ecr:${var.aws_region}:${local.account_id}:repository/${local.edge_name}"
-  log_group_arn     = "arn:aws:logs:${var.aws_region}:${local.account_id}:log-group:/aws/lambda/${local.core_name}"
-  exec_role_arn     = "arn:aws:iam::${local.account_id}:role/${local.core_name}-role"
-  edge_user_arn     = "arn:aws:iam::${local.account_id}:user/${local.edge_name}"
+  # ARN prefixes for "any resource of this stack": everything the root stack creates is
+  # named <name_prefix>-*, so new resources fall inside the deploy role's scope as long
+  # as they follow the convention.
+  arn_region = "${var.aws_region}:${local.account_id}"
+  stack      = "${var.name_prefix}-*"
 }
 
-# Least-privilege permissions for the deploy workflow. Service-level action
-# wildcards (e.g. ecr:*) are kept where enumerating every Terraform-issued call
-# is brittle, but each statement is pinned to this stack's resource ARNs so the
-# role's blast radius is exactly the interactions stack and nothing more.
+# --- The workload boundary ----------------------------------------------------
+# The ceiling for every role and user the stack creates. The deploy role may create
+# and edit IAM principals only with this boundary attached (see ManageStackRoles and
+# ManageStackUsers), and only an admin can change it, so whatever policy CI writes, a
+# workload can never do more than this: no IAM, and data-plane access to the stack's
+# own resources only. A workload needing more is a bootstrap change.
+data "aws_iam_policy_document" "workload_boundary" {
+  statement {
+    sid       = "WriteLogs"
+    actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["*"]
+  }
+
+  # PutMetricData and the X-Ray writes have no resource-level scoping.
+  statement {
+    sid       = "PublishTelemetry"
+    actions   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords", "cloudwatch:PutMetricData"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "InvokeModels"
+    actions   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "InvokeStackFunctions"
+    actions   = ["lambda:InvokeFunction", "lambda:GetFunctionConfiguration"]
+    resources = ["arn:aws:lambda:${local.arn_region}:function:${local.stack}"]
+  }
+
+  statement {
+    sid = "UseStackTables"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:Query",
+    ]
+    resources = ["arn:aws:dynamodb:${local.arn_region}:table/${local.stack}"]
+  }
+
+  statement {
+    sid       = "ReadStackSecrets"
+    actions   = ["ssm:GetParameter", "ssm:GetParameters"]
+    resources = ["arn:aws:ssm:${local.arn_region}:parameter/${var.name_prefix}/*"]
+  }
+
+  statement {
+    sid       = "DecryptSecretsViaSSM"
+    actions   = ["kms:Decrypt"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["ssm.${var.aws_region}.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_policy" "workload_boundary" {
+  name        = "${var.name_prefix}-workload-boundary"
+  description = "Permissions boundary for every IAM role and user the ${var.name_prefix} stack creates."
+  policy      = data.aws_iam_policy_document.workload_boundary.json
+}
+
+output "workload_boundary_arn" {
+  value = aws_iam_policy.workload_boundary.arn
+}
+
+# The deploy role's permissions. Service-level action wildcards (e.g. ecr:*) are kept
+# where enumerating every Terraform-issued call is brittle; each statement is scoped to
+# resources named <name_prefix>-*, so a stolen CI token reaches this stack and nothing
+# else in the account. IAM writes require the workload boundary, and the CI roles are
+# carved out (DenyCiRoles), so the deploy role can never widen its own permissions.
 data "aws_iam_policy_document" "deploy_permissions" {
+  # The root stack's state only (deploy.yml: key=<name_prefix>/terraform.tfstate);
+  # bootstrap's own state, in the same bucket, stays out of CI's reach.
+  statement {
+    sid       = "ListState"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.state.arn]
+  }
+
   statement {
     sid       = "TerraformState"
-    actions   = ["s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-    resources = [aws_s3_bucket.state.arn, "${aws_s3_bucket.state.arn}/*"]
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.state.arn}/${var.name_prefix}/*"]
   }
 
   statement {
     sid       = "ReadRuntimeSecrets"
     actions   = ["ssm:GetParameter", "ssm:GetParameters"]
-    resources = ["arn:aws:ssm:${var.aws_region}:${local.account_id}:parameter/petbot/*"]
+    resources = ["arn:aws:ssm:${local.arn_region}:parameter/${var.name_prefix}/*"]
   }
 
   # SecureString parameters are KMS-encrypted; reading them with decryption needs
@@ -177,24 +256,24 @@ data "aws_iam_policy_document" "deploy_permissions" {
     resources = ["*"]
   }
 
-  # Manage both ECR repos (worker + edge), including their lifecycle and the
-  # edge repo's policy (set so the Lightsail puller principal can read it).
   statement {
     sid       = "ManageEcrRepos"
     actions   = ["ecr:*"]
-    resources = [local.ecr_repo_arn, local.edge_ecr_repo_arn]
+    resources = ["arn:aws:ecr:${local.arn_region}:repository/${local.stack}"]
   }
 
   statement {
-    sid       = "ManageLambda"
-    actions   = ["lambda:*"]
-    resources = [local.lambda_arn, "${local.lambda_arn}:*"]
+    sid     = "ManageLambda"
+    actions = ["lambda:*"]
+    # The trailing wildcard also covers qualified ARNs (versions, aliases).
+    resources = ["arn:aws:lambda:${local.arn_region}:function:${local.stack}"]
   }
 
   statement {
-    sid       = "ManageLogs"
-    actions   = ["logs:*"]
-    resources = [local.log_group_arn, "${local.log_group_arn}:*"]
+    sid     = "ManageLogs"
+    actions = ["logs:*"]
+    # The trailing wildcard also covers the groups' streams (":log-stream:...").
+    resources = ["arn:aws:logs:${local.arn_region}:log-group:/aws/lambda/${local.stack}"]
   }
 
   # logs:DescribeLogGroups is a list operation that AWS only authorizes on "*"
@@ -208,22 +287,42 @@ data "aws_iam_policy_document" "deploy_permissions" {
   }
 
   statement {
+    sid       = "ManageDynamoTables"
+    actions   = ["dynamodb:*"]
+    resources = ["arn:aws:dynamodb:${local.arn_region}:table/${local.stack}"]
+  }
+
+  statement {
     sid       = "ManageBudget"
     actions   = ["budgets:*"]
     resources = ["arn:aws:budgets::${local.account_id}:budget/*"]
   }
 
-  # Create/manage only the Lambda execution role this stack owns.
+  # The stack's IAM roles (the Lambda execution role). Creating one, or changing what it
+  # may do, requires the workload boundary on it.
   statement {
-    sid = "ManageExecRole"
+    sid = "ManageStackRoles"
     actions = [
-      "iam:GetRole",
       "iam:CreateRole",
-      "iam:DeleteRole",
+      "iam:PutRolePermissionsBoundary",
       "iam:AttachRolePolicy",
       "iam:DetachRolePolicy",
       "iam:PutRolePolicy",
       "iam:DeleteRolePolicy",
+    ]
+    resources = ["arn:aws:iam::${local.account_id}:role/${local.stack}"]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PermissionsBoundary"
+      values   = [aws_iam_policy.workload_boundary.arn]
+    }
+  }
+
+  statement {
+    sid = "MaintainStackRoles"
+    actions = [
+      "iam:GetRole",
+      "iam:DeleteRole",
       "iam:GetRolePolicy",
       "iam:ListRolePolicies",
       "iam:ListAttachedRolePolicies",
@@ -231,15 +330,15 @@ data "aws_iam_policy_document" "deploy_permissions" {
       "iam:TagRole",
       "iam:UntagRole",
     ]
-    resources = [local.exec_role_arn]
+    resources = ["arn:aws:iam::${local.account_id}:role/${local.stack}"]
   }
 
   # PassRole is the classic privilege-escalation lever, so it is doubly fenced:
-  # only the one exec role, and only when handed to the Lambda service.
+  # only the stack's roles, and only when handed to the Lambda service.
   statement {
-    sid       = "PassExecRoleToLambda"
+    sid       = "PassStackRolesToLambda"
     actions   = ["iam:PassRole"]
-    resources = [local.exec_role_arn]
+    resources = ["arn:aws:iam::${local.account_id}:role/${local.stack}"]
     condition {
       test     = "StringEquals"
       variable = "iam:PassedToService"
@@ -247,23 +346,29 @@ data "aws_iam_policy_document" "deploy_permissions" {
     }
   }
 
-  # The edge runs on Lightsail's container service. Lightsail resources are
-  # identified by random-GUID ARNs, so there is no name-based ARN to scope to —
-  # the same reason ecr:* / lambda:* above are kept as service-level wildcards.
-  # The blast radius is the account's Lightsail, which holds only this edge.
+  # The stack's IAM users (the edge's identity for invoking the core Lambda — see
+  # edge.tf), with their access keys and inline policies. As for roles, creating one or
+  # changing what it may do requires the workload boundary on it.
   statement {
-    sid       = "ManageEdgeContainerService"
-    actions   = ["lightsail:*"]
-    resources = ["*"]
+    sid = "ManageStackUsers"
+    actions = [
+      "iam:CreateUser",
+      "iam:PutUserPermissionsBoundary",
+      "iam:PutUserPolicy",
+      "iam:DeleteUserPolicy",
+    ]
+    resources = ["arn:aws:iam::${local.account_id}:user/${local.stack}"]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PermissionsBoundary"
+      values   = [aws_iam_policy.workload_boundary.arn]
+    }
   }
 
-  # Create/manage only the scoped edge IAM user + its access key and inline policy
-  # (the edge's identity for invoking the worker Lambda — see edge.tf).
   statement {
-    sid = "ManageEdgeUser"
+    sid = "MaintainStackUsers"
     actions = [
       "iam:GetUser",
-      "iam:CreateUser",
       "iam:DeleteUser",
       "iam:TagUser",
       "iam:UntagUser",
@@ -271,12 +376,28 @@ data "aws_iam_policy_document" "deploy_permissions" {
       "iam:DeleteAccessKey",
       "iam:ListAccessKeys",
       "iam:GetUserPolicy",
-      "iam:PutUserPolicy",
-      "iam:DeleteUserPolicy",
       "iam:ListUserPolicies",
       "iam:ListAttachedUserPolicies",
     ]
-    resources = [local.edge_user_arn]
+    resources = ["arn:aws:iam::${local.account_id}:user/${local.stack}"]
+  }
+
+  # The edge runs on Lightsail's container service. Lightsail resources are
+  # identified by random-GUID ARNs, so there is no name-based ARN to scope to.
+  # The blast radius is the account's Lightsail, which holds only this edge.
+  statement {
+    sid       = "ManageEdgeContainerService"
+    actions   = ["lightsail:*"]
+    resources = ["*"]
+  }
+
+  # The CI roles share the stack's prefix (<name_prefix>-github-*); an explicit deny
+  # keeps the deploy role from editing them, i.e. from granting itself more.
+  statement {
+    sid       = "DenyCiRoles"
+    effect    = "Deny"
+    actions   = ["iam:*"]
+    resources = ["arn:aws:iam::${local.account_id}:role/${var.name_prefix}-github-*"]
   }
 }
 

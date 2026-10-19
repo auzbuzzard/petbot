@@ -3,8 +3,8 @@ name: Deploy
 # Build + push the core worker image (arm64) and the edge image (amd64) to ECR,
 # then terraform apply — entirely from CI via GitHub OIDC (no static AWS keys).
 # The Lightsail edge pulls its image from ECR (private-registry access). See
-# deploy/terraform/README.md. The one-time trust bootstrap (OIDC provider +
-# deploy role + state bucket + SSM secrets) is run once from AWS CloudShell.
+# deploy/terraform/README.md. The root of trust (deploy/terraform/bootstrap: OIDC
+# provider + deploy role + state bucket) and the SSM secrets are admin-applied.
 on:
   workflow_dispatch:
   push:
