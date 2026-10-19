@@ -141,11 +141,22 @@ resource "aws_iam_openid_connect_provider" "github" {
   thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
 }
 
-# Trust policy: only jobs in this repo's deploy environment may assume the role. The `sub`
-# claim names the environment whenever a job references one, so a job on any other branch,
-# a pull request, or any other workflow (including the AI review bots, which hold
-# id-token: write) cannot; the environment's branch rule admits only main.
-data "aws_iam_policy_document" "deploy_trust" {
+# The GitHub environment each CI role is assumed from. Each role trusts exactly its
+# environment's `sub`: the claim names the environment whenever a job references one, so a
+# job on any other branch, a pull request, or any other workflow (including the AI review
+# bots, which hold id-token: write) cannot assume it, and each environment's branch rule
+# admits only main.
+locals {
+  github_role_environments = {
+    deploy            = var.deploy_environment
+    "bootstrap-plan"  = var.bootstrap_plan_environment
+    "bootstrap-apply" = var.bootstrap_apply_environment
+  }
+}
+
+data "aws_iam_policy_document" "github_trust" {
+  for_each = local.github_role_environments
+
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
 
@@ -163,14 +174,14 @@ data "aws_iam_policy_document" "deploy_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repo}:environment:${var.deploy_environment}"]
+      values   = ["repo:${var.github_repo}:environment:${each.value}"]
     }
   }
 }
 
 resource "aws_iam_role" "github_deploy" {
   name               = "${var.name_prefix}-github-deploy"
-  assume_role_policy = data.aws_iam_policy_document.deploy_trust.json
+  assume_role_policy = data.aws_iam_policy_document.github_trust["deploy"].json
 }
 
 locals {
@@ -258,7 +269,7 @@ output "workload_boundary_arn" {
 # where enumerating every Terraform-issued call is brittle; each statement is scoped to
 # resources named <name_prefix>-*, so a stolen CI token reaches this stack and nothing
 # else in the account. IAM writes require the workload boundary, and the CI roles are
-# carved out (DenyAccessRoles), so the deploy role can never widen its own permissions.
+# carved out (DenyAccessPrincipals), so the deploy role can never widen its own permissions.
 data "aws_iam_policy_document" "deploy_permissions" {
   # The root stack's state only (deploy.yml: key=<name_prefix>/terraform.tfstate);
   # bootstrap's own state, in the same bucket, stays out of CI's reach.
@@ -436,16 +447,17 @@ data "aws_iam_policy_document" "deploy_permissions" {
     resources = ["*"]
   }
 
-  # The access roles share the stack's prefix: CI's (<name_prefix>-github-*) and the
-  # operator's (operator.tf). An explicit deny keeps the deploy role from editing them,
+  # The access principals: CI's roles (<name_prefix>-github-*), and the operator's role
+  # and user (operator.tf). An explicit deny keeps the deploy role from editing them,
   # i.e. from granting itself, or anyone, more.
   statement {
-    sid     = "DenyAccessRoles"
+    sid     = "DenyAccessPrincipals"
     effect  = "Deny"
     actions = ["iam:*"]
     resources = [
       "arn:aws:iam::${local.account_id}:role/${var.name_prefix}-github-*",
       aws_iam_role.operator.arn,
+      aws_iam_user.operator.arn,
     ]
   }
 }

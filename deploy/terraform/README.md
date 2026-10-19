@@ -107,9 +107,12 @@ stack's own resources). Adding resources to the root stack therefore needs **no
 bootstrap change**; only a new AWS service does.
 
 **Changing bootstrap** is a PR like any other. After it merges, `bootstrap.yml`
-plans with the read-only role and posts the plan to the run's summary; the run then
-waits on the `bootstrap` environment until a required reviewer approves, and applies
-that exact plan. A PR that needs the new permission in its own deploy (a new AWS
+plans with the read-only role and posts the plan, with its digest, to the run's
+summary; the run then waits on the `bootstrap` environment until a required reviewer
+approves, plans again, and applies only if that plan has the reviewed digest (otherwise
+re-run the workflow and review the new plan). No plan file or state leaves the runner;
+the plan text in the public log shows what this directory's code already shows, plus
+the account ID. A PR that needs the new permission in its own deploy (a new AWS
 service) lands its bootstrap change first.
 
 **GitHub settings** (Settings → Environments; one time, by a repo admin). Use
@@ -204,9 +207,20 @@ region              = us-east-1
 ```
 
 An existing user is adopted at seeding (see above). The user must hold nothing
-besides that `sts:AssumeRole` (no group, no attached policy). AWS's
-`ReadOnlyAccess`, for one, reads every S3 object, including the state. Changes to
-access go through the bootstrap pipeline, never through this role.
+besides that `sts:AssumeRole`: AWS's `ReadOnlyAccess`, for one, reads every S3
+object, including the state. Bootstrap enforces it three ways:
+
+- the user's **permissions boundary** (`petbot-operator-user-boundary`) allows only
+  assuming `petbot-operator`, so a group, attached or inline policy added by hand
+  grants nothing;
+- its inline policies are exactly `assume-petbot-operator` and it has no attached
+  policies (`aws_iam_user_policies_exclusive`,
+  `aws_iam_user_policy_attachments_exclusive`): the next plan shows any other as
+  drift and the apply removes it;
+- the deploy role is denied all IAM on it, and `operator_user` may not start with
+  `<name_prefix>-` (the deploy role's user scope).
+
+Changes to access go through the bootstrap pipeline, never through this role.
 
 ## CI deploy (the steady-state path)
 

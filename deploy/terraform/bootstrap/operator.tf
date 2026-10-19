@@ -1,9 +1,9 @@
 # --- Operator access: read-only triage (plus invoking the core for integration tests) --
 # The operator (an agent or a human on call) reads logs, deployments and tables to
 # triage incidents, and invokes the core worker to test prompts end to end. It is part
-# of the root of trust, like the CI roles: bootstrap grants it, and the deploy role can never edit
-# it (DenyAccessRoles). The operator's IAM user holds long-lived keys, created out of
-# band and never in Terraform state; the user may only assume petbot-operator, whose
+# of the root of trust, like the CI roles: bootstrap grants it, and the deploy role can never
+# edit it (DenyAccessPrincipals). The operator's IAM user holds long-lived keys, created out
+# of band and never in Terraform state; the user may only assume petbot-operator, whose
 # sessions last at most an hour. Secrets stay out of reach: no ssm:GetParameter, and
 # no access to the state bucket (Terraform state holds the injected secrets).
 
@@ -11,10 +11,17 @@ variable "operator_user" {
   type        = string
   description = "IAM user that may assume the read-only operator role. Its access keys are managed out of band."
   default     = "claude"
+
+  # The deploy role manages users named <name_prefix>-*; the operator must stay outside it.
+  validation {
+    condition     = !startswith(var.operator_user, "${var.name_prefix}-")
+    error_message = "operator_user must not start with \"<name_prefix>-\": the deploy role manages those users."
+  }
 }
 
 resource "aws_iam_user" "operator" {
-  name = var.operator_user
+  name                 = var.operator_user
+  permissions_boundary = aws_iam_policy.operator_user_boundary.arn
 
   # The user's tags are the account owner's labels, not part of this policy.
   lifecycle {
@@ -33,8 +40,12 @@ data "aws_iam_policy_document" "operator_trust" {
   }
 }
 
+locals {
+  operator_role_name = "${var.name_prefix}-operator"
+}
+
 resource "aws_iam_role" "operator" {
-  name                 = "${var.name_prefix}-operator"
+  name                 = local.operator_role_name
   assume_role_policy   = data.aws_iam_policy_document.operator_trust.json
   max_session_duration = 3600
 }
@@ -49,14 +60,26 @@ data "aws_iam_policy_document" "operator_permissions" {
       "logs:StartQuery",
       "logs:StopQuery",
     ]
-    # The trailing wildcard also covers the groups' streams.
-    resources = ["arn:aws:logs:${local.arn_region}:log-group:/aws/lambda/${local.stack}"]
+    # The stack's Lambda log groups (the trailing wildcard also covers their streams), and
+    # aws/spans, where X-Ray Transaction Search writes traces (observability.tf).
+    resources = [
+      "arn:aws:logs:${local.arn_region}:log-group:/aws/lambda/${local.stack}",
+      "arn:aws:logs:${local.arn_region}:log-group:aws/spans",
+      "arn:aws:logs:${local.arn_region}:log-group:aws/spans:*",
+    ]
   }
 
-  # Listing log groups and fetching Logs Insights results have no resource form.
+  # Listing resources and fetching Logs Insights results have no resource form; listing
+  # shows names and configuration, not data.
   statement {
-    sid       = "ListLogs"
-    actions   = ["logs:DescribeLogGroups", "logs:GetQueryResults"]
+    sid = "ListResources"
+    actions = [
+      "logs:DescribeLogGroups",
+      "logs:GetQueryResults",
+      "lambda:ListFunctions",
+      "dynamodb:ListTables",
+      "ecr:DescribeRepositories",
+    ]
     resources = ["*"]
   }
 
@@ -139,6 +162,8 @@ data "aws_iam_policy_document" "operator_permissions" {
       "cloudwatch:ListMetrics",
       "xray:GetTraceSummaries",
       "xray:BatchGetTraces",
+      "xray:GetServiceGraph",
+      "xray:GetTraceGraph",
       "cloudtrail:LookupEvents",
       "iam:SimulateCustomPolicy",
       "budgets:ViewBudget",
@@ -153,21 +178,43 @@ resource "aws_iam_role_policy" "operator" {
   policy = data.aws_iam_policy_document.operator_permissions.json
 }
 
-# The operator user's only permission: assume the role above. It must hold nothing else
-# (no group, no attached policy): a broad grant such as ReadOnlyAccess would also read the
-# state bucket, and with it every secret Terraform injected.
+# The operator user's only permission: assume the role above. Nothing else may reach it:
+# a broad grant such as ReadOnlyAccess would also read the state bucket, and with it every
+# secret Terraform injected. Three layers keep it that way:
+#   - its permissions boundary allows only this sts:AssumeRole, so a group, attached or
+#     inline policy added by hand grants nothing;
+#   - its inline policies are exactly operator_assume, and it has no attached policies:
+#     every plan shows any other as drift, and the next apply removes it;
+#   - the deploy role is denied all IAM on it (DenyAccessPrincipals).
+# By name, not by reference: the role's trust names the user, which carries this boundary.
+data "aws_iam_policy_document" "operator_user" {
+  statement {
+    actions   = ["sts:AssumeRole"]
+    resources = ["arn:aws:iam::${local.account_id}:role/${local.operator_role_name}"]
+  }
+}
+
+resource "aws_iam_policy" "operator_user_boundary" {
+  name        = "${var.name_prefix}-operator-user-boundary"
+  description = "Permissions boundary for the operator user: assuming ${local.operator_role_name}, nothing else."
+  policy      = data.aws_iam_policy_document.operator_user.json
+}
+
+resource "aws_iam_user_policies_exclusive" "operator" {
+  user_name    = aws_iam_user.operator.name
+  policy_names = [aws_iam_user_policy.operator_assume.name]
+}
+
+resource "aws_iam_user_policy_attachments_exclusive" "operator" {
+  user_name   = aws_iam_user.operator.name
+  policy_arns = []
+}
+
 resource "aws_iam_user_policy" "operator_assume" {
   name = "assume-${aws_iam_role.operator.name}"
   user = aws_iam_user.operator.name
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = "sts:AssumeRole"
-      Resource = aws_iam_role.operator.arn
-    }]
-  })
+  policy = data.aws_iam_policy_document.operator_user.json
 }
 
 output "operator_role_arn" {

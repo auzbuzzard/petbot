@@ -31,10 +31,10 @@ jobs:
     environment: production
     env:
       TF_DIR: deploy/terraform
-      # Non-secret deploy config, supplied as GitHub Actions Variables (the
-      # `production` environment's, or the repo's) and read by Terraform as TF_VAR_*;
-      # secret *values* stay in SSM, referenced by name. Job-level, because only a job
-      # that references an environment can see that environment's variables.
+      # Non-secret deploy config, read by Terraform as TF_VAR_*; secret *values* stay in
+      # SSM, referenced by name. AWS_REGION and TF_STATE_BUCKET are repository variables
+      # (bootstrap.yml reads them too); the rest are the `production` environment's.
+      # Job-level, because only a job that references an environment sees its variables.
       TF_VAR_aws_region: ${{ vars.AWS_REGION }}
       TF_VAR_chat_llm_kind: ${{ vars.CHAT_LLM_KIND }}
       TF_VAR_chat_llm_model: ${{ vars.CHAT_LLM_MODEL }}
@@ -44,8 +44,8 @@ jobs:
       TF_VAR_tavily_api_key_ssm_parameter: ${{ vars.TAVILY_API_KEY_SSM_PARAMETER }}
       # Observability (off unless OBSERVABILITY_ENABLED is set to "true"). The `|| 'default'`
       # fallbacks matter: an unset GitHub Variable renders as an empty string, and Terraform
-      # would reject "" for a bool/number var — so unset must resolve to a valid default,
-      # keeping a deploy without these Variables byte-identical to before.
+      # would reject "" for a bool/number var — so an unset Variable resolves to the
+      # variable's default.
       TF_VAR_observability_enabled: ${{ vars.OBSERVABILITY_ENABLED || 'false' }}
       TF_VAR_observability_sample_ratio: ${{ vars.OBSERVABILITY_SAMPLE_RATIO || '1.0' }}
       TF_VAR_telemetry_id_salt_ssm_parameter: ${{ vars.TELEMETRY_ID_SALT_SSM_PARAMETER }}

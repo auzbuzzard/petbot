@@ -78,7 +78,10 @@ by the `claude` user, whose only permission is that `sts:AssumeRole`. It sits in
 bootstrap, not the root stack, because who may access the account belongs to the root
 of trust; CI is denied it like its own role. Secrets (SSM, Terraform state) and every
 write stay out of it; access changes go through the bootstrap pipeline. The group is
-removed, so the user holds nothing but the `sts:AssumeRole`.
+removed, and the user holds nothing but the `sts:AssumeRole` by construction: its
+permissions boundary allows only that, so anything attached by hand grants nothing, and
+Terraform manages its inline and attached policies exclusively, so the next plan shows
+any stray one and the apply removes it.
 
 ## Follow-on: one trust model, bootstrap applied by a gated pipeline (2026-10)
 
@@ -100,8 +103,10 @@ Decision:
   by running on `main` in that environment.
 - Bootstrap gets its own two roles: plan (read-only, plus the state lock) and apply
   (scoped to what bootstrap manages, no deleting the state bucket, no minting the
-  operator's credentials). Apply runs only the plan the reviewer saw, and only after
-  the `bootstrap` environment's required reviewer approves. The apply role can edit
+  operator's credentials). Apply runs only after the `bootstrap` environment's
+  required reviewer approves, and only a plan whose resource changes match the
+  reviewed one (by digest); no plan file or state is handed between jobs, so none is
+  published. The apply role can edit
   itself, so it is exactly as strong as that approval, which is why only it, never the
   deploy role, may touch the access roles.
 - The state bucket refuses plain HTTP and is `prevent_destroy`.

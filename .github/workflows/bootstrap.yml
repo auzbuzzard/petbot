@@ -2,11 +2,15 @@ name: Bootstrap
 
 # Applies deploy/terraform/bootstrap, the root of trust: the CI roles, the workload
 # boundary, the operator's access and the state bucket. A change merged to main is
-# planned with a read-only role, and that exact plan is applied only after a required
-# reviewer approves the `bootstrap` environment, having read the plan in the run's
-# summary. Each job assumes its role from its environment, and both environments admit
-# only main, so no branch, pull request or other workflow can reach these roles. See
-# deploy/terraform/README.md "Bootstrap".
+# planned with a read-only role and posted to the run's summary; the apply job waits for
+# a required reviewer to approve the `bootstrap` environment, plans again, and applies only
+# if that plan is the one reviewed (same resource changes). Each job assumes its role from
+# its environment, and both environments admit only main, so no branch, pull request or
+# other workflow can reach these roles. See deploy/terraform/README.md "Bootstrap".
+#
+# The plan is in the run's log and summary, which are public like the repository: it
+# shows what the code in this directory already shows, plus the account ID. No plan file
+# or state leaves the runner.
 on:
   push:
     branches: [main]
@@ -25,9 +29,18 @@ concurrency:
 
 env:
   TF_DIR: deploy/terraform/bootstrap
+  TF_IN_AUTOMATION: "true"
+  # Repository variables (both environments read them), not environment ones.
   TF_VAR_aws_region: ${{ vars.AWS_REGION }}
   TF_VAR_state_bucket: ${{ vars.TF_STATE_BUCKET }}
-  TF_IN_AUTOMATION: "true"
+  # The backend, once for both jobs: terraform adds these to every `terraform init`.
+  TF_CLI_ARGS_init: >-
+    -input=false
+    -backend-config=bucket=${{ vars.TF_STATE_BUCKET }}
+    -backend-config=key=bootstrap/terraform.tfstate
+    -backend-config=region=${{ vars.AWS_REGION }}
+    -backend-config=encrypt=true
+    -backend-config=use_lockfile=true
 
 jobs:
   plan:
@@ -35,7 +48,18 @@ jobs:
     environment: bootstrap-plan
     outputs:
       changes: ${{ steps.plan.outputs.changes }}
+      digest: ${{ steps.plan.outputs.digest }}
     steps:
+      - name: Check repository variables
+        run: |
+          for name in AWS_REGION TF_STATE_BUCKET BOOTSTRAP_PLAN_ROLE_ARN; do
+            [ -n "${!name}" ] || { echo "::error::$name is unset (AWS_REGION and TF_STATE_BUCKET are repository variables; BOOTSTRAP_PLAN_ROLE_ARN is bootstrap-plan's)"; exit 1; }
+          done
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          BOOTSTRAP_PLAN_ROLE_ARN: ${{ vars.BOOTSTRAP_PLAN_ROLE_ARN }}
+
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
@@ -50,43 +74,40 @@ jobs:
 
       - name: Terraform init
         working-directory: ${{ env.TF_DIR }}
-        run: |
-          terraform init -input=false \
-            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
-            -backend-config="key=bootstrap/terraform.tfstate" \
-            -backend-config="region=${{ vars.AWS_REGION }}" \
-            -backend-config="encrypt=true" \
-            -backend-config="use_lockfile=true"
+        run: terraform init
 
-      # -detailed-exitcode: 0 = no changes, 2 = changes, 1 = error.
+      # -detailed-exitcode: 0 = no changes, 2 = changes; anything else is a failure. The
+      # digest identifies the plan's resource changes, so the apply job can check it
+      # applies the plan that was reviewed.
       - name: Terraform plan
         id: plan
         working-directory: ${{ env.TF_DIR }}
         run: |
           set +e
-          terraform plan -input=false -no-color -lock-timeout=120s -detailed-exitcode -out=bootstrap.tfplan > plan.txt 2>&1
+          terraform plan -no-color -lock-timeout=120s -detailed-exitcode -out=bootstrap.tfplan > plan.txt 2>&1
           code=$?
           set -e
           cat plan.txt
-          if [ "$code" -eq 1 ]; then exit 1; fi
-          echo "changes=$([ "$code" -eq 2 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0) changes=false ;;
+            2) changes=true ;;
+            *) echo "::error::terraform plan exited $code"; exit 1 ;;
+          esac
+          digest=$(terraform show -json bootstrap.tfplan | jq -S '.resource_changes' | sha256sum | cut -d' ' -f1)
+          echo "changes=$changes" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
           {
             echo "## Bootstrap plan"
+            echo "Plan digest: \`$digest\`"
+            limit=900000
+            if [ "$(wc -c < plan.txt)" -gt "$limit" ]; then
+              echo "> [!WARNING]"
+              echo "> The plan is longer than the summary allows and is cut off below. Read it in full in the **Terraform plan** step's log before approving."
+            fi
             echo '```'
-            tail -c 60000 plan.txt
+            head -c "$limit" plan.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-
-      # The apply job applies this exact plan, built against this provider lock.
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: steps.plan.outputs.changes == 'true'
-        with:
-          name: bootstrap-plan
-          path: |
-            ${{ env.TF_DIR }}/bootstrap.tfplan
-            ${{ env.TF_DIR }}/.terraform.lock.hcl
-          retention-days: 1
-          include-hidden-files: true
 
   apply:
     needs: plan
@@ -96,11 +117,6 @@ jobs:
     environment: bootstrap
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: bootstrap-plan
-          path: ${{ env.TF_DIR }}
 
       - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
@@ -114,15 +130,20 @@ jobs:
 
       - name: Terraform init
         working-directory: ${{ env.TF_DIR }}
-        run: |
-          terraform init -input=false -lockfile=readonly \
-            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
-            -backend-config="key=bootstrap/terraform.tfstate" \
-            -backend-config="region=${{ vars.AWS_REGION }}" \
-            -backend-config="encrypt=true" \
-            -backend-config="use_lockfile=true"
+        run: terraform init
 
-      # A saved plan refuses to apply if the state moved since it was made.
+      # Plan again under the state lock and apply only if it is the plan that was
+      # reviewed: if anything changed since (the state, the account), re-run the workflow
+      # and review the new plan.
       - name: Terraform apply (the reviewed plan)
         working-directory: ${{ env.TF_DIR }}
-        run: terraform apply -input=false -no-color -lock-timeout=120s bootstrap.tfplan
+        env:
+          REVIEWED_DIGEST: ${{ needs.plan.outputs.digest }}
+        run: |
+          terraform plan -no-color -lock-timeout=120s -out=bootstrap.tfplan
+          digest=$(terraform show -json bootstrap.tfplan | jq -S '.resource_changes' | sha256sum | cut -d' ' -f1)
+          if [ "$digest" != "$REVIEWED_DIGEST" ]; then
+            echo "::error::The plan changed since it was reviewed ($REVIEWED_DIGEST, now $digest). Re-run the workflow and review the new plan."
+            exit 1
+          fi
+          terraform apply -no-color -lock-timeout=120s bootstrap.tfplan

@@ -9,7 +9,7 @@
 # Both environments admit only main. The apply role can edit every resource here,
 # itself included, so it is as powerful as this stack: the reviewer's approval is the
 # control that guards it, which is why the deploy role (no approval) can never assume or
-# edit it.
+# edit it. Their trust policies are main.tf's github_trust.
 
 variable "bootstrap_plan_environment" {
   type        = string
@@ -24,52 +24,28 @@ variable "bootstrap_apply_environment" {
 }
 
 locals {
-  bootstrap_environments = {
-    plan  = var.bootstrap_plan_environment
-    apply = var.bootstrap_apply_environment
-  }
-
   # What this stack manages, by ARN: the access roles and the policies, the operator user,
   # the OIDC provider. Its plan and apply roles are scoped to exactly these.
   bootstrap_iam_arns = [
     "arn:aws:iam::${local.account_id}:role/${var.name_prefix}-github-*",
-    "arn:aws:iam::${local.account_id}:role/${var.name_prefix}-operator",
+    aws_iam_role.operator.arn,
     "arn:aws:iam::${local.account_id}:policy/${var.name_prefix}-*",
-    "arn:aws:iam::${local.account_id}:user/${var.operator_user}",
+    aws_iam_user.operator.arn,
     aws_iam_openid_connect_provider.github.arn,
   ]
-}
 
-data "aws_iam_policy_document" "bootstrap_trust" {
-  for_each = local.bootstrap_environments
-
-  statement {
-    actions = ["sts:AssumeRoleWithWebIdentity"]
-
-    principals {
-      type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github.arn]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:aud"
-      values   = ["sts.amazonaws.com"]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repo}:environment:${each.value}"]
-    }
+  # Each pipeline role and its policy; the trust is github_trust["bootstrap-<key>"].
+  bootstrap_role_policies = {
+    plan  = data.aws_iam_policy_document.bootstrap_read.json
+    apply = data.aws_iam_policy_document.bootstrap_apply.json
   }
 }
 
 resource "aws_iam_role" "github_bootstrap" {
-  for_each = local.bootstrap_environments
+  for_each = local.bootstrap_role_policies
 
   name                 = "${var.name_prefix}-github-bootstrap-${each.key}"
-  assume_role_policy   = data.aws_iam_policy_document.bootstrap_trust[each.key].json
+  assume_role_policy   = data.aws_iam_policy_document.github_trust["bootstrap-${each.key}"].json
   max_session_duration = 3600
 }
 
@@ -84,7 +60,6 @@ data "aws_iam_policy_document" "bootstrap_read" {
       "s3:GetLifecycleConfiguration",
       "s3:GetReplicationConfiguration",
       "s3:GetAccelerateConfiguration",
-      "s3:GetObjectLockConfiguration",
     ]
     resources = [aws_s3_bucket.state.arn]
   }
@@ -109,8 +84,10 @@ data "aws_iam_policy_document" "bootstrap_read" {
 }
 
 # On top of reading: writing the state and changing what the stack manages. The bucket
-# can't be deleted (prevent_destroy, and no s3:DeleteBucket here), and no credential can be
-# minted for the operator user: its keys stay out of band.
+# can't be deleted (prevent_destroy, and no s3:DeleteBucket here). Terraform never creates
+# the operator user's credentials (its keys stay out of band), so an applied plan can't
+# either. That is not a bound on what this role can grant: it edits every access policy,
+# its own included, and the reviewer's approval is what guards that.
 data "aws_iam_policy_document" "bootstrap_apply" {
   source_policy_documents = [data.aws_iam_policy_document.bootstrap_read.json]
 
@@ -148,18 +125,16 @@ data "aws_iam_policy_document" "bootstrap_apply" {
       "iam:UploadSSHPublicKey",
       "iam:UploadSigningCertificate",
     ]
-    resources = ["arn:aws:iam::${local.account_id}:user/${var.operator_user}"]
+    resources = [aws_iam_user.operator.arn]
   }
 }
 
 resource "aws_iam_role_policy" "github_bootstrap" {
-  for_each = local.bootstrap_environments
+  for_each = local.bootstrap_role_policies
 
-  name = "bootstrap-${each.key}"
-  role = aws_iam_role.github_bootstrap[each.key].id
-  policy = (each.key == "apply"
-    ? data.aws_iam_policy_document.bootstrap_apply.json
-  : data.aws_iam_policy_document.bootstrap_read.json)
+  name   = "bootstrap-${each.key}"
+  role   = aws_iam_role.github_bootstrap[each.key].id
+  policy = each.value
 }
 
 output "bootstrap_plan_role_arn" {
