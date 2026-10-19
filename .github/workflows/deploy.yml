@@ -3,8 +3,9 @@ name: Deploy
 # Build + push the core worker image (arm64) and the edge image (amd64) to ECR,
 # then terraform apply — entirely from CI via GitHub OIDC (no static AWS keys).
 # The Lightsail edge pulls its image from ECR (private-registry access). See
-# deploy/terraform/README.md. The root of trust (deploy/terraform/bootstrap: OIDC
-# provider + deploy role + state bucket) and the SSM secrets are admin-applied.
+# deploy/terraform/README.md. The deploy role trusts only jobs in the `production`
+# environment (which admits only master); the root of trust itself is applied by
+# bootstrap.yml. Actions are pinned to commit SHAs: this job holds AWS credentials.
 on:
   workflow_dispatch:
   push:
@@ -44,23 +45,24 @@ jobs:
     # image builds natively; the smaller edge image cross-builds for amd64 via
     # QEMU (cheaper to emulate than the heavy worker image).
     runs-on: ubuntu-24.04-arm
-    # Optional manual-approval gate; configure required reviewers on the
-    # `production` GitHub Environment to require sign-off before a deploy runs.
+    # The deploy role's trust names this environment, and the environment's
+    # deployment-branch rule admits only master. Add required reviewers to it for a
+    # manual sign-off before each deploy.
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
       # buildx for the gha layer cache; QEMU for the amd64 edge build on arm.
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
           terraform_version: "1.11.4"
 
@@ -97,7 +99,7 @@ jobs:
             | docker login --username AWS --password-stdin "${ECR_REPO%%/*}"
 
       - name: Build & push core worker image (arm64)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: deploy/Dockerfile.lambda
@@ -111,7 +113,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=worker
 
       - name: Build & push edge image (amd64)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: deploy/Dockerfile.edge

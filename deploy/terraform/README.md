@@ -10,7 +10,7 @@ Infrastructure-as-code for PetBot 2.1: two deployables over one neutral core.
   WebSocket, maps each `@mention` to a dispatched call, and invokes the worker.
 
 ```
-bootstrap/        root of trust: S3 state bucket + GitHub OIDC + CI deploy role (admin-applied)
+bootstrap/        root of trust: state bucket, GitHub OIDC, CI roles, workload boundary, operator access
 *.tf              the core worker (Lambda + ECR + IAM) and edge (Lightsail) stack
 backend.hcl.example       remote-state backend config (copy -> backend.hcl)
 terraform.tfvars.example  inputs (copy -> terraform.tfvars); no secrets here
@@ -77,42 +77,71 @@ scraping.
 
 ## Bootstrap (root of trust)
 
-`bootstrap/` holds what CI cannot create for itself: the remote-state bucket, the
-**GitHub Actions OIDC provider** and the **`petbot-github-deploy` IAM role** the CI
-pipeline assumes (no static AWS keys). An admin applies it; CI never does, so CI
-can never widen its own permissions. Its state lives in the same bucket, under
+`bootstrap/` holds what the root stack's CI cannot grant itself: the remote-state
+bucket, the **GitHub Actions OIDC provider**, the CI roles, the workload permissions
+boundary and the operator's access. Its state lives in the same bucket, under
 `bootstrap/terraform.tfstate`.
 
-The deploy role is scoped by naming convention: it may manage resources named
+**Who may assume what.** Every OIDC role trusts exactly one GitHub environment (the
+token's `sub` is `repo:auzbuzzard/petbot:environment:<name>` whenever a job references
+an environment), and each environment admits only `master`:
+
+| Role | Assumed by | Environment | Gate |
+| --- | --- | --- | --- |
+| `petbot-github-deploy` | `deploy.yml` (root stack) | `production` | `master` only |
+| `petbot-github-bootstrap-plan` | `bootstrap.yml`, plan job (read-only) | `bootstrap-plan` | `master` only |
+| `petbot-github-bootstrap-apply` | `bootstrap.yml`, apply job | `bootstrap` | `master` only + required reviewer |
+| `petbot-operator` | the `claude` IAM user (`sts:AssumeRole`) | — | read-only |
+
+No pull request, other branch or other workflow (the AI review bots hold
+`id-token: write`) can assume any of them. The deploy role is explicitly denied the
+access roles (`<name_prefix>-github-*`, `<name_prefix>-operator`), so it can't widen
+its own or anyone's permissions.
+
+**The deploy role** is scoped by naming convention: it may manage resources named
 `<name_prefix>-*` (ECR repos, the Lambda and its log group, DynamoDB tables, IAM
-roles and users) and is explicitly denied the CI roles themselves
-(`<name_prefix>-github-*`, and the operator role below). Every role and user it creates must carry the
+roles and users). Every role and user it creates must carry the
 **`<name_prefix>-workload-boundary`** permissions boundary, so no policy CI writes
 can grant a workload more than that ceiling (no IAM; data-plane access to the
 stack's own resources). Adding resources to the root stack therefore needs **no
-bootstrap change**; only a new AWS service does. Then the PR edits
-`bootstrap/main.tf`, and an admin applies it **before** merging (CI's deploy would
-otherwise fail with `AccessDenied`):
+bootstrap change**; only a new AWS service does.
+
+**Changing bootstrap** is a PR like any other. After it merges, `bootstrap.yml`
+plans with the read-only role and posts the plan to the run's summary; the run then
+waits on the `bootstrap` environment until a required reviewer approves, and applies
+that exact plan. A PR that needs the new permission in its own deploy (a new AWS
+service) lands its bootstrap change first.
+
+**GitHub settings** (Settings → Environments; one time, by a repo admin). These are
+part of the trust model: without the branch rule, any branch could reference the
+environment and assume its role.
+
+| Environment | Deployment branches | Required reviewers |
+| --- | --- | --- |
+| `production` | Selected: `master` | optional |
+| `bootstrap-plan` | Selected: `master` | none |
+| `bootstrap` | Selected: `master` | the repo owner |
+
+**Seeding (once per account, by an admin).** The pipeline can't create the roles it
+assumes, so the first apply is by hand, with admin credentials (e.g. CloudShell with
+Terraform installed):
 
 ```sh
-cd bootstrap
-cp backend.hcl.example backend.hcl   # once; fill in the bucket name
-terraform init -backend-config=backend.hcl
-terraform plan  -var "state_bucket=petbot-tfstate-<your-account-id>"
-terraform apply -var "state_bucket=petbot-tfstate-<your-account-id>"
-```
+# A new account only: create the bucket the state will live in, then adopt it below.
+aws s3api create-bucket --bucket petbot-tfstate-<account-id> --region us-east-1   # elsewhere also pass --create-bucket-configuration LocationConstraint=<region>
 
-**First run in a new account.** The bucket that will hold the state doesn't exist
-yet, so create it, then let Terraform adopt it:
-
-```sh
-aws s3api create-bucket --bucket petbot-tfstate-<your-account-id> --region us-east-1   # outside us-east-1 also pass --create-bucket-configuration LocationConstraint=<region>
-cd bootstrap && cp backend.hcl.example backend.hcl   # fill in the bucket name
+cd deploy/terraform/bootstrap
+cp backend.hcl.example backend.hcl   # fill in the bucket name
 terraform init -backend-config=backend.hcl
-terraform import -var "state_bucket=petbot-tfstate-<your-account-id>" aws_s3_bucket.state petbot-tfstate-<your-account-id>
-terraform apply  -var "state_bucket=petbot-tfstate-<your-account-id>"
+terraform import -var "state_bucket=petbot-tfstate-<account-id>" aws_s3_bucket.state petbot-tfstate-<account-id>   # new account only
+terraform import -var "state_bucket=petbot-tfstate-<account-id>" aws_iam_user.operator claude                       # if the user exists
+terraform apply  -var "state_bucket=petbot-tfstate-<account-id>"
 cd .. && cp backend.hcl.example backend.hcl   # root stack backend
 ```
+
+Then set the GitHub variables below from `terraform output`. From here on, no one
+applies bootstrap by hand.
+
 Set the following repo **Variables** (Settings → Secrets and variables → Actions
 → Variables — these are non-secret; the actual secret *values* live in SSM,
 referenced here only by parameter name). The deploy reads them as `TF_VAR_*`:
@@ -120,6 +149,8 @@ referenced here only by parameter name). The deploy reads them as `TF_VAR_*`:
 | GitHub Actions variable | Value | Where it comes from |
 | --- | --- | --- |
 | `DEPLOY_ROLE_ARN` | the deploy role ARN | `terraform -chdir=bootstrap output deploy_role_arn` |
+| `BOOTSTRAP_PLAN_ROLE_ARN` | the bootstrap plan role ARN | `terraform -chdir=bootstrap output bootstrap_plan_role_arn` |
+| `BOOTSTRAP_APPLY_ROLE_ARN` | the bootstrap apply role ARN | `terraform -chdir=bootstrap output bootstrap_apply_role_arn` |
 | `AWS_REGION` | e.g. `us-east-1` | your choice (match `backend.hcl` / SSM region) |
 | `TF_STATE_BUCKET` | the state bucket name | the `state_bucket` you chose above |
 | `CHAT_LLM_KIND` | `bedrock` \| `openai_compatible` \| `openrouter` | your choice of provider |
@@ -162,12 +193,10 @@ credential_source   = Environment
 region              = us-east-1
 ```
 
-An existing user is adopted once, by an admin, before the apply:
-`terraform import -var "state_bucket=..." aws_iam_user.operator claude`.
-The user must hold nothing besides that `sts:AssumeRole` (no group, no attached
-policy). AWS's `ReadOnlyAccess`, for one, reads every S3 object, including the state.
-Elevated changes (bootstrap applies, policy edits) are never part of this role: an
-admin runs them.
+An existing user is adopted at seeding (see above). The user must hold nothing
+besides that `sts:AssumeRole` (no group, no attached policy). AWS's
+`ReadOnlyAccess`, for one, reads every S3 object, including the state. Changes to
+access go through the bootstrap pipeline, never through this role.
 
 ## CI deploy (the steady-state path)
 
@@ -233,7 +262,8 @@ terraform destroy
 cd bootstrap && terraform init -backend-config=backend.hcl
 ```
 
-Bootstrap's state lives in the bucket it destroys, so move it off first: delete the
+Bootstrap's state lives in the bucket it destroys, and the bucket is
+`prevent_destroy`, so: remove the bucket's `prevent_destroy`, delete the
 `backend "s3" {}` block from `bootstrap/main.tf`, run `terraform init -migrate-state`,
 empty the versioned bucket (console → *Empty*), then
 `terraform destroy -var "state_bucket=petbot-tfstate-<your-account-id>"`.

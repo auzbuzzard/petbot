@@ -1,7 +1,7 @@
 # --- Operator access: read-only triage (plus invoking the core for integration tests) --
 # The operator (an agent or a human on call) reads logs, deployments and tables to
 # triage incidents, and invokes the core worker to test prompts end to end. It is part
-# of the root of trust, like the CI role: an admin grants it here and CI can never edit
+# of the root of trust, like the CI roles: bootstrap grants it, and the deploy role can never edit
 # it (DenyAccessRoles). The operator's IAM user holds long-lived keys, created out of
 # band and never in Terraform state; the user may only assume petbot-operator, whose
 # sessions last at most an hour. Secrets stay out of reach: no ssm:GetParameter, and

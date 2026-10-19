@@ -1,0 +1,128 @@
+name: Bootstrap
+
+# Applies deploy/terraform/bootstrap, the root of trust: the CI roles, the workload
+# boundary, the operator's access and the state bucket. A change merged to master is
+# planned with a read-only role, and that exact plan is applied only after a required
+# reviewer approves the `bootstrap` environment, having read the plan in the run's
+# summary. Each job assumes its role from its environment, and both environments admit
+# only master, so no branch, pull request or other workflow can reach these roles. See
+# deploy/terraform/README.md "Bootstrap".
+on:
+  push:
+    branches: [master]
+    paths:
+      - "deploy/terraform/bootstrap/**"
+      - ".github/workflows/bootstrap.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: bootstrap
+  cancel-in-progress: false
+
+env:
+  TF_DIR: deploy/terraform/bootstrap
+  TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+  TF_VAR_state_bucket: ${{ vars.TF_STATE_BUCKET }}
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    environment: bootstrap-plan
+    outputs:
+      changes: ${{ steps.plan.outputs.changes }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.BOOTSTRAP_PLAN_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: "1.11.4"
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=bootstrap/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+
+      # -detailed-exitcode: 0 = no changes, 2 = changes, 1 = error.
+      - name: Terraform plan
+        id: plan
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          set +e
+          terraform plan -input=false -no-color -lock-timeout=120s -detailed-exitcode -out=bootstrap.tfplan > plan.txt 2>&1
+          code=$?
+          set -e
+          cat plan.txt
+          if [ "$code" -eq 1 ]; then exit 1; fi
+          echo "changes=$([ "$code" -eq 2 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Bootstrap plan"
+            echo '```'
+            tail -c 60000 plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The apply job applies this exact plan, built against this provider lock.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.plan.outputs.changes == 'true'
+        with:
+          name: bootstrap-plan
+          path: |
+            ${{ env.TF_DIR }}/bootstrap.tfplan
+            ${{ env.TF_DIR }}/.terraform.lock.hcl
+          retention-days: 1
+          include-hidden-files: true
+
+  apply:
+    needs: plan
+    if: needs.plan.outputs.changes == 'true'
+    runs-on: ubuntu-latest
+    # Required reviewer: the run waits here until approved.
+    environment: bootstrap
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: bootstrap-plan
+          path: ${{ env.TF_DIR }}
+
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.BOOTSTRAP_APPLY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: "1.11.4"
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init -input=false -lockfile=readonly \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=bootstrap/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+
+      # A saved plan refuses to apply if the state moved since it was made.
+      - name: Terraform apply (the reviewed plan)
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform apply -input=false -no-color -lock-timeout=120s bootstrap.tfplan
