@@ -50,7 +50,8 @@ Discord ⇄ [ frontend ]  --Input(JSON)-->  [ core service ]  chat(LLM) · math 
    the **chat process** (the pydantic-ai brain, which voices itself; it feeds
    `TextInput.history` to the agent as message history and reactively compacts it — a
    DI-selected sliding window or summarizer — only if the model rejects the conversation
-   for length) or the **command process** (which runs the resolved tool and applies the
+   for length, and grounds each run with per-run instructions: the current UTC time, the
+   speaker's display name, and whether the channel is age-gated) or the **command process** (which runs the resolved tool and applies the
    persona `StylePort`). Tools are called in-process through the `ToolRegistry`; the
    agent's tools and the slash surface both derive from one `CATALOG`.
 4. The service returns a neutral `SkillResult`; the frontend renders it (the one place
