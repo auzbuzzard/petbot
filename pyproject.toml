@@ -52,8 +52,9 @@ compute-core = [
     # Capped below the next major: 2.x changed `openai_model_profile` to return a
     # non-dataclass, breaking the `dataclasses.replace` in process/model.py. A rebuilt
     # image must not pull a new major out from under the pinned lock.
-    # `web-fetch` brings markdownify for the fetch skill's HTML-to-markdown conversion.
-    "pydantic-ai-slim[bedrock,openai,web-fetch]>=1.107,<2",
+    "pydantic-ai-slim[bedrock,openai]>=1.107,<2",
+    # Main-content extraction for the fetch skill: a page's article, not its navigation.
+    "trafilatura>=2.0",
     # Keyless web-search fallback (metasearch over public result pages).
     "ddgs>=9.16",
 ]

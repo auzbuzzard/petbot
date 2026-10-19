@@ -3,6 +3,7 @@ all without a live LLM (``TestModel``) or live skills (fakes in a real ToolRegis
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from typing import Any
@@ -732,3 +733,27 @@ async def test_agent_offers_every_catalog_tool_including_agent_only_ones() -> No
         TextInput(text="hi", history=Recalled(turns=())), _ctx()
     )
     assert offered == {"math", "derpi", "e621", "web_search", "web_fetch", "weather"}
+
+
+async def test_chat_answers_with_a_fallback_when_the_turn_runs_out_of_time() -> None:
+    from petbot.platform import budget
+
+    async def slow(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        await asyncio.sleep(5)
+        return ModelResponse(parts=[TextPart(content="too late")])
+
+    chat = ChatProcess(_registry(), model=FunctionModel(slow))
+    with budget(0.05):
+        result = await chat.respond(TextInput(text="hi", history=Recalled(turns=())), _ctx())
+    assert result.text is not None and "took me too long" in result.text
+
+
+async def test_a_timeout_inside_the_run_is_not_mistaken_for_the_budget() -> None:
+    from petbot.platform import budget
+
+    def broken(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        raise TimeoutError("upstream")
+
+    chat = ChatProcess(_registry(), model=FunctionModel(broken))
+    with budget(30), pytest.raises(TimeoutError, match="upstream"):
+        await chat.respond(TextInput(text="hi", history=Recalled(turns=())), _ctx())
