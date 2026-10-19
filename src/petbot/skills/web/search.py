@@ -153,10 +153,8 @@ def format_hits(query: str, hits: Sequence[SearchHit]) -> str:
         if hit.snippet:
             lines.append(f"   {_clip(hit.snippet, MAX_SNIPPET)}")
     lines.append(
-        "These are short excerpts. Never state a date that isn't shown here or in a page you "
-        "read. If the question is about the latest or current state of something, read the "
-        "most authoritative source above with web_fetch before answering. Answer only from "
-        "what you read, and end your reply with the links you used, written as <url>."
+        "Answer only from these results, never state a date that isn't shown here, and end "
+        "your reply with the links you used, written as <url>."
     )
     return "\n".join(lines)
 
