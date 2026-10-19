@@ -133,10 +133,16 @@ is consolidated** until scale justifies splitting:
   into "couldn't reach my brain". So the *first* message after a quiet spell always
   failed and the next one worked. That looked like a DM-vs-guild bug, because the first
   try was in a guild and the retry was a DM. `LambdaTransport` now re-invokes on
-  `ResourceConflictException` / `ResourceNotReadyException` with backoff, for up to 60 s.
+  `ResourceConflictException` / `ResourceNotReadyException` with backoff, for up to 120 s.
   Re-invoking is safe because the function never ran. It also raises a `FunctionError`
   response with the runtime's own message instead of mis-parsing it as a `SkillResult`.
-  A deploy's brief `Pending` window is covered too.
+  A deploy's brief `Pending` window is covered too. Letting the function go `Inactive` is
+  accepted: no keep-warm ping. The wait is made visible instead. An @mention turn runs
+  under the typing indicator, and past 10 s (`THINKING_AFTER_SECONDS`) the edge also posts
+  a `-# 💭 thinking…` placeholder reply, deleted once the answer is sent. Ten seconds is
+  Nielsen's attention limit and one typing trigger's life, and it clears a normal cold
+  start (~9 s end to end), so only abnormal waits get the placeholder. Slash commands
+  already show Discord's own "thinking…" from their deferred response.
 
 ### 5. Repository structure — uv workspace, hexagonal
 

@@ -82,7 +82,7 @@ class LambdaTransport(Transport):
         function_name: str,
         client: _LambdaClient,
         *,
-        ready_timeout: float = 60.0,
+        ready_timeout: float = 120.0,
         retry_delay: float = 1.0,
     ) -> None:
         self._function_name = function_name

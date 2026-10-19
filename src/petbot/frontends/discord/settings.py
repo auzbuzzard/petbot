@@ -13,6 +13,8 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from petbot.frontends.discord.thinking import THINKING_AFTER_SECONDS
+
 
 class HttpService(BaseModel):
     """Reach the compute service over HTTP."""
@@ -49,6 +51,9 @@ class DiscordSettings(BaseSettings):
     #: How many reply-chain ancestors to fetch when reconstructing conversation history
     #: (a Discord-API cost bound, not a model-context bound). Env ``HISTORY_MAX_TURNS``.
     history_max_turns: int = 25
+    #: Seconds a conversational turn may run on the typing indicator alone before PetBot
+    #: posts a "thinking…" placeholder. Env ``THINKING_AFTER_SECONDS``.
+    thinking_after_seconds: float = THINKING_AFTER_SECONDS
     #: The compute service to dispatch to (required; see ``SERVICE__*``).
     service: ServiceTarget
 
