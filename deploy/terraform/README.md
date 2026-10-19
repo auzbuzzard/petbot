@@ -86,7 +86,7 @@ can never widen its own permissions. Its state lives in the same bucket, under
 The deploy role is scoped by naming convention: it may manage resources named
 `<name_prefix>-*` (ECR repos, the Lambda and its log group, DynamoDB tables, IAM
 roles and users) and is explicitly denied the CI roles themselves
-(`<name_prefix>-github-*`). Every role and user it creates must carry the
+(`<name_prefix>-github-*`, and the operator role below). Every role and user it creates must carry the
 **`<name_prefix>-workload-boundary`** permissions boundary, so no policy CI writes
 can grant a workload more than that ceiling (no IAM; data-plane access to the
 stack's own resources). Adding resources to the root stack therefore needs **no
@@ -138,6 +138,36 @@ different base URL.
 That's the complete list — once these Variables and the SSM secrets above exist,
 a push to `master` runs a green deploy. (Merging the PR alone does **not** create
 them; this one-time setup is yours to do.)
+
+## Operator access (read-only triage)
+
+`bootstrap/operator.tf` gives the operator (an agent such as Claude, or a human on
+call) what triage needs and nothing more: the stack's Lambda logs, the edge's
+container logs and deployments, function config, the stack's DynamoDB tables, ECR
+images, IAM reads and policy simulation, metrics, traces and CloudTrail, plus
+`lambda:InvokeFunction` on the core worker for integration tests. No secrets
+(`ssm:GetParameter`), no state bucket (Terraform state holds the injected secrets),
+no writes.
+
+The IAM user `operator_user` (default `claude`) may only assume `petbot-operator`
+(1-hour sessions). Its access keys are created out of band (console or
+`aws iam create-access-key`), never in Terraform state. Point the operator's AWS
+config at the role, with the user's keys in the environment:
+
+```ini
+# ~/.aws/config
+[default]
+role_arn            = arn:aws:iam::<account-id>:role/petbot-operator
+credential_source   = Environment
+region              = us-east-1
+```
+
+An existing user is adopted once, by an admin, before the apply:
+`terraform import -var "state_bucket=..." aws_iam_user.operator claude`.
+The user must hold nothing besides that `sts:AssumeRole` (no group, no attached
+policy). AWS's `ReadOnlyAccess`, for one, reads every S3 object, including the state.
+Elevated changes (bootstrap applies, policy edits) are never part of this role: an
+admin runs them.
 
 ## CI deploy (the steady-state path)
 

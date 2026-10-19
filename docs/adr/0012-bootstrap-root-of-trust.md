@@ -29,7 +29,8 @@ Two of its choices made every infrastructure addition a manual ordeal:
   `<name_prefix>-*` (ECR repositories, Lambda functions and their log groups, DynamoDB
   tables, IAM roles and users, PassRole to Lambda only), plus account-wide calls that
   have no resource form (ECR login, log-group listing, Lightsail). An explicit deny on
-  `role/<name_prefix>-github-*` keeps it from editing the CI roles.
+  `role/<name_prefix>-github-*` keeps it from editing the CI roles (and, since the
+  operator role was added, `role/<name_prefix>-operator`).
 - Name scoping alone would still let CI create a `petbot-*` user or role with an admin
   policy. So bootstrap also owns a **permissions boundary**,
   `<name_prefix>-workload-boundary` (no IAM; logs, telemetry, model invocation and
@@ -53,3 +54,20 @@ Two of its choices made every infrastructure addition a manual ordeal:
   that, since it already reads that user's key from SSM.
 - Adopting the existing account: the seven bootstrap resources were imported into the
   remote state; the changes applied were the deploy role's policy and the new boundary.
+
+## Follow-on: operator access (2026-10)
+
+Triage (reading the edge's container logs, the Lambda's logs, the claims table) and
+integration tests (invoking the core) had been done outside IaC: the `claude` IAM user
+sat in a hand-made `claude-automation` group with AWS's `ReadOnlyAccess` (plus a deny on
+two SSM secrets), and gained Lightsail logs and Lambda invoke from hand-attached inline
+policies. `ReadOnlyAccess` also reads the state bucket, i.e. every secret Terraform
+injected, so the SSM deny protected nothing. Bootstrap now owns that access too:
+`petbot-operator`, a read-only role plus `lambda:InvokeFunction` on the core, assumed
+by the `claude` user, whose only permission is that `sts:AssumeRole`. It sits in
+bootstrap, not the root stack, because who may access the account belongs to the root
+of trust; CI is denied it like its own role. Secrets (SSM, Terraform state) and every
+write stay out of it; elevated changes are an admin's. The group is removed, so the
+user holds nothing but the `sts:AssumeRole`. The cost: the operator can no longer plan
+bootstrap (it reads neither bootstrap's state nor the IAM it would diff), which is the
+point; an admin plans and applies it.

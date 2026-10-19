@@ -213,7 +213,7 @@ output "workload_boundary_arn" {
 # where enumerating every Terraform-issued call is brittle; each statement is scoped to
 # resources named <name_prefix>-*, so a stolen CI token reaches this stack and nothing
 # else in the account. IAM writes require the workload boundary, and the CI roles are
-# carved out (DenyCiRoles), so the deploy role can never widen its own permissions.
+# carved out (DenyAccessRoles), so the deploy role can never widen its own permissions.
 data "aws_iam_policy_document" "deploy_permissions" {
   # The root stack's state only (deploy.yml: key=<name_prefix>/terraform.tfstate);
   # bootstrap's own state, in the same bucket, stays out of CI's reach.
@@ -391,13 +391,17 @@ data "aws_iam_policy_document" "deploy_permissions" {
     resources = ["*"]
   }
 
-  # The CI roles share the stack's prefix (<name_prefix>-github-*); an explicit deny
-  # keeps the deploy role from editing them, i.e. from granting itself more.
+  # The access roles share the stack's prefix: CI's (<name_prefix>-github-*) and the
+  # operator's (operator.tf). An explicit deny keeps the deploy role from editing them,
+  # i.e. from granting itself, or anyone, more.
   statement {
-    sid       = "DenyCiRoles"
-    effect    = "Deny"
-    actions   = ["iam:*"]
-    resources = ["arn:aws:iam::${local.account_id}:role/${var.name_prefix}-github-*"]
+    sid     = "DenyAccessRoles"
+    effect  = "Deny"
+    actions = ["iam:*"]
+    resources = [
+      "arn:aws:iam::${local.account_id}:role/${var.name_prefix}-github-*",
+      aws_iam_role.operator.arn,
+    ]
   }
 }
 
