@@ -13,6 +13,10 @@ Styling is a *uniform output stage*: every process runs its result through a
 
 from __future__ import annotations
 
+import logging
+import re
+import unicodedata
+
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
 
@@ -20,21 +24,63 @@ from petbot.domain import SkillContext, SkillResult, StylePort
 from petbot.process.model import build_model_from_config
 from petbot.process.settings import ChatSettings
 
+logger = logging.getLogger(__name__)
+
+#: Discord's display-name limit; also bounds what a user-chosen name can inject.
+_MAX_NAME = 32
+
+#: A fenced code block: formatted output (a math transcript) shown verbatim, never restated.
+_FENCE = re.compile(r"```.*?```", re.DOTALL)
+
+#: The facts a restatement must keep word for word: links and numbers.
+_FACT = re.compile(r"https?://\S+|\d+(?:[.,]\d+)*")
+
+
+def addressee(ctx: SkillContext) -> str | None:
+    """The requesting user's display name, made safe to put in a prompt: control characters
+    and newlines dropped, whitespace collapsed, capped at Discord's 32 characters. ``None`` if
+    nothing printable is left."""
+    printable = "".join(
+        " " if ch.isspace() else ch
+        for ch in ctx.user.display_name
+        if ch.isspace() or not unicodedata.category(ch).startswith("C")
+    )
+    name = " ".join(printable.split())[:_MAX_NAME].strip()
+    return name or None
+
+
+def speaker_line(ctx: SkillContext) -> str:
+    """The sentence that tells a model who it is talking to (see :func:`addressee`)."""
+    name = addressee(ctx)
+    return f"You are talking with {name}." if name else "You don't know the user's name."
+
 
 def _describe(result: SkillResult, ctx: SkillContext) -> str | None:
     """What the stylist is asked to voice, or ``None`` if there's nothing to say.
 
-    A result with text carries a line to relay (an answer, or a voiced failure note); a
-    result with only a card is a found image to greet over (the card is shown separately).
+    A result with formatted output (a fenced code block) gets a one-line introduction only,
+    since the output itself is shown verbatim beneath it. Other text is restated. A result
+    with only a card is a found image to greet over (the card is shown separately).
     """
+    if result.text and _FENCE.search(result.text):
+        return (
+            f"{speaker_line(ctx)} This result is shown to them verbatim right below your "
+            "line, so do not restate or summarise it; just introduce it."
+            f"\n<result>\n{result.text}\n</result>"
+        )
     if result.text:
-        return result.text
+        return f"{speaker_line(ctx)} Restate this result.\n<result>\n{result.text}\n</result>"
     if result.embed is not None:
-        note = "An image was found and is being shown to the user."
+        note = f"{speaker_line(ctx)} An image was found and is being shown to them."
         if ctx.allows_explicit:
             note += " The channel is age-gated (NSFW), so it may be explicit."
         return note
     return None
+
+
+def _keeps_facts(original: str, restated: str) -> bool:
+    """Whether every link and number in ``original`` survives into ``restated``."""
+    return all(fact in restated for fact in _FACT.findall(original))
 
 
 class Stylist(StylePort):
@@ -60,11 +106,20 @@ class Stylist(StylePort):
         return self._model
 
     async def stylize(self, result: SkillResult, ctx: SkillContext) -> SkillResult:
+        """Voice ``result``. Formatted output keeps its text verbatim under a voiced line; a
+        restatement that loses a number or link is discarded for the original text, since a
+        correct answer beats an in-character wrong one."""
         prompt = _describe(result, ctx)
         if prompt is None:
             return result
-        styled = await self._agent.run(prompt, model=self._resolved_model())
-        return result.model_copy(update={"text": styled.output})
+        styled = (await self._agent.run(prompt, model=self._resolved_model())).output.strip()
+        text = result.text
+        if text and _FENCE.search(text):
+            return result.model_copy(update={"text": f"{styled}\n{text}"})
+        if text and not _keeps_facts(text, styled):
+            logger.warning("stylist dropped a fact from the result; sending it unstyled")
+            return result
+        return result.model_copy(update={"text": styled})
 
 
 class PassthroughStyle(StylePort):

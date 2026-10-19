@@ -58,6 +58,15 @@ reuses the agent's model.
 - A cheaper stylizer tier is a config flip, not code.
 - Token cost is negligible at this scale (the always-on edge holder dominates), so the
   tier is chosen for latency/fit, not savings.
+- Follow-on (2026-10): a prompt is not a guarantee. Live, Gemma 4 turned `/math 6 * 7`
+  (a `py` code-block transcript) into "Here's what I found, [Name]! ^v^", dropping the 42
+  despite "drop nothing". The stylist now enforces the facts in code instead of asking:
+  a result with a fenced code block keeps its text verbatim under a one-line voiced
+  introduction, and a restatement that loses any number or link from the original is
+  discarded for the original text. The "[Name]" came from the persona's "address people
+  by name" with no name given. Both the stylist and the chat agent are now told the
+  requesting user's display name, sanitized (control characters and newlines stripped,
+  capped at Discord's 32 characters) because it is user-chosen text in a prompt.
 
 ## Open issue — the pipeline does not yet match the intended DDD layering
 

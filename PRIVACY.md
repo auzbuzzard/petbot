@@ -18,12 +18,16 @@ The data controller for the hosted instance is **[CONTROLLER NAME]**, contactabl
 
 ## What PetBot processes, and why
 
-PetBot replies when you @mention it or reply to one of its messages.
+PetBot replies when you message it directly (DM), @mention it, or reply to one of its
+messages.
 
 - **Message content (processed, not stored).** To generate a reply, PetBot reads the text of
   the message that mentions or replies to it, plus the immediate reply-chain it is part of.
   This content is used **in memory to produce the response and then discarded**. We do **not**
   write message content to any database, log, or telemetry system.
+- **Display name (processed, not stored).** Your display name is given to the model with
+  your message so PetBot can address you by name, the same way the names of other people
+  in a reply chain are. It is used in memory for that reply only.
 - **Search queries.** A message may ask PetBot to search an image board (Derpibooru, e621).
   The query is sent to that third-party site to fetch a result. The query text is **not**
   stored by us.

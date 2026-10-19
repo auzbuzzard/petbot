@@ -44,7 +44,7 @@ from petbot.process.context import (
 from petbot.process.history import drop_leading_assistant, to_model_messages
 from petbot.process.model import build_model
 from petbot.process.settings import ChatSettings
-from petbot.process.voice import PassthroughStyle
+from petbot.process.voice import PassthroughStyle, speaker_line
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,9 @@ class ChatProcess(Process):
                 history, note, recalled = [], _LOST_CONTEXT_NOTE, False
             case _:
                 assert_never(inp.history)
-        result = await self._run(inp.text, history, deps, instructions=note)
+        speaker = speaker_line(ctx)
+        instructions = f"{speaker}\n\n{note}" if note else speaker
+        result = await self._run(inp.text, history, deps, instructions=instructions)
         self._log_outcome(result, ctx, recalled=recalled)
         card = next((a for a in deps.attachments if a.embed is not None), None)
         files = tuple(f for a in deps.attachments for f in a.files)
