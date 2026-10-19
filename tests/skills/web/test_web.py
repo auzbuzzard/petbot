@@ -6,6 +6,8 @@ replaced by fakes so nothing leaves the process.
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 import respx
@@ -122,9 +124,39 @@ async def test_search_rejects_a_blank_query() -> None:
 def test_format_hits_numbers_results_and_clips_snippets() -> None:
     text = format_hits("q", [SearchHit(title="A", url="https://a.test", snippet="x" * 1000)])
     lines = text.splitlines()
-    assert lines[1] == "1. A — <https://a.test>"
+    assert lines[1] == "1. A — <https://a.test> (date unknown)"
     assert len(lines[2].strip()) <= 400 and lines[2].endswith("…")
+    assert "never state a date that isn't shown here" in lines[-1]
     assert "end your reply with the links you used" in lines[-1]
+
+
+def test_format_hits_shows_the_publication_date_when_known() -> None:
+    hit = SearchHit(title="Gemma 3 270M", url="https://n.test", snippet="s", published="2025-08-14")
+    assert format_hits("q", [hit]).splitlines()[1].endswith("(published 2025-08-14)")
+
+
+@respx.mock
+async def test_tavily_asks_for_dates_and_safe_results_and_keeps_the_day() -> None:
+    route = respx.post(TAVILY_URL).respond(
+        json={
+            "results": [
+                {
+                    "title": "T",
+                    "url": "https://x.test/a",
+                    "content": "c",
+                    "published_date": "2025-08-14T09:00:00Z",
+                },
+                {"title": "U", "url": "https://x.test/b", "content": "c", "published_date": None},
+            ]
+        }
+    )
+    async with httpx.AsyncClient() as client:
+        hits = await TavilyProvider(client, "k").search("q", safe=True)
+        await TavilyProvider(client, "k").search("q", safe=False)
+    assert [h.published for h in hits] == ["2025-08-14", None]
+    first, second = (json.loads(c.request.content) for c in route.calls)
+    assert first["include_published_date"] is True
+    assert (first["safe_search"], second["safe_search"]) == (True, False)
 
 
 async def test_search_asks_for_safe_results_outside_age_gated_channels() -> None:
@@ -216,8 +248,43 @@ async def test_fetch_converts_html_and_sends_the_original_host() -> None:
     text = await _fetch("https://a.test/p")
     assert "<https://a.test/p>" in text and "Title: Hello" in text
     assert text.endswith("cite it as <https://a.test/p>.")
-    assert "# Hi" in text or "Hi\n==" in text
+    assert "Hi" in text and "body" in text
     assert route.calls.last.request.headers["host"] == "a.test"
+
+
+_ARTICLE = "The striped hyena is a species of hyena native to North and East Africa. " * 8
+_NAV = "".join(f'<li><a href="/wiki/Page_{i}">Navigation link {i}</a></li>' for i in range(60))
+_PAGE = f"""<html><head><title>Striped hyena</title>
+<script type="application/ld+json">{{"@context": "https://schema.org", "@type": "Article"}}</script>
+</head><body>
+<nav><ul>{_NAV}</ul></nav>
+<main><article><h1>Striped hyena</h1><p>{_ARTICLE}</p>
+<h2>Conservation</h2><p>It is listed as Near Threatened on the IUCN Red List.
+The global population is estimated at under 10,000 mature individuals.</p></article></main>
+<footer>{"".join(f'<a href="/f/{i}">Footer link {i}</a> ' for i in range(40))}</footer>
+</body></html>"""
+
+
+def test_to_markdown_keeps_the_article_not_the_navigation() -> None:
+    title, text = fetch_module.to_markdown("text/html", _PAGE, "https://a.test/wiki/Striped_hyena")
+    assert title == "Striped hyena"
+    assert "Near Threatened" in text and "native to North and East Africa" in text
+    assert "Navigation link" not in text and "Footer link" not in text
+    assert "](" not in text and "schema.org" not in text  # no link markup, no JSON-LD
+
+
+def test_to_markdown_falls_back_to_visible_text_without_main_content() -> None:
+    _, text = fetch_module.to_markdown(
+        "text/html", "<html><body><a href='/x'>Sign in</a></body></html>", "https://a.test"
+    )
+    assert text == "Sign in"
+
+
+def test_to_markdown_passes_non_html_text_through() -> None:
+    assert fetch_module.to_markdown("text/plain", "plain words", "https://a.test") == (
+        "",
+        "plain words",
+    )
 
 
 @respx.mock

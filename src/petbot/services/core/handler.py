@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from contextlib import nullcontext
 from typing import Any
 
 from petbot.domain import Process
@@ -23,7 +24,7 @@ from petbot.observability import (
     configure_observability,
     flush_observability,
 )
-from petbot.platform import serve
+from petbot.platform import budget, serve
 from petbot.services.core import build_process
 
 # Cold start, once per execution environment. The Lambda runtime installs no app logging, so
@@ -35,6 +36,10 @@ configure_observability(ObservabilitySettings())
 
 _process: Process | None = None
 _loop: asyncio.AbstractEventLoop | None = None
+
+#: Seconds of the invocation kept back from the turn's budget for encoding the result and
+#: flushing telemetry, so a turn that runs out of budget still returns before Lambda kills it.
+_RESERVE_SECONDS = 5.0
 
 
 def _get_process() -> Process:
@@ -60,8 +65,18 @@ def handler(event: dict[str, Any], context: object = None) -> dict[str, Any]:
     itself, which the frontend parses directly.
     """
     body = event["body"] if isinstance(event, dict) and "body" in event else json.dumps(event)
+    # The invocation's own clock sets the turn's budget; a call without a Lambda context
+    # (a local test) runs unbounded. An invocation that starts inside the reserve gets a
+    # zero budget: the turn answers with its fallback at once rather than being killed.
+    remaining_ms = getattr(context, "get_remaining_time_in_millis", None)
+    scope = (
+        budget(max(0.0, remaining_ms() / 1000 - _RESERVE_SECONDS))
+        if callable(remaining_ms)
+        else nullcontext()
+    )
     try:
-        out = _get_loop().run_until_complete(serve(_get_process(), body))
+        with scope:
+            out = _get_loop().run_until_complete(serve(_get_process(), body))
         result: dict[str, Any] = json.loads(out)
         return result
     finally:
