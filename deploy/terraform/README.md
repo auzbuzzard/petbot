@@ -28,7 +28,9 @@ Discord ⇄ [ edge ]  --boto3 invoke (IAM)-->  [ core worker Lambda ]  math · b
 
 The edge carries a **scoped IAM user** whose only permissions are
 `lambda:InvokeFunction` and `lambda:GetFunctionConfiguration` (to wait out an
-Inactive/Pending function) on the core worker. Its access key is injected into the
+Inactive/Pending function) on the core worker, and `dynamodb:PutItem` /
+`dynamodb:UpdateItem` on its `petbot-edge-claims` table (one copy answers each
+message; see `claims.tf`). Its access key is injected into the
 container's environment (Lightsail container services have no IAM instance roles).
 No public, unauthenticated surface exists, so there is no LLM cost-abuse vector.
 
