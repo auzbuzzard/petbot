@@ -22,6 +22,7 @@ from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models import Model
 from pydantic_ai.models.instrumented import InstrumentationSettings
+from pydantic_ai.settings import ModelSettings
 
 from petbot.domain import (
     Input,
@@ -144,6 +145,8 @@ class ChatProcess(Process):
         self._clock = clock
         self._agent = build_agent(self._settings.system_prompt, instrumentation=instrumentation)
         self._compactor: Compactor = build_compactor(self._settings, model=model)
+        thinking = self._settings.thinking
+        self._model_settings = ModelSettings(thinking=thinking) if thinking is not None else None
 
     def _resolved_model(self) -> Model | str:
         if self._model is None:
@@ -235,6 +238,7 @@ class ChatProcess(Process):
                     message_history=history,
                     deps=deps,
                     model=model,
+                    model_settings=self._model_settings,
                     instructions=instructions,
                 )
             except ModelHTTPError as exc:

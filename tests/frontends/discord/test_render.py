@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
-from collections.abc import AsyncIterator
-
 import discord
 
 from petbot.domain import (
@@ -52,10 +49,6 @@ class FakeChannel:
     ) -> None:
         self.sent.append({"content": content, "embed": embed})
         self.kwargs.append({"reference": reference, "mention_author": mention_author})
-
-    @contextlib.asynccontextmanager
-    async def typing(self) -> AsyncIterator[None]:
-        yield
 
 
 class FakeAuthor:

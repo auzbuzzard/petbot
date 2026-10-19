@@ -56,6 +56,7 @@ locals {
       CHAT_CONTEXT__KIND = var.context_kind
     },
     var.chat_llm_base_url != "" ? { CHAT_LLM__BASE_URL = var.chat_llm_base_url } : {},
+    var.chat_thinking != "" ? { CHAT_THINKING = var.chat_thinking } : {},
     var.user_agent != "" ? { USER_AGENT = var.user_agent } : {},
   )
 

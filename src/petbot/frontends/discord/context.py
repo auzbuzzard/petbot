@@ -27,11 +27,15 @@ def _place_names(
     channel: discord.abc.MessageableChannel | discord.abc.GuildChannel | None,
 ) -> tuple[str | None, str | None]:
     """The ``(server, channel)`` display names, both ``None`` in a DM. ``name`` is read
-    defensively because a DM or partial channel carries none."""
+    defensively because a DM or partial channel/guild carries none."""
     if guild is None:
         return None, None
-    name = getattr(channel, "name", None)
-    return guild.name, name if isinstance(name, str) and name else None
+
+    def named(obj: object) -> str | None:
+        name = getattr(obj, "name", None)
+        return name if isinstance(name, str) and name else None
+
+    return named(guild), named(channel)
 
 
 def build_context(message: discord.Message) -> SkillContext:

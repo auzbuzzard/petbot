@@ -66,6 +66,12 @@ def _openai_compatible_profile(model_name: str) -> ModelProfile | None:
     every chat turn, not just one that would call the tool. The dialect Gemma needs is the one
     we keep; strict is what gives.
 
+    Gemma 4 and Gemini can think, so the profile declares ``supports_thinking``. Without it
+    pydantic-ai silently drops the unified ``thinking`` setting (``CHAT_THINKING``). The
+    reasoning comes back in the response's ``reasoning`` field and is **not** sent back on
+    the next request of a tool loop: Google and AWS both advise replaying only final
+    answers, since replayed reasoning degrades the next response.
+
     Returns ``None`` (defer to the provider default) for models we don't special-case.
     """
     name = model_name.lower()
@@ -76,6 +82,8 @@ def _openai_compatible_profile(model_name: str) -> ModelProfile | None:
             OpenAIModelProfile.from_profile(openai_model_profile(model_name)),
             json_schema_transformer=_GeminiToolSchema,
             openai_supports_strict_tool_definition=False,
+            supports_thinking=True,
+            openai_chat_send_back_thinking_parts=False,
         )
     return None
 

@@ -104,6 +104,24 @@ variable "chat_llm_api_key_ssm_parameter" {
   default     = ""
 }
 
+variable "chat_thinking" {
+  type        = string
+  description = <<-EOT
+    Whether the chat agent reasons before answering. Sets CHAT_THINKING in the worker:
+    "" leaves the model's default; otherwise true, false, minimal, low, medium, high.
+    The reasoning is never shown or replayed; it only improves answers. Gemma 4 on
+    mantle thinks only at "high" (lower levels return no reasoning). Measured on
+    PetBot prompts: p50 1.6 s -> 5.8 s for chat, 0.8 s -> 2.5 s for a tool call, with
+    4-8x the output tokens and a 41.6 s outlier.
+  EOT
+  default     = "high"
+
+  validation {
+    condition     = contains(["", "true", "false", "minimal", "low", "medium", "high"], var.chat_thinking)
+    error_message = "chat_thinking must be empty, true, false, minimal, low, medium or high."
+  }
+}
+
 variable "context_kind" {
   type        = string
   description = <<-EOT
