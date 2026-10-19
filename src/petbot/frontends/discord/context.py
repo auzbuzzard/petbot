@@ -22,11 +22,24 @@ def _channel_is_nsfw(
     return bool(is_nsfw()) if callable(is_nsfw) else False
 
 
+def _place_names(
+    guild: discord.Guild | None,
+    channel: discord.abc.MessageableChannel | discord.abc.GuildChannel | None,
+) -> tuple[str | None, str | None]:
+    """The ``(server, channel)`` display names, both ``None`` in a DM. ``name`` is read
+    defensively because a DM or partial channel carries none."""
+    if guild is None:
+        return None, None
+    name = getattr(channel, "name", None)
+    return guild.name, name if isinstance(name, str) and name else None
+
+
 def build_context(message: discord.Message) -> SkillContext:
     """Map ``message`` onto a :class:`SkillContext`.
 
     ``allows_explicit`` comes from the channel's NSFW flag; the conversation id is
-    the channel (the natural session unit on Discord).
+    the channel (the natural session unit on Discord); the server and channel names
+    ground the chat agent in where it is talking.
     """
     author = message.author
     user = User(
@@ -34,11 +47,14 @@ def build_context(message: discord.Message) -> SkillContext:
         id=str(author.id),
         display_name=author.display_name,
     )
+    community, channel = _place_names(getattr(message, "guild", None), message.channel)
     return SkillContext(
         platform=Platform.DISCORD,
         user=user,
         conversation_id=f"discord:{message.channel.id}",
         allows_explicit=_channel_is_nsfw(message.channel),
+        community_name=community,
+        channel_name=channel,
     )
 
 
@@ -46,17 +62,20 @@ def build_interaction_context(interaction: discord.Interaction) -> SkillContext:
     """Map a slash-command ``interaction`` onto a :class:`SkillContext`.
 
     The interaction twin of :func:`build_context`: same neutral mapping (NSFW flag,
-    channel as the conversation id) so a slash command reaches a skill on the exact
-    path an @mention does.
+    channel as the conversation id, place names) so a slash command reaches a skill on the
+    exact path an @mention does.
     """
     user = User(
         platform=Platform.DISCORD,
         id=str(interaction.user.id),
         display_name=interaction.user.display_name,
     )
+    community, channel = _place_names(getattr(interaction, "guild", None), interaction.channel)
     return SkillContext(
         platform=Platform.DISCORD,
         user=user,
         conversation_id=f"discord:{interaction.channel_id}",
         allows_explicit=_channel_is_nsfw(interaction.channel),
+        community_name=community,
+        channel_name=channel,
     )

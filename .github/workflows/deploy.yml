@@ -28,6 +28,8 @@ env:
   TF_VAR_chat_llm_model: ${{ vars.CHAT_LLM_MODEL }}
   TF_VAR_chat_llm_base_url: ${{ vars.CHAT_LLM_BASE_URL }}
   TF_VAR_chat_llm_api_key_ssm_parameter: ${{ vars.CHAT_LLM_API_KEY_SSM_PARAMETER }}
+  # Optional: the web_search tool's Tavily key (unset => keyless ddgs search only).
+  TF_VAR_tavily_api_key_ssm_parameter: ${{ vars.TAVILY_API_KEY_SSM_PARAMETER }}
   # Observability (off unless OBSERVABILITY_ENABLED is set to "true"). The `|| 'default'`
   # fallbacks matter: an unset GitHub Variable renders as an empty string, and Terraform
   # would reject "" for a bool/number var — so unset must resolve to a valid default,

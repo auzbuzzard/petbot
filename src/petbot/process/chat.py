@@ -62,16 +62,28 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def _place(ctx: SkillContext) -> str:
+    if ctx.community_name is None:
+        return "a direct message"
+    if ctx.channel_name is None:
+        return f"the {ctx.community_name} server"
+    return f"#{ctx.channel_name} in the {ctx.community_name} server"
+
+
 def run_context(ctx: SkillContext, now: datetime) -> str:
     """The per-run grounding added to the static persona: the clock, who is speaking, and
-    the channel's rating. Kept out of the static instructions so that prefix stays cacheable.
+    where. Kept out of the static instructions so that prefix stays cacheable.
+
+    The clock is UTC plus its Unix time: the agent doesn't know the reader's timezone, so
+    it writes times as Discord timestamps, which each reader's client shows in their own.
     """
+    utc = now.astimezone(UTC)
     rating = "age-gated (NSFW)" if ctx.allows_explicit else "not age-gated, so keep everything SFW"
     return "\n".join(
         (
             "Current context:",
-            f"- Now: {now.astimezone(UTC):%A, %d %B %Y, %H:%M} UTC.",
-            f"- You are answering {ctx.user.display_name}.",
+            f"- Now: {utc:%A, %d %B %Y, %H:%M} UTC (Unix time {int(utc.timestamp())}).",
+            f"- You are answering {ctx.user.display_name}, in {_place(ctx)}.",
             f"- This channel is {rating}.",
         )
     )

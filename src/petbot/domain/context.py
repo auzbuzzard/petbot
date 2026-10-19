@@ -49,3 +49,7 @@ class SkillContext(Frozen):
     #: resolving per-conversation compute state (e.g. a music queue + voice port).
     conversation_id: str
     allows_explicit: bool = False
+    #: Display names of where the request was made, for grounding the chat agent (a
+    #: Discord server and channel). Both ``None`` means a direct message.
+    community_name: str | None = None
+    channel_name: str | None = None

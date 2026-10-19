@@ -30,6 +30,12 @@ data "aws_ssm_parameter" "chat_api_key" {
   }
 }
 
+data "aws_ssm_parameter" "tavily_api_key" {
+  count           = trimspace(var.tavily_api_key_ssm_parameter) != "" ? 1 : 0
+  name            = var.tavily_api_key_ssm_parameter
+  with_decryption = true
+}
+
 data "aws_ssm_parameter" "booru" {
   for_each        = var.booru_ssm_parameters
   name            = each.value
@@ -55,6 +61,7 @@ locals {
 
   secret_env = merge(
     local.chat_needs_api_key ? { CHAT_LLM__API_KEY = data.aws_ssm_parameter.chat_api_key[0].value } : {},
+    length(data.aws_ssm_parameter.tavily_api_key) > 0 ? { TAVILY_API_KEY = data.aws_ssm_parameter.tavily_api_key[0].value } : {},
     { for env_name, param in data.aws_ssm_parameter.booru : env_name => param.value },
   )
 

@@ -604,13 +604,34 @@ async def test_chat_grounds_each_run_in_the_clock_speaker_and_channel_rating() -
     chat = ChatProcess(_registry(), model=FunctionModel(fn), clock=lambda: now)
     await chat.respond(TextInput(text="what day is it?", history=Recalled(turns=())), _ctx())
     instructions = seen[-1]
-    assert "Monday, 19 October 2026, 03:29 UTC" in instructions
-    assert "You are answering tester" in instructions
+    assert "Monday, 19 October 2026, 03:29 UTC (Unix time 1792380540)" in instructions
+    assert "You are answering tester, in a direct message" in instructions
     assert "not age-gated" in instructions
     assert "lost the thread" not in instructions
+
+
+def test_run_context_names_the_server_and_channel() -> None:
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    ctx = _ctx().model_copy(update={"community_name": "Hyena Den", "channel_name": "general"})
+    assert "in #general in the Hyena Den server" in run_context(ctx, now)
+    server_only = ctx.model_copy(update={"channel_name": None})
+    assert "in the Hyena Den server." in run_context(server_only, now)
 
 
 def test_run_context_reports_an_age_gated_channel() -> None:
     ctx = _ctx().model_copy(update={"allows_explicit": True})
     text = run_context(ctx, datetime(2026, 1, 1, tzinfo=UTC))
     assert "age-gated (NSFW)" in text and "not age-gated" not in text
+
+
+async def test_agent_offers_every_catalog_tool_including_agent_only_ones() -> None:
+    offered: set[str] = set()
+
+    def fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        offered.update(t.name for t in info.function_tools)
+        return ModelResponse(parts=[TextPart(content="ok")])
+
+    await ChatProcess(_registry(), model=FunctionModel(fn)).respond(
+        TextInput(text="hi", history=Recalled(turns=())), _ctx()
+    )
+    assert offered == {"math", "derpi", "e621", "web_search", "web_fetch", "weather"}

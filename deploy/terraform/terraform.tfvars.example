@@ -16,11 +16,14 @@ log_level          = "INFO"
 #   Gemma 4 "mantle" endpoint, or a self-hosted Ollama/vLLM.
 # openrouter: OpenRouter + key.
 chat_llm_kind  = "openai_compatible"
-chat_llm_model = "" # REQUIRED — e.g. google.gemma-4-26b-a4b
+chat_llm_model = "" # REQUIRED — e.g. google.gemma-4-31b
 # Required for openai_compatible (the endpoint URL):
 # chat_llm_base_url = "https://bedrock-mantle.us-east-1.api.aws/openai/v1"
 # Required for openai_compatible + openrouter (SSM SecureString holding the key):
 # chat_llm_api_key_ssm_parameter = "/petbot/core/bedrock_api_key"
+
+# Optional web search key (Tavily); unset => keyless ddgs search only.
+# tavily_api_key_ssm_parameter = "/petbot/core/tavily_api_key"
 
 # Optional booru auth: ENV-VAR-NAME => SSM-parameter-name.
 # booru_ssm_parameters = {

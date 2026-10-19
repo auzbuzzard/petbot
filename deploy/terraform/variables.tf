@@ -121,6 +121,16 @@ variable "context_kind" {
   }
 }
 
+variable "tavily_api_key_ssm_parameter" {
+  type        = string
+  description = <<-EOT
+    Optional SSM SecureString holding a Tavily API key for the chat agent's web_search
+    tool. Empty (default) runs search on the keyless ddgs fallback alone. Sets
+    TAVILY_API_KEY in the worker.
+  EOT
+  default     = ""
+}
+
 variable "booru_ssm_parameters" {
   type        = map(string)
   description = <<-EOT
