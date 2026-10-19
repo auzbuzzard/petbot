@@ -88,7 +88,7 @@ an environment), and each environment admits only `master`:
 
 | Role | Assumed by | Environment | Gate |
 | --- | --- | --- | --- |
-| `petbot-github-deploy` | `deploy.yml` (root stack) | `production` | `master` only |
+| `petbot-github-deploy` | `deploy.yml` (root stack) | `production` | `master` only + required reviewer |
 | `petbot-github-bootstrap-plan` | `bootstrap.yml`, plan job (read-only) | `bootstrap-plan` | `master` only |
 | `petbot-github-bootstrap-apply` | `bootstrap.yml`, apply job | `bootstrap` | `master` only + required reviewer |
 | `petbot-operator` | the `claude` IAM user (`sts:AssumeRole`) | — | read-only |
@@ -118,7 +118,7 @@ environment and assume its role.
 
 | Environment | Deployment branches | Required reviewers |
 | --- | --- | --- |
-| `production` | Selected: `master` | optional |
+| `production` | Selected: `master` | the repo owner |
 | `bootstrap-plan` | Selected: `master` | none |
 | `bootstrap` | Selected: `master` | the repo owner |
 

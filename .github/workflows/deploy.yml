@@ -45,9 +45,8 @@ jobs:
     # image builds natively; the smaller edge image cross-builds for amd64 via
     # QEMU (cheaper to emulate than the heavy worker image).
     runs-on: ubuntu-24.04-arm
-    # The deploy role's trust names this environment, and the environment's
-    # deployment-branch rule admits only master. Add required reviewers to it for a
-    # manual sign-off before each deploy.
+    # The deploy role's trust names this environment; the environment admits only
+    # master and needs a required reviewer's approval, so a merge alone ships nothing.
     environment: production
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

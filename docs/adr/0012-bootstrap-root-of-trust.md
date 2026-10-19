@@ -51,7 +51,8 @@ Two of its choices made every infrastructure addition a manual ordeal:
   does, and that bootstrap change lands (and is approved and applied) first.
 - The blast radius of a stolen deploy token grows from "the resources that exist today"
   to "any resource named `petbot-*` of the listed services"; getting such a token needs a
-  job running in `production` on `master`.
+  job running in `production` on `master`, approved by its required reviewer. Every
+  deploy therefore waits on that approval: a merge alone ships nothing.
 - A workload needing a permission outside the boundary is a bootstrap change, as is
   a new service.
 - The `petbot-*` prefix is reserved for the stack. The hand-made Bedrock API-key user
