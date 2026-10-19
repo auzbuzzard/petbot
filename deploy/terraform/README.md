@@ -84,7 +84,10 @@ can never widen its own permissions. Its state lives in the same bucket, under
 The deploy role is scoped by naming convention: it may manage resources named
 `<name_prefix>-*` (ECR repos, the Lambda and its log group, DynamoDB tables, IAM
 roles and users) and is explicitly denied the CI roles themselves
-(`<name_prefix>-github-*`). Adding resources to the root stack therefore needs **no
+(`<name_prefix>-github-*`). Every role and user it creates must carry the
+**`<name_prefix>-workload-boundary`** permissions boundary, so no policy CI writes
+can grant a workload more than that ceiling (no IAM; data-plane access to the
+stack's own resources). Adding resources to the root stack therefore needs **no
 bootstrap change**; only a new AWS service does. Then the PR edits
 `bootstrap/main.tf`, and an admin applies it **before** merging (CI's deploy would
 otherwise fail with `AccessDenied`):
@@ -101,7 +104,7 @@ terraform apply -var "state_bucket=petbot-tfstate-<your-account-id>"
 yet, so create it, then let Terraform adopt it:
 
 ```sh
-aws s3api create-bucket --bucket petbot-tfstate-<your-account-id> --region us-east-1
+aws s3api create-bucket --bucket petbot-tfstate-<your-account-id> --region us-east-1   # outside us-east-1 also pass --create-bucket-configuration LocationConstraint=<region>
 cd bootstrap && cp backend.hcl.example backend.hcl   # fill in the bucket name
 terraform init -backend-config=backend.hcl
 terraform import -var "state_bucket=petbot-tfstate-<your-account-id>" aws_s3_bucket.state petbot-tfstate-<your-account-id>
@@ -195,8 +198,13 @@ role in the console). Nothing imports from the old state.
 
 ```sh
 terraform destroy
-cd bootstrap && terraform init -backend-config=backend.hcl && terraform destroy -var "state_bucket=petbot-tfstate-<your-account-id>"
+cd bootstrap && terraform init -backend-config=backend.hcl
 ```
+
+Bootstrap's state lives in the bucket it destroys, so move it off first: delete the
+`backend "s3" {}` block from `bootstrap/main.tf`, run `terraform init -migrate-state`,
+empty the versioned bucket (console → *Empty*), then
+`terraform destroy -var "state_bucket=petbot-tfstate-<your-account-id>"`.
 
 ## CI checks
 

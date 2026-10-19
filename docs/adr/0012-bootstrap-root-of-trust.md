@@ -30,6 +30,13 @@ Two of its choices made every infrastructure addition a manual ordeal:
   tables, IAM roles and users, PassRole to Lambda only), plus account-wide calls that
   have no resource form (ECR login, log-group listing, Lightsail). An explicit deny on
   `role/<name_prefix>-github-*` keeps it from editing the CI roles.
+- Name scoping alone would still let CI create a `petbot-*` user or role with an admin
+  policy. So bootstrap also owns a **permissions boundary**,
+  `<name_prefix>-workload-boundary` (no IAM; logs, telemetry, model invocation and
+  data-plane access to `petbot-*` resources), and the deploy role may create or edit
+  IAM principals only with it attached (`iam:PermissionsBoundary`). CI can write any
+  workload policy; the boundary caps what it grants. The deploy role may read and
+  write only the root stack's state (`petbot/*`), not bootstrap's.
 
 ## Consequences
 
@@ -39,5 +46,10 @@ Two of its choices made every infrastructure addition a manual ordeal:
   "any resource named `petbot-*` of the listed services". The trust policy still lets any
   ref of this repo assume the role, as it did before; tightening that to `master` is a
   separate decision.
+- A workload needing a permission outside the boundary is a bootstrap change, as is
+  a new service.
+- The `petbot-*` prefix is reserved for the stack. The hand-made Bedrock API-key user
+  `petbot-bedrock-key` falls inside the deploy role's user scope; CI gains nothing from
+  that, since it already reads that user's key from SSM.
 - Adopting the existing account: the seven bootstrap resources were imported into the
-  remote state; the only change applied was the deploy role's policy.
+  remote state; the changes applied were the deploy role's policy and the new boundary.

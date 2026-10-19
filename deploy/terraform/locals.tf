@@ -4,4 +4,8 @@
 locals {
   core_name = "${var.name_prefix}-core"
   edge_name = "${var.name_prefix}-edge"
+
+  # Created by bootstrap. The deploy role may create IAM roles and users only with
+  # this permissions boundary attached, so every principal here carries it.
+  workload_boundary_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${var.name_prefix}-workload-boundary"
 }

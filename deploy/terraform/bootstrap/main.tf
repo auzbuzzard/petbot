@@ -87,8 +87,7 @@ output "state_bucket" {
 
 # --- GitHub Actions OIDC: the one irreducible bit of trust --------------------
 # CI cannot bootstrap its own trust: AWS must already trust GitHub before any
-# workflow can assume a role. This (and the SSM secrets) is the single manual,
-# in-browser CloudShell step; after it, 100% of deploys are CI.
+# workflow can assume a role, so an admin applies this stack (see the header).
 
 data "aws_caller_identity" "current" {}
 
@@ -138,16 +137,96 @@ locals {
   stack      = "${var.name_prefix}-*"
 }
 
+# --- The workload boundary ----------------------------------------------------
+# The ceiling for every role and user the stack creates. The deploy role may create
+# and edit IAM principals only with this boundary attached (see ManageStackRoles and
+# ManageStackUsers), and only an admin can change it, so whatever policy CI writes, a
+# workload can never do more than this: no IAM, and data-plane access to the stack's
+# own resources only. A workload needing more is a bootstrap change.
+data "aws_iam_policy_document" "workload_boundary" {
+  statement {
+    sid       = "WriteLogs"
+    actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["*"]
+  }
+
+  # PutMetricData and the X-Ray writes have no resource-level scoping.
+  statement {
+    sid       = "PublishTelemetry"
+    actions   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords", "cloudwatch:PutMetricData"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "InvokeModels"
+    actions   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "InvokeStackFunctions"
+    actions   = ["lambda:InvokeFunction", "lambda:GetFunctionConfiguration"]
+    resources = ["arn:aws:lambda:${local.arn_region}:function:${local.stack}"]
+  }
+
+  statement {
+    sid = "UseStackTables"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:Query",
+    ]
+    resources = ["arn:aws:dynamodb:${local.arn_region}:table/${local.stack}"]
+  }
+
+  statement {
+    sid       = "ReadStackSecrets"
+    actions   = ["ssm:GetParameter", "ssm:GetParameters"]
+    resources = ["arn:aws:ssm:${local.arn_region}:parameter/${var.name_prefix}/*"]
+  }
+
+  statement {
+    sid       = "DecryptSecretsViaSSM"
+    actions   = ["kms:Decrypt"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["ssm.${var.aws_region}.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_policy" "workload_boundary" {
+  name        = "${var.name_prefix}-workload-boundary"
+  description = "Permissions boundary for every IAM role and user the ${var.name_prefix} stack creates."
+  policy      = data.aws_iam_policy_document.workload_boundary.json
+}
+
+output "workload_boundary_arn" {
+  value = aws_iam_policy.workload_boundary.arn
+}
+
 # The deploy role's permissions. Service-level action wildcards (e.g. ecr:*) are kept
 # where enumerating every Terraform-issued call is brittle; each statement is scoped to
 # resources named <name_prefix>-*, so a stolen CI token reaches this stack and nothing
-# else in the account. The CI roles themselves are carved out (DenyCiRoles), so the
-# deploy role can never widen its own permissions.
+# else in the account. IAM writes require the workload boundary, and the CI roles are
+# carved out (DenyCiRoles), so the deploy role can never widen its own permissions.
 data "aws_iam_policy_document" "deploy_permissions" {
+  # The root stack's state only (deploy.yml: key=<name_prefix>/terraform.tfstate);
+  # bootstrap's own state, in the same bucket, stays out of CI's reach.
+  statement {
+    sid       = "ListState"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.state.arn]
+  }
+
   statement {
     sid       = "TerraformState"
-    actions   = ["s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-    resources = [aws_s3_bucket.state.arn, "${aws_s3_bucket.state.arn}/*"]
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.state.arn}/${var.name_prefix}/*"]
   }
 
   statement {
@@ -186,19 +265,15 @@ data "aws_iam_policy_document" "deploy_permissions" {
   statement {
     sid     = "ManageLambda"
     actions = ["lambda:*"]
-    resources = [
-      "arn:aws:lambda:${local.arn_region}:function:${local.stack}",
-      "arn:aws:lambda:${local.arn_region}:function:${local.stack}:*",
-    ]
+    # The trailing wildcard also covers qualified ARNs (versions, aliases).
+    resources = ["arn:aws:lambda:${local.arn_region}:function:${local.stack}"]
   }
 
   statement {
     sid     = "ManageLogs"
     actions = ["logs:*"]
-    resources = [
-      "arn:aws:logs:${local.arn_region}:log-group:/aws/lambda/${local.stack}",
-      "arn:aws:logs:${local.arn_region}:log-group:/aws/lambda/${local.stack}:*",
-    ]
+    # The trailing wildcard also covers the groups' streams (":log-stream:...").
+    resources = ["arn:aws:logs:${local.arn_region}:log-group:/aws/lambda/${local.stack}"]
   }
 
   # logs:DescribeLogGroups is a list operation that AWS only authorizes on "*"
@@ -223,17 +298,31 @@ data "aws_iam_policy_document" "deploy_permissions" {
     resources = ["arn:aws:budgets::${local.account_id}:budget/*"]
   }
 
-  # The stack's IAM roles (the Lambda execution role).
+  # The stack's IAM roles (the Lambda execution role). Creating one, or changing what it
+  # may do, requires the workload boundary on it.
   statement {
     sid = "ManageStackRoles"
     actions = [
-      "iam:GetRole",
       "iam:CreateRole",
-      "iam:DeleteRole",
+      "iam:PutRolePermissionsBoundary",
       "iam:AttachRolePolicy",
       "iam:DetachRolePolicy",
       "iam:PutRolePolicy",
       "iam:DeleteRolePolicy",
+    ]
+    resources = ["arn:aws:iam::${local.account_id}:role/${local.stack}"]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PermissionsBoundary"
+      values   = [aws_iam_policy.workload_boundary.arn]
+    }
+  }
+
+  statement {
+    sid = "MaintainStackRoles"
+    actions = [
+      "iam:GetRole",
+      "iam:DeleteRole",
       "iam:GetRolePolicy",
       "iam:ListRolePolicies",
       "iam:ListAttachedRolePolicies",
@@ -258,12 +347,28 @@ data "aws_iam_policy_document" "deploy_permissions" {
   }
 
   # The stack's IAM users (the edge's identity for invoking the core Lambda — see
-  # edge.tf), with their access keys and inline policies.
+  # edge.tf), with their access keys and inline policies. As for roles, creating one or
+  # changing what it may do requires the workload boundary on it.
   statement {
     sid = "ManageStackUsers"
     actions = [
-      "iam:GetUser",
       "iam:CreateUser",
+      "iam:PutUserPermissionsBoundary",
+      "iam:PutUserPolicy",
+      "iam:DeleteUserPolicy",
+    ]
+    resources = ["arn:aws:iam::${local.account_id}:user/${local.stack}"]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PermissionsBoundary"
+      values   = [aws_iam_policy.workload_boundary.arn]
+    }
+  }
+
+  statement {
+    sid = "MaintainStackUsers"
+    actions = [
+      "iam:GetUser",
       "iam:DeleteUser",
       "iam:TagUser",
       "iam:UntagUser",
@@ -271,8 +376,6 @@ data "aws_iam_policy_document" "deploy_permissions" {
       "iam:DeleteAccessKey",
       "iam:ListAccessKeys",
       "iam:GetUserPolicy",
-      "iam:PutUserPolicy",
-      "iam:DeleteUserPolicy",
       "iam:ListUserPolicies",
       "iam:ListAttachedUserPolicies",
     ]
