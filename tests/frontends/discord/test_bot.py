@@ -1,5 +1,5 @@
-"""The message entrypoint (DM, @mention, reply) end to end: trigger, recall, dispatch, render, retire the
-placeholder — against fakes, without a gateway."""
+"""The message entrypoint (DM, @mention, reply) end to end: trigger, recall, dispatch,
+render, retire the placeholder — against fakes, without a gateway."""
 
 from __future__ import annotations
 
