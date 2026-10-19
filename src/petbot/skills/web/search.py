@@ -123,12 +123,18 @@ def _clip(text: str, limit: int) -> str:
 
 
 def format_hits(query: str, hits: Sequence[SearchHit]) -> str:
-    """The numbered result list handed to the model."""
+    """The numbered result list handed to the model, closed by a citation reminder: a small
+    model follows an instruction next to the material far more reliably than one in its
+    system prompt."""
     lines = [f'Web results for "{query}":']
     for i, hit in enumerate(hits, start=1):
         lines.append(f"{i}. {_clip(hit.title, 120) or hit.url} — <{hit.url}>")
         if hit.snippet:
             lines.append(f"   {_clip(hit.snippet, MAX_SNIPPET)}")
+    lines.append(
+        "Answer only from these results and end your reply with the links you used, "
+        "written as <url>."
+    )
     return "\n".join(lines)
 
 
