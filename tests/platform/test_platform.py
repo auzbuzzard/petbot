@@ -1,11 +1,14 @@
-"""The tool registry, the serve boundary, the ProcessClient, and the HTTP transport."""
+"""The tool registry, the serve boundary, the ProcessClient, and the HTTP + Lambda transports."""
 
 from __future__ import annotations
 
+import io
 import json
+from typing import Any
 
 import httpx
 import pytest
+from botocore.exceptions import ClientError
 
 from petbot.domain import (
     CommandInput,
@@ -18,7 +21,7 @@ from petbot.domain import (
     SkillResult,
     User,
 )
-from petbot.platform import HttpTransport, ProcessClient, ToolRegistry, serve
+from petbot.platform import HttpTransport, LambdaTransport, ProcessClient, ToolRegistry, serve
 from petbot.types import MathArgs
 
 
@@ -115,3 +118,68 @@ async def test_process_client_http_round_trip() -> None:
             CommandInput(name="math", values={"expression": "6 * 7"}), _ctx()
         )
     assert result.text == "ran math"
+
+
+# --- LambdaTransport ----------------------------------------------------------
+
+
+def _not_ready(code: str) -> ClientError:
+    message = "The function is currently in the following state: Inactive"
+    return ClientError({"Error": {"Code": code, "Message": message}}, "Invoke")
+
+
+class _FakeLambda:
+    """A boto3 Lambda client stand-in: raises each queued error, then serves the dispatch."""
+
+    def __init__(self, *errors: Exception, function_error: str | None = None) -> None:
+        self._errors = list(errors)
+        self._function_error = function_error
+        self.calls = 0
+
+    def invoke(self, **kwargs: Any) -> Any:
+        self.calls += 1
+        if self._errors:
+            raise self._errors.pop(0)
+        if self._function_error is not None:
+            body = b'{"errorMessage": "Task timed out after 60.00 seconds"}'
+            return {"FunctionError": self._function_error, "Payload": io.BytesIO(body)}
+        return {"Payload": io.BytesIO(SkillResult.message("ran").model_dump_json().encode())}
+
+
+def _command() -> CommandInput:
+    return CommandInput(name="math", values={"expression": "1"})
+
+
+@pytest.mark.parametrize("code", ["ResourceConflictException", "ResourceNotReadyException"])
+async def test_lambda_transport_waits_out_a_function_that_is_not_active(code: str) -> None:
+    # A container-image function idle for ~2 weeks goes Inactive: the next invoke is rejected
+    # while Lambda re-pulls the image. That rejection must not become the user's answer.
+    client = _FakeLambda(_not_ready(code), _not_ready(code))
+    transport = LambdaTransport("petbot-core", client, retry_delay=0)
+    result = await ProcessClient(transport).respond(_command(), _ctx())
+    assert result.text == "ran"
+    assert client.calls == 3
+
+
+async def test_lambda_transport_gives_up_after_the_ready_timeout() -> None:
+    client = _FakeLambda(*[_not_ready("ResourceConflictException")] * 10)
+    transport = LambdaTransport("petbot-core", client, ready_timeout=0, retry_delay=0.01)
+    with pytest.raises(ClientError):
+        await ProcessClient(transport).respond(_command(), _ctx())
+    assert client.calls == 1
+
+
+async def test_lambda_transport_does_not_retry_other_errors() -> None:
+    denied = ClientError({"Error": {"Code": "AccessDeniedException", "Message": "no"}}, "Invoke")
+    client = _FakeLambda(denied)
+    with pytest.raises(ClientError):
+        await ProcessClient(LambdaTransport("petbot-core", client, retry_delay=0)).respond(
+            _command(), _ctx()
+        )
+    assert client.calls == 1
+
+
+async def test_lambda_transport_raises_the_runtime_error_on_function_error() -> None:
+    client = _FakeLambda(function_error="Unhandled")
+    with pytest.raises(RuntimeError, match="Task timed out"):
+        await ProcessClient(LambdaTransport("petbot-core", client)).respond(_command(), _ctx())

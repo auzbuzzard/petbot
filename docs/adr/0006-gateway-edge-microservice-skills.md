@@ -125,6 +125,18 @@ is consolidated** until scale justifies splitting:
   lessons: a provider-side validation change can break a frozen deployment with no
   deploy of ours, and a profile assembled from another provider's defaults carries that
   provider's promises with it.
+- Follow-on (2026-10): the core worker is a **container-image** Lambda, and Lambda
+  marks such a function `Inactive` after about two weeks with no invocations (CloudTrail
+  shows it re-pulling the image from ECR every ~1.5 days after the last invoke, then
+  stopping). The next invoke is **rejected without running**: the function goes `Pending`
+  while Lambda re-pulls the image (~20 s), then `Active`. The edge turned that rejection
+  into "couldn't reach my brain". So the *first* message after a quiet spell always
+  failed and the next one worked. That looked like a DM-vs-guild bug, because the first
+  try was in a guild and the retry was a DM. `LambdaTransport` now re-invokes on
+  `ResourceConflictException` / `ResourceNotReadyException` with backoff, for up to 60 s.
+  Re-invoking is safe because the function never ran. It also raises a `FunctionError`
+  response with the runtime's own message instead of mis-parsing it as a `SkillResult`.
+  A deploy's brief `Pending` window is covered too.
 
 ### 5. Repository structure — uv workspace, hexagonal
 

@@ -45,7 +45,9 @@ Discord ⇄ [ frontend ]  --Input(JSON)-->  [ core service ]  chat(LLM) · math 
    `ProcessClient` (a `Process` over a transport).
 2. A `Dispatch` envelope carries the typed input. A remote transport
    (`HttpTransport`, `LambdaTransport`) serialises it at the boundary; `serve` decodes
-   it on the compute side.
+   it on the compute side. `LambdaTransport` waits out a worker that isn't `Active` yet
+   (an idle container-image function goes `Inactive`, and its next invoke is rejected
+   while the image is re-pulled), so the first message after a quiet spell still lands.
 3. A `RouterProcess` picks — by the input *type*, the one place anything branches —
    the **chat process** (the pydantic-ai brain, which voices itself; it feeds
    `TextInput.history` to the agent as message history and reactively compacts it — a
