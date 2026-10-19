@@ -57,10 +57,13 @@ variable "timeout" {
   type        = number
   description = <<-EOT
     Lambda timeout (seconds). The edge invokes the worker synchronously and the
-    chat agent runs an LLM tool-loop, so this is generous — not the old 3s
-    Discord-interaction bound (the edge holds the gateway, not this function).
+    chat agent runs an LLM tool-loop: a search -> read -> answer turn is three model
+    calls with reasoning on, each up to ~30s. The worker hands the remaining
+    invocation time (minus a small reserve) to the turn as its budget, so a turn
+    that runs long answers with a fallback line instead of being killed. Not the
+    old 3s Discord-interaction bound (the edge holds the gateway, not this function).
   EOT
-  default     = 60
+  default     = 120
 }
 
 # --- Chat LLM (the worker's agent) --------------------------------------------

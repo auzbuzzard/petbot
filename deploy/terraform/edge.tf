@@ -88,6 +88,8 @@ resource "aws_lightsail_container_service_deployment_version" "edge" {
       AWS_ACCESS_KEY_ID     = aws_iam_access_key.edge.id
       AWS_SECRET_ACCESS_KEY = aws_iam_access_key.edge.secret
       DISCORD_TOKEN         = data.aws_ssm_parameter.discord_token.value
+      # Claimed message ids, so of every connected copy exactly one answers (claims.tf).
+      CLAIMS_TABLE = aws_dynamodb_table.claims.name
     }, local.observability_edge_env)
   }
 
@@ -101,10 +103,12 @@ data "aws_ssm_parameter" "discord_token" {
 
 # --- The edge's scoped AWS identity -------------------------------------------
 # Least privilege: invoke exactly the core worker Lambda and read its state (so the
-# transport can wait for an Inactive/Pending function to become Active), nothing else.
+# transport can wait for an Inactive/Pending function to become Active), and claim
+# messages in the claims table (claims.tf), nothing else.
 
 resource "aws_iam_user" "edge" {
-  name = local.edge_name
+  name                 = local.edge_name
+  permissions_boundary = local.workload_boundary_arn
 }
 
 resource "aws_iam_access_key" "edge" {
@@ -117,10 +121,17 @@ resource "aws_iam_user_policy" "edge_invoke" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["lambda:InvokeFunction", "lambda:GetFunctionConfiguration"]
-      Resource = aws_lambda_function.this.arn
-    }]
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["lambda:InvokeFunction", "lambda:GetFunctionConfiguration"]
+        Resource = aws_lambda_function.this.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["dynamodb:PutItem", "dynamodb:UpdateItem"]
+        Resource = aws_dynamodb_table.claims.arn
+      },
+    ]
   })
 }

@@ -38,6 +38,7 @@ class _Message:
     """An @mention of the bot in a guild, replying to nothing."""
 
     def __init__(self) -> None:
+        self.id = 4242
         self.author = _User(2, "Alice")
         self.content = f"<@{_BOT_ID}> hi"
         self.mentions = [_User(_BOT_ID, "PetBot", bot=True)]
@@ -94,3 +95,47 @@ def test_thinking_threshold_must_be_positive(value: float) -> None:
             service=HttpService(url="http://svc/dispatch"),
             thinking_after_seconds=value,
         )
+
+
+class _AtomicClaims:
+    """An in-memory claim store shared by two bot copies: the first claim of an id wins."""
+
+    def __init__(self, *, error: Exception | None = None) -> None:
+        self.claimed: list[str] = []
+        self._error = error
+
+    async def claim(self, event_id: str) -> bool:
+        if self._error is not None:
+            raise self._error
+        await asyncio.sleep(0)  # let the other copy's claim interleave
+        if event_id in self.claimed:
+            return False
+        self.claimed.append(event_id)
+        return True
+
+
+async def test_two_copies_on_the_gateway_answer_a_message_once() -> None:
+    # A deployment rolling over: old and new edge both receive the same message at once.
+    claims = _AtomicClaims()
+    process = _SlowProcess(0.01)
+    old, new = _bot(process, thinking_after=1), _bot(process, thinking_after=1)
+    old.claims = new.claims = claims
+    seen_by_old, seen_by_new = _Message(), _Message()  # same id: one Discord message
+    await asyncio.gather(
+        old.on_message(seen_by_old),  # type: ignore[arg-type]
+        new.on_message(seen_by_new),  # type: ignore[arg-type]
+    )
+    assert claims.claimed == ["discord:message:4242"]
+    assert len(process.inputs) == 1  # the core is invoked once
+    events = [seen_by_old.channel.events, seen_by_new.channel.events]
+    assert sorted(events) == [[], ["typing", "send:the answer"]]  # the loser does nothing
+
+
+async def test_a_failing_claim_store_still_answers() -> None:
+    # A rare duplicate beats a dropped message.
+    process = _SlowProcess(0)
+    bot = _bot(process, thinking_after=1)
+    bot.claims = _AtomicClaims(error=OSError("dynamodb down"))
+    message = _Message()
+    await bot.on_message(message)  # type: ignore[arg-type]
+    assert message.channel.events == ["typing", "send:the answer"]

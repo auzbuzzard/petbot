@@ -2,9 +2,10 @@
 
 Tavily (keyed, built for LLM consumers) runs first; ``ddgs`` (keyless metasearch over
 public result pages) is the fallback for a missing key, an exhausted quota, or an outage.
-The results come back as a compact numbered list the agent reads and cites from. Outside an
-age-gated channel the search asks for safe results where the provider supports it (ddgs's
-``safesearch``; Tavily has no such filter, so there the persona's SFW rule is the gate).
+The results come back as a compact numbered list the agent reads and cites from, each with
+its publication date when the provider knows it and marked undated when it doesn't, so the
+model never has to guess when a snippet was written. Outside an age-gated channel both
+providers are asked for safe results (Tavily's ``safe_search``, ddgs's ``safesearch``).
 """
 
 from __future__ import annotations
@@ -46,6 +47,8 @@ class SearchHit:
     title: str
     url: str
     snippet: str
+    #: When the source was published or last updated (``YYYY-MM-DD``), if the provider knows.
+    published: str | None = None
 
 
 class SearchProvider(Protocol):
@@ -61,6 +64,12 @@ def _text(value: object) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _day(value: object) -> str | None:
+    """The ``YYYY-MM-DD`` day of a provider timestamp, or ``None`` if it has none."""
+    text = _text(value).strip()
+    return text[:10] if len(text) >= 10 and text[4] == "-" and text[7] == "-" else None
+
+
 class TavilyProvider(SearchProvider):
     """Tavily's search API (``search_depth=basic``: one credit per query)."""
 
@@ -74,11 +83,22 @@ class TavilyProvider(SearchProvider):
         response = await self._client.post(
             TAVILY_URL,
             headers={"Authorization": f"Bearer {self._api_key}"},
-            json={"query": query, "max_results": MAX_RESULTS, "search_depth": "basic"},
+            json={
+                "query": query,
+                "max_results": MAX_RESULTS,
+                "search_depth": "basic",
+                "include_published_date": True,
+                "safe_search": safe,
+            },
         )
         response.raise_for_status()
         return [
-            SearchHit(title=_text(r.get("title")), url=r["url"], snippet=_text(r.get("content")))
+            SearchHit(
+                title=_text(r.get("title")),
+                url=r["url"],
+                snippet=_text(r.get("content")),
+                published=_day(r.get("published_date")),
+            )
             for r in response.json().get("results") or []
             if isinstance(r.get("url"), str) and r["url"]
         ]
@@ -123,12 +143,19 @@ def _clip(text: str, limit: int) -> str:
 
 
 def format_hits(query: str, hits: Sequence[SearchHit]) -> str:
-    """The numbered result list handed to the model."""
+    """The numbered result list handed to the model, each result dated or marked undated,
+    closed by how to use them: a small model follows an instruction next to the material
+    far more reliably than one in its system prompt."""
     lines = [f'Web results for "{query}":']
     for i, hit in enumerate(hits, start=1):
-        lines.append(f"{i}. {_clip(hit.title, 120) or hit.url} — <{hit.url}>")
+        dated = f"published {hit.published}" if hit.published else "date unknown"
+        lines.append(f"{i}. {_clip(hit.title, 120) or hit.url} — <{hit.url}> ({dated})")
         if hit.snippet:
             lines.append(f"   {_clip(hit.snippet, MAX_SNIPPET)}")
+    lines.append(
+        "Answer only from these results, never state a date that isn't shown here, and end "
+        "your reply with the links you used, written as <url>."
+    )
     return "\n".join(lines)
 
 
