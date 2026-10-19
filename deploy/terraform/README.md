@@ -10,7 +10,7 @@ Infrastructure-as-code for PetBot 2.1: two deployables over one neutral core.
   WebSocket, maps each `@mention` to a dispatched call, and invokes the worker.
 
 ```
-bootstrap/        root of trust: S3 state bucket + GitHub OIDC + CI deploy role (admin-applied)
+bootstrap/        root of trust: state bucket, GitHub OIDC, CI roles, workload boundary, operator access
 *.tf              the core worker (Lambda + ECR + IAM) and edge (Lightsail) stack
 backend.hcl.example       remote-state backend config (copy -> backend.hcl)
 terraform.tfvars.example  inputs (copy -> terraform.tfvars); no secrets here
@@ -77,56 +77,100 @@ scraping.
 
 ## Bootstrap (root of trust)
 
-`bootstrap/` holds what CI cannot create for itself: the remote-state bucket, the
-**GitHub Actions OIDC provider** and the **`petbot-github-deploy` IAM role** the CI
-pipeline assumes (no static AWS keys). An admin applies it; CI never does, so CI
-can never widen its own permissions. Its state lives in the same bucket, under
+`bootstrap/` holds what the root stack's CI cannot grant itself: the remote-state
+bucket, the **GitHub Actions OIDC provider**, the CI roles, the workload permissions
+boundary and the operator's access. Its state lives in the same bucket, under
 `bootstrap/terraform.tfstate`.
 
-The deploy role is scoped by naming convention: it may manage resources named
+**Who may assume what.** Every OIDC role trusts exactly one GitHub environment (the
+token's `sub` is `repo:auzbuzzard/petbot:environment:<name>` whenever a job references
+an environment), and each environment admits only `main`:
+
+| Role | Assumed by | Environment | Gate |
+| --- | --- | --- | --- |
+| `petbot-github-deploy` | `deploy.yml` (root stack) | `production` | `main` only + required reviewer |
+| `petbot-github-bootstrap-plan` | `bootstrap.yml`, plan job (read-only) | `bootstrap-plan` | `main` only |
+| `petbot-github-bootstrap-apply` | `bootstrap.yml`, apply job | `bootstrap` | `main` only + required reviewer |
+| `petbot-operator` | the `claude` IAM user (`sts:AssumeRole`) | — | read-only |
+
+No pull request, other branch or other workflow (the AI review bots hold
+`id-token: write`) can assume any of them. The deploy role is explicitly denied the
+access roles (`<name_prefix>-github-*`, `<name_prefix>-operator`), so it can't widen
+its own or anyone's permissions.
+
+**The deploy role** is scoped by naming convention: it may manage resources named
 `<name_prefix>-*` (ECR repos, the Lambda and its log group, DynamoDB tables, IAM
-roles and users) and is explicitly denied the CI roles themselves
-(`<name_prefix>-github-*`). Every role and user it creates must carry the
+roles and users). Every role and user it creates must carry the
 **`<name_prefix>-workload-boundary`** permissions boundary, so no policy CI writes
 can grant a workload more than that ceiling (no IAM; data-plane access to the
 stack's own resources). Adding resources to the root stack therefore needs **no
-bootstrap change**; only a new AWS service does. Then the PR edits
-`bootstrap/main.tf`, and an admin applies it **before** merging (CI's deploy would
-otherwise fail with `AccessDenied`):
+bootstrap change**; only a new AWS service does.
+
+**Changing bootstrap** is a PR like any other. After it merges, `bootstrap.yml`
+plans with the read-only role and posts the plan, with its digest, to the run's
+summary; the run then waits on the `bootstrap` environment until a required reviewer
+approves, plans again, and applies only if that plan has the reviewed digest (otherwise
+re-run the workflow and review the new plan). No plan file or state leaves the runner;
+the plan text in the public log shows what this directory's code already shows, plus
+the account ID. A PR that needs the new permission in its own deploy (a new AWS
+service) lands its bootstrap change first.
+
+**GitHub settings** (Settings → Environments; one time, by a repo admin). Use
+*Selected branches and tags → Branch `main`*, not *Protected branches only*: that option
+admits every branch when the repo has no classic branch protection rules (a ruleset may
+not count), and it would admit any branch protected later. These are
+part of the trust model: without the branch rule, any branch could reference the
+environment and assume its role.
+
+| Environment | Deployment branches | Required reviewers |
+| --- | --- | --- |
+| `production` | Selected: `main` | the repo owner |
+| `bootstrap-plan` | Selected: `main` | none |
+| `bootstrap` | Selected: `main` | the repo owner |
+
+**Seeding (once per account, by an admin).** The pipeline can't create the roles it
+assumes, so the first apply is by hand, with admin credentials (e.g. CloudShell with
+Terraform installed):
 
 ```sh
-cd bootstrap
-cp backend.hcl.example backend.hcl   # once; fill in the bucket name
-terraform init -backend-config=backend.hcl
-terraform plan  -var "state_bucket=petbot-tfstate-<your-account-id>"
-terraform apply -var "state_bucket=petbot-tfstate-<your-account-id>"
-```
+# A new account only: create the bucket the state will live in, then adopt it below.
+aws s3api create-bucket --bucket petbot-tfstate-<account-id> --region us-east-1   # elsewhere also pass --create-bucket-configuration LocationConstraint=<region>
 
-**First run in a new account.** The bucket that will hold the state doesn't exist
-yet, so create it, then let Terraform adopt it:
-
-```sh
-aws s3api create-bucket --bucket petbot-tfstate-<your-account-id> --region us-east-1   # outside us-east-1 also pass --create-bucket-configuration LocationConstraint=<region>
-cd bootstrap && cp backend.hcl.example backend.hcl   # fill in the bucket name
+cd deploy/terraform/bootstrap
+cp backend.hcl.example backend.hcl   # fill in the bucket name
 terraform init -backend-config=backend.hcl
-terraform import -var "state_bucket=petbot-tfstate-<your-account-id>" aws_s3_bucket.state petbot-tfstate-<your-account-id>
-terraform apply  -var "state_bucket=petbot-tfstate-<your-account-id>"
+terraform import -var "state_bucket=petbot-tfstate-<account-id>" aws_s3_bucket.state petbot-tfstate-<account-id>   # new account only
+terraform import -var "state_bucket=petbot-tfstate-<account-id>" aws_iam_user.operator claude                       # if the user exists
+terraform apply  -var "state_bucket=petbot-tfstate-<account-id>"
 cd .. && cp backend.hcl.example backend.hcl   # root stack backend
 ```
-Set the following repo **Variables** (Settings → Secrets and variables → Actions
-→ Variables — these are non-secret; the actual secret *values* live in SSM,
-referenced here only by parameter name). The deploy reads them as `TF_VAR_*`:
 
-| GitHub Actions variable | Value | Where it comes from |
-| --- | --- | --- |
-| `DEPLOY_ROLE_ARN` | the deploy role ARN | `terraform -chdir=bootstrap output deploy_role_arn` |
-| `AWS_REGION` | e.g. `us-east-1` | your choice (match `backend.hcl` / SSM region) |
-| `TF_STATE_BUCKET` | the state bucket name | the `state_bucket` you chose above |
-| `CHAT_LLM_KIND` | `bedrock` \| `openai_compatible` \| `openrouter` | your choice of provider |
-| `CHAT_LLM_MODEL` | the model id | e.g. `google.gemma-4-31b` (Gemma 4 via mantle), a Bedrock Converse model, or an OpenRouter model |
-| `CHAT_LLM_BASE_URL` | endpoint URL | **only** for `openai_compatible`, e.g. `https://bedrock-mantle.us-east-1.api.aws/openai/v1`; unset otherwise |
-| `CHAT_LLM_API_KEY_SSM_PARAMETER` | e.g. `/petbot/core/bedrock_api_key` | for `openai_compatible` + `openrouter`; **unset** for `bedrock` |
-| `TAVILY_API_KEY_SSM_PARAMETER` | e.g. `/petbot/core/tavily_api_key` | optional; the web search key. Unset ⇒ keyless `ddgs` search only |
+Then set the GitHub variables below from `terraform output`. From here on, no one
+applies bootstrap by hand.
+
+Set the following **Variables** (non-secret; the actual secret *values* live in SSM,
+referenced here only by parameter name). Each lives where it's used: in the one
+environment whose jobs read it (Settings → Environments → *name* → Environment
+variables), or at repo level (Settings → Secrets and variables → Actions →
+Variables) when both pipelines read it. An environment variable is visible only to
+jobs that reference that environment. The deploy reads its config as `TF_VAR_*`:
+
+| GitHub Actions variable | Scope | Value | Where it comes from |
+| --- | --- | --- | --- |
+| `AWS_REGION` | repo | e.g. `us-east-1` | your choice (match `backend.hcl` / SSM region) |
+| `TF_STATE_BUCKET` | repo | the state bucket name | the `state_bucket` you chose above |
+| `DEPLOY_ROLE_ARN` | `production` | the deploy role ARN | `terraform -chdir=bootstrap output deploy_role_arn` |
+| `BOOTSTRAP_PLAN_ROLE_ARN` | `bootstrap-plan` | the bootstrap plan role ARN | `terraform -chdir=bootstrap output bootstrap_plan_role_arn` |
+| `BOOTSTRAP_APPLY_ROLE_ARN` | `bootstrap` | the bootstrap apply role ARN | `terraform -chdir=bootstrap output bootstrap_apply_role_arn` |
+| `CHAT_LLM_KIND` | `production` | `bedrock` \| `openai_compatible` \| `openrouter` | your choice of provider |
+| `CHAT_LLM_MODEL` | `production` | the model id | e.g. `google.gemma-4-31b` (Gemma 4 via mantle), a Bedrock Converse model, or an OpenRouter model |
+| `CHAT_LLM_BASE_URL` | `production` | endpoint URL | **only** for `openai_compatible`, e.g. `https://bedrock-mantle.us-east-1.api.aws/openai/v1`; unset otherwise |
+| `CHAT_LLM_API_KEY_SSM_PARAMETER` | `production` | e.g. `/petbot/core/bedrock_api_key` | for `openai_compatible` + `openrouter`; **unset** for `bedrock` |
+| `TAVILY_API_KEY_SSM_PARAMETER` | `production` | e.g. `/petbot/core/tavily_api_key` | optional; the web search key. Unset ⇒ keyless `ddgs` search only |
+| `OBSERVABILITY_ENABLED`, `OBSERVABILITY_SAMPLE_RATIO`, `TELEMETRY_ID_SALT_SSM_PARAMETER` | `production` | see `observability.tf` | optional |
+
+Scoping is hygiene, not the security boundary: none of these is secret, and AWS
+enforces who may assume each role by the token's environment claim.
 
 **Provider notes.** `bedrock` = the Converse API with IAM auth (no key) — Nova /
 Claude. **Gemma 4 is served only via Bedrock's OpenAI-compatible "mantle"
@@ -136,14 +180,53 @@ endpoint**, so for Gemma 4 use `CHAT_LLM_KIND=openai_compatible` with the
 different base URL.
 
 That's the complete list — once these Variables and the SSM secrets above exist,
-a push to `master` runs a green deploy. (Merging the PR alone does **not** create
+a push to `main` runs a green deploy. (Merging the PR alone does **not** create
 them; this one-time setup is yours to do.)
+
+## Operator access (read-only triage)
+
+`bootstrap/operator.tf` gives the operator (an agent such as Claude, or a human on
+call) what triage needs and nothing more: the stack's Lambda logs, the edge's
+container logs and deployments, function config, the stack's DynamoDB tables, ECR
+images, IAM reads and policy simulation, metrics, traces and CloudTrail, plus
+`lambda:InvokeFunction` on the core worker for integration tests. No secrets
+(`ssm:GetParameter`), no state bucket (Terraform state holds the injected secrets),
+no writes.
+
+The IAM user `operator_user` (default `claude`) may only assume `petbot-operator`
+(1-hour sessions). Its access keys are created out of band (console or
+`aws iam create-access-key`), never in Terraform state. Point the operator's AWS
+config at the role, with the user's keys in the environment:
+
+```ini
+# ~/.aws/config
+[default]
+role_arn            = arn:aws:iam::<account-id>:role/petbot-operator
+credential_source   = Environment
+region              = us-east-1
+```
+
+An existing user is adopted at seeding (see above). The user must hold nothing
+besides that `sts:AssumeRole`: AWS's `ReadOnlyAccess`, for one, reads every S3
+object, including the state. Bootstrap enforces it three ways:
+
+- the user's **permissions boundary** (`petbot-operator-user-boundary`) allows only
+  assuming `petbot-operator`, so a group, attached or inline policy added by hand
+  grants nothing;
+- its inline policies are exactly `assume-petbot-operator` and it has no attached
+  policies (`aws_iam_user_policies_exclusive`,
+  `aws_iam_user_policy_attachments_exclusive`): the next plan shows any other as
+  drift and the apply removes it;
+- the deploy role is denied all IAM on it, and `operator_user` may not start with
+  `<name_prefix>-` (the deploy role's user scope).
+
+Changes to access go through the bootstrap pipeline, never through this role.
 
 ## CI deploy (the steady-state path)
 
 `.github/workflows/deploy.yml` does the whole rollout via OIDC: build + push both
 images to ECR (arm64 worker, amd64 edge), then `terraform apply` (the Lightsail
-edge pulls its image from ECR). A push to `master` (or a manual *Actions → Deploy
+edge pulls its image from ECR). A push to `main` (or a manual *Actions → Deploy
 → Run workflow*) ships it. **No deploy is run from a developer machine.**
 
 ## Deploy (manual / break-glass)
@@ -203,7 +286,8 @@ terraform destroy
 cd bootstrap && terraform init -backend-config=backend.hcl
 ```
 
-Bootstrap's state lives in the bucket it destroys, so move it off first: delete the
+Bootstrap's state lives in the bucket it destroys, and the bucket is
+`prevent_destroy`, so: remove the bucket's `prevent_destroy`, delete the
 `backend "s3" {}` block from `bootstrap/main.tf`, run `terraform init -migrate-state`,
 empty the versioned bucket (console → *Empty*), then
 `terraform destroy -var "state_bucket=petbot-tfstate-<your-account-id>"`.

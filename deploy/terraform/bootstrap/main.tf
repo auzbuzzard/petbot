@@ -1,14 +1,16 @@
-# The root of trust for CI: the remote-state bucket, the GitHub OIDC provider and the
-# deploy role CI assumes. CI cannot grant itself trust or permissions, so an admin
-# applies this stack, and only when it changes: the deploy role is scoped by the stack's
-# naming convention (<name_prefix>-*), so adding resources to the root stack never needs
-# a bootstrap change; only adding a new AWS service does. See README "Bootstrap".
+# The root of trust: the remote-state bucket, the GitHub OIDC provider, the CI roles
+# (deploy, and bootstrap's own plan/apply pipeline in pipeline.tf), the workload
+# permissions boundary and the operator's access (operator.tf).
+#
+# Every OIDC role trusts exactly one GitHub environment, never a branch or a PR, and the
+# environments' deployment-branch rules admit only main. The deploy workflow assumes
+# petbot-github-deploy from `production`; the bootstrap workflow plans this stack from
+# `bootstrap-plan` and applies the reviewed plan from `bootstrap`, which needs a required
+# reviewer's approval. An admin applies this stack by hand exactly once, to seed it in a
+# new account. See README "Bootstrap" and docs/adr/0012.
 #
 # Its own state lives in the bucket it manages (key bootstrap/terraform.tfstate),
-# locked natively by S3 (`use_lockfile`, Terraform >= 1.11):
-#
-#   terraform init -backend-config=backend.hcl
-#   terraform apply -var "state_bucket=petbot-tfstate-<your-account-id>"
+# locked natively by S3 (`use_lockfile`, Terraform >= 1.11).
 
 terraform {
   required_version = ">= 1.11"
@@ -44,6 +46,12 @@ variable "github_repo" {
   default     = "auzbuzzard/petbot"
 }
 
+variable "deploy_environment" {
+  type        = string
+  description = "GitHub environment whose jobs may assume the deploy role (deploy.yml's `environment:`)."
+  default     = "production"
+}
+
 variable "name_prefix" {
   type        = string
   description = "Must match var.name_prefix in the root stack; the deploy role may manage resources named <name_prefix>-*."
@@ -52,6 +60,11 @@ variable "name_prefix" {
 
 resource "aws_s3_bucket" "state" {
   bucket = var.state_bucket
+
+  # Every stack's state lives here; losing it orphans all of them.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket_versioning" "state" {
@@ -81,13 +94,42 @@ resource "aws_s3_bucket_public_access_block" "state" {
   restrict_public_buckets = true
 }
 
+# TLS only: refuse any request to the state over plain HTTP.
+data "aws_iam_policy_document" "state_bucket" {
+  statement {
+    sid       = "DenyInsecureTransport"
+    effect    = "Deny"
+    actions   = ["s3:*"]
+    resources = [aws_s3_bucket.state.arn, "${aws_s3_bucket.state.arn}/*"]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "state" {
+  bucket = aws_s3_bucket.state.id
+  policy = data.aws_iam_policy_document.state_bucket.json
+
+  # S3 rejects a bucket policy while the public-access block is still being applied.
+  depends_on = [aws_s3_bucket_public_access_block.state]
+}
+
 output "state_bucket" {
   value = aws_s3_bucket.state.id
 }
 
 # --- GitHub Actions OIDC: the one irreducible bit of trust --------------------
 # CI cannot bootstrap its own trust: AWS must already trust GitHub before any
-# workflow can assume a role, so an admin applies this stack (see the header).
+# workflow can assume a role, so an admin seeds this stack once (see the header).
 
 data "aws_caller_identity" "current" {}
 
@@ -99,8 +141,22 @@ resource "aws_iam_openid_connect_provider" "github" {
   thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
 }
 
-# Trust policy: only this repo's workflows (any ref) may assume the role.
-data "aws_iam_policy_document" "deploy_trust" {
+# The GitHub environment each CI role is assumed from. Each role trusts exactly its
+# environment's `sub`: the claim names the environment whenever a job references one, so a
+# job on any other branch, a pull request, or any other workflow (including the AI review
+# bots, which hold id-token: write) cannot assume it, and each environment's branch rule
+# admits only main.
+locals {
+  github_role_environments = {
+    deploy            = var.deploy_environment
+    "bootstrap-plan"  = var.bootstrap_plan_environment
+    "bootstrap-apply" = var.bootstrap_apply_environment
+  }
+}
+
+data "aws_iam_policy_document" "github_trust" {
+  for_each = local.github_role_environments
+
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
 
@@ -116,16 +172,16 @@ data "aws_iam_policy_document" "deploy_trust" {
     }
 
     condition {
-      test     = "StringLike"
+      test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repo}:*"]
+      values   = ["repo:${var.github_repo}:environment:${each.value}"]
     }
   }
 }
 
 resource "aws_iam_role" "github_deploy" {
   name               = "${var.name_prefix}-github-deploy"
-  assume_role_policy = data.aws_iam_policy_document.deploy_trust.json
+  assume_role_policy = data.aws_iam_policy_document.github_trust["deploy"].json
 }
 
 locals {
@@ -140,7 +196,7 @@ locals {
 # --- The workload boundary ----------------------------------------------------
 # The ceiling for every role and user the stack creates. The deploy role may create
 # and edit IAM principals only with this boundary attached (see ManageStackRoles and
-# ManageStackUsers), and only an admin can change it, so whatever policy CI writes, a
+# ManageStackUsers), and only bootstrap can change it, so whatever policy CI writes, a
 # workload can never do more than this: no IAM, and data-plane access to the stack's
 # own resources only. A workload needing more is a bootstrap change.
 data "aws_iam_policy_document" "workload_boundary" {
@@ -213,7 +269,7 @@ output "workload_boundary_arn" {
 # where enumerating every Terraform-issued call is brittle; each statement is scoped to
 # resources named <name_prefix>-*, so a stolen CI token reaches this stack and nothing
 # else in the account. IAM writes require the workload boundary, and the CI roles are
-# carved out (DenyCiRoles), so the deploy role can never widen its own permissions.
+# carved out (DenyAccessPrincipals), so the deploy role can never widen its own permissions.
 data "aws_iam_policy_document" "deploy_permissions" {
   # The root stack's state only (deploy.yml: key=<name_prefix>/terraform.tfstate);
   # bootstrap's own state, in the same bucket, stays out of CI's reach.
@@ -391,13 +447,18 @@ data "aws_iam_policy_document" "deploy_permissions" {
     resources = ["*"]
   }
 
-  # The CI roles share the stack's prefix (<name_prefix>-github-*); an explicit deny
-  # keeps the deploy role from editing them, i.e. from granting itself more.
+  # The access principals: CI's roles (<name_prefix>-github-*), and the operator's role
+  # and user (operator.tf). An explicit deny keeps the deploy role from editing them,
+  # i.e. from granting itself, or anyone, more.
   statement {
-    sid       = "DenyCiRoles"
-    effect    = "Deny"
-    actions   = ["iam:*"]
-    resources = ["arn:aws:iam::${local.account_id}:role/${var.name_prefix}-github-*"]
+    sid     = "DenyAccessPrincipals"
+    effect  = "Deny"
+    actions = ["iam:*"]
+    resources = [
+      "arn:aws:iam::${local.account_id}:role/${var.name_prefix}-github-*",
+      aws_iam_role.operator.arn,
+      aws_iam_user.operator.arn,
+    ]
   }
 }
 
