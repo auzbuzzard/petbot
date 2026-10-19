@@ -2,15 +2,15 @@
 
 Discord gives an @mention no built-in progress UI (a slash command gets "PetBot is
 thinking…" from its deferred response; a message gets nothing). The typing indicator is the
-first line of feedback: it lasts ~10 s per trigger, so discord.py re-triggers it every 5 s
-for as long as the turn runs. Past :data:`THINKING_AFTER_SECONDS` a typing dot alone stops
-reading as "working on it", so :func:`think` also posts a small placeholder reply
-(:data:`THINKING`, Discord ``-#`` subtext) and keeps typing. The caller retires the
-placeholder with :func:`clear` once the real answer is sent, so the answer lands as a
-fresh message rather than an "(edited)" one.
+first line of feedback: one trigger lasts ~10 s, so :func:`think` re-triggers it every
+:data:`TYPING_REFRESH_SECONDS` for as long as the turn runs. Past
+:data:`THINKING_AFTER_SECONDS` a typing dot alone stops reading as "working on it", so
+:func:`think` also posts a small placeholder reply (:data:`THINKING`, Discord ``-#``
+subtext) and keeps typing. The caller retires the placeholder with :func:`clear` once the
+real answer is sent, so the answer lands as a fresh message rather than an "(edited)" one.
 
-The placeholder is cosmetic: failing to post or delete it is logged and never sinks the
-turn.
+Typing and the placeholder are cosmetic: any failure to trigger, post or delete them is
+logged and never sinks the turn.
 """
 
 from __future__ import annotations
@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 #: re-activating (~20 s before the cold start even begins), and not for routine turns.
 THINKING_AFTER_SECONDS = 10.0
 
+#: How often to re-trigger typing: well inside one trigger's ~10 s life.
+TYPING_REFRESH_SECONDS = 5.0
+
 #: The placeholder: Discord subtext, so it reads as a status line, not an answer.
 THINKING = "-# 💭 thinking… (waking up can take a little while)"
 
@@ -45,36 +48,45 @@ async def think[T](
     :data:`THINKING` placeholder as a reply to ``message`` and keep typing.
 
     Returns ``work``'s result and the placeholder (``None`` if the turn was quick), which
-    the caller passes to :func:`clear` after sending the answer."""
+    the caller passes to :func:`clear` after sending the answer. Only ``work`` itself (or a
+    cancellation) can raise."""
     task = asyncio.ensure_future(work)
+    typing = asyncio.create_task(_keep_typing(message.channel))
     placeholder: discord.Message | None = None
     try:
-        async with message.channel.typing():
-            done, _ = await asyncio.wait({task}, timeout=after)
-            if not done:
-                placeholder = await _post_placeholder(message)
-            result = await task
+        done, _ = await asyncio.wait({task}, timeout=after)
+        if not done:
+            placeholder = await _post_placeholder(message)
+            # Sending a message clears the sender's typing indicator: restart the loop so it
+            # re-triggers now rather than at its next refresh.
+            typing.cancel()
+            typing = asyncio.create_task(_keep_typing(message.channel))
+        result = await task
     except BaseException:
         task.cancel()
         await clear(placeholder)
         raise
+    finally:
+        typing.cancel()
     return result, placeholder
+
+
+async def _keep_typing(channel: discord.abc.Messageable) -> None:
+    while True:
+        try:
+            await channel.typing()
+        except Exception:
+            logger.warning("couldn't trigger typing", exc_info=True)
+        await asyncio.sleep(TYPING_REFRESH_SECONDS)
 
 
 async def _post_placeholder(message: discord.Message) -> discord.Message | None:
     try:
         # Silent and non-pinging: it is a status line, not the answer.
-        placeholder = await message.reply(THINKING, mention_author=False, silent=True)
-    except discord.HTTPException:
+        return await message.reply(THINKING, mention_author=False, silent=True)
+    except Exception:
         logger.warning("couldn't post the thinking placeholder", exc_info=True)
         return None
-    try:
-        # Sending a message clears the sender's typing indicator; re-trigger it now rather
-        # than leave a gap until discord.py's next 5 s refresh.
-        await message.channel.typing()
-    except discord.HTTPException:
-        logger.warning("couldn't re-trigger typing", exc_info=True)
-    return placeholder
 
 
 async def clear(placeholder: discord.Message | None) -> None:
@@ -83,5 +95,5 @@ async def clear(placeholder: discord.Message | None) -> None:
         return
     try:
         await placeholder.delete()
-    except discord.HTTPException:
+    except Exception:
         logger.warning("couldn't delete the thinking placeholder", exc_info=True)

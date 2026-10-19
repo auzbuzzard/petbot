@@ -4,7 +4,7 @@ output "core_function_name" {
 }
 
 output "core_function_arn" {
-  description = "ARN of the core worker Lambda; the edge's IAM user is granted lambda:InvokeFunction on it."
+  description = "ARN of the core worker Lambda; the edge's IAM user may invoke it and read its configuration."
   value       = aws_lambda_function.this.arn
 }
 

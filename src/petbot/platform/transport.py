@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 from typing import Any, Protocol
 
 import httpx
@@ -33,6 +34,13 @@ logger = logging.getLogger(__name__)
 #: ``Inactive``; the next invoke is *rejected* and starts re-pulling the image (``Pending``,
 #: ~20 s), and a deploy leaves it ``Pending`` briefly too.
 _NOT_READY = frozenset({"ResourceConflictException", "ResourceNotReadyException"})
+
+#: How often to poll the function's state while waiting for it to become ``Active``.
+_READY_POLL_SECONDS = 2
+
+#: Lambda's maximum function timeout. The SDK's read timeout sits above it so the client
+#: never abandons, and so never re-sends, an invocation Lambda is still running.
+_LAMBDA_MAX_TIMEOUT_SECONDS = 900
 
 
 def _wire(dispatch: Dispatch) -> dict[str, Any]:
@@ -66,36 +74,40 @@ class _LambdaClient(Protocol):
 
     def invoke(self, **kwargs: Any) -> Any: ...
 
+    def get_waiter(self, waiter_name: str) -> Any: ...
+
 
 class LambdaTransport(Transport):
     """Dispatches by synchronously invoking a process Lambda (off-loop).
 
-    A function that isn't ``Active`` rejects the invoke without running it (see
-    :data:`_NOT_READY`), so the invoke is retried with backoff for up to ``ready_timeout``
-    seconds instead of failing the first message after an idle spell. A ``FunctionError``
-    response (the handler crashed, timed out, or ran out of memory) is raised with the
-    runtime's own error payload rather than mis-parsed as a ``SkillResult``.
+    A function that isn't ``Active`` rejects an invoke without running it (see
+    :data:`_NOT_READY`). On that rejection the transport waits, for up to ``ready_timeout``
+    seconds, until boto3's ``function_active`` waiter sees the function ``Active``, then
+    invokes once more. A ``FunctionError`` response (the handler crashed, timed out, or ran
+    out of memory) is raised with the runtime's own error payload; only a clean response is
+    parsed as a ``SkillResult``.
     """
 
     def __init__(
-        self,
-        function_name: str,
-        client: _LambdaClient,
-        *,
-        ready_timeout: float = 120.0,
-        retry_delay: float = 1.0,
+        self, function_name: str, client: _LambdaClient, *, ready_timeout: float = 120.0
     ) -> None:
         self._function_name = function_name
         self._client = client
         self._ready_timeout = ready_timeout
-        self._retry_delay = retry_delay
 
     @classmethod
     def from_function_name(cls, function_name: str) -> LambdaTransport:
-        """Build a transport with a default ``boto3`` Lambda client (lazy import)."""
+        """Build a transport with a ``boto3`` Lambda client (lazy import) configured so the
+        SDK never re-sends an invocation: no SDK retries, and a read timeout above any
+        function's timeout. A re-sent invocation would run the whole turn again."""
         import boto3
+        from botocore.config import Config
 
-        return cls(function_name, boto3.client("lambda"))
+        config = Config(
+            read_timeout=_LAMBDA_MAX_TIMEOUT_SECONDS + 10,
+            retries={"total_max_attempts": 1},
+        )
+        return cls(function_name, boto3.client("lambda", config=config))
 
     async def send(self, dispatch: Dispatch) -> SkillResult:
         response = await self._invoke(json.dumps(_wire(dispatch)).encode())
@@ -107,23 +119,33 @@ class LambdaTransport(Transport):
         return SkillResult.model_validate_json(payload)
 
     async def _invoke(self, payload: bytes) -> Any:
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + self._ready_timeout
-        delay = self._retry_delay
-        while True:
-            try:
-                return await asyncio.to_thread(
-                    self._client.invoke, FunctionName=self._function_name, Payload=payload
-                )
-            except Exception as exc:
-                code = _error_code(exc)
-                if code not in _NOT_READY or loop.time() + delay > deadline:
-                    raise
-                logger.warning(
-                    "%s not ready (%s); retrying in %.0fs", self._function_name, code, delay
-                )
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, 8.0)
+        try:
+            return await self._call(payload)
+        except Exception as exc:
+            code = _error_code(exc)
+            if code not in _NOT_READY:
+                raise
+            logger.warning(
+                "%s not ready (%s); waiting for it to become Active", self._function_name, code
+            )
+        await asyncio.to_thread(self._wait_until_active)
+        return await self._call(payload)
+
+    async def _call(self, payload: bytes) -> Any:
+        return await asyncio.to_thread(
+            self._client.invoke, FunctionName=self._function_name, Payload=payload
+        )
+
+    def _wait_until_active(self) -> None:
+        # The waiter keeps polling through `Inactive` and `Pending`, succeeds on `Active`,
+        # and raises a WaiterError on `Failed` or once `ready_timeout` is spent.
+        self._client.get_waiter("function_active").wait(
+            FunctionName=self._function_name,
+            WaiterConfig={
+                "Delay": _READY_POLL_SECONDS,
+                "MaxAttempts": max(1, math.ceil(self._ready_timeout / _READY_POLL_SECONDS)),
+            },
+        )
 
 
 def _error_code(exc: Exception) -> str | None:

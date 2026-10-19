@@ -132,11 +132,14 @@ is consolidated** until scale justifies splitting:
   while Lambda re-pulls the image (~20 s), then `Active`. The edge turned that rejection
   into "couldn't reach my brain". So the *first* message after a quiet spell always
   failed and the next one worked. That looked like a DM-vs-guild bug, because the first
-  try was in a guild and the retry was a DM. `LambdaTransport` now re-invokes on
-  `ResourceConflictException` / `ResourceNotReadyException` with backoff, for up to 120 s.
-  Re-invoking is safe because the function never ran. It also raises a `FunctionError`
-  response with the runtime's own message instead of mis-parsing it as a `SkillResult`.
-  A deploy's brief `Pending` window is covered too. Letting the function go `Inactive` is
+  try was in a guild and the retry was a DM. On `ResourceConflictException` /
+  `ResourceNotReadyException`, `LambdaTransport` now waits (boto3's `function_active`
+  waiter, up to 120 s; the edge may `lambda:GetFunctionConfiguration`) and invokes once
+  more. Re-invoking is safe because the function never ran. The boto3 client is configured
+  never to re-send an invocation (no SDK retries, read timeout above Lambda's 900 s
+  maximum), since a re-send would run the whole turn twice. A `FunctionError` response is
+  raised with the runtime's own message instead of mis-parsed as a `SkillResult`. A
+  deploy's brief `Pending` window is covered too. Letting the function go `Inactive` is
   accepted: no keep-warm ping. The wait is made visible instead. An @mention turn runs
   under the typing indicator, and past 10 s (`THINKING_AFTER_SECONDS`) the edge also posts
   a `-# 💭 thinking…` placeholder reply, deleted once the answer is sent. Ten seconds is
@@ -261,7 +264,7 @@ that for the actual deploy:
 - **Edge → worker transport = boto3 `invoke` + IAM** (private; no public Function
   URL, so no unauthenticated LLM-cost surface). Lightsail container services have
   no IAM instance role, so the edge carries a **scoped IAM user** (`petbot-edge`,
-  `lambda:InvokeFunction` on the core worker only); its key is injected as env and
+  `lambda:InvokeFunction` + `lambda:GetFunctionConfiguration` on the core worker only); its key is injected as env and
   consumed by boto3's default credential chain (zero app code).
 - **Worker brain stays AWS Lambda** (arm64 image), with Bedrock access via the
   exec role (or OpenRouter via an env key).

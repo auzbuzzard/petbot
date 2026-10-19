@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 import pytest
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, WaiterError
 
 from petbot.domain import (
     CommandInput,
@@ -128,58 +128,104 @@ def _not_ready(code: str) -> ClientError:
     return ClientError({"Error": {"Code": code, "Message": message}}, "Invoke")
 
 
-class _FakeLambda:
-    """A boto3 Lambda client stand-in: raises each queued error, then serves the dispatch."""
+class _FakeWaiter:
+    def __init__(self, client: _FakeLambda, error: Exception | None) -> None:
+        self._client = client
+        self._error = error
 
-    def __init__(self, *errors: Exception, function_error: str | None = None) -> None:
-        self._errors = list(errors)
+    def wait(self, **kwargs: Any) -> None:
+        self._client.waits.append(kwargs)
+        if self._error is not None:
+            raise self._error
+        self._client.active = True
+
+
+class _FakeLambda:
+    """A boto3 Lambda client stand-in: rejects invokes until its waiter has seen the
+    function Active, then serves the dispatch."""
+
+    def __init__(
+        self,
+        *,
+        active: bool = True,
+        not_ready_code: str = "ResourceConflictException",
+        invoke_error: Exception | None = None,
+        waiter_error: Exception | None = None,
+        function_error: str | None = None,
+    ) -> None:
+        self.active = active
+        self._not_ready_code = not_ready_code
+        self._invoke_error = invoke_error
+        self._waiter_error = waiter_error
         self._function_error = function_error
         self.calls = 0
+        self.waits: list[dict[str, Any]] = []
+        self.waiter_names: list[str] = []
 
     def invoke(self, **kwargs: Any) -> Any:
         self.calls += 1
-        if self._errors:
-            raise self._errors.pop(0)
+        if self._invoke_error is not None:
+            raise self._invoke_error
+        if not self.active:
+            raise _not_ready(self._not_ready_code)
         if self._function_error is not None:
             body = b'{"errorMessage": "Task timed out after 60.00 seconds"}'
             return {"FunctionError": self._function_error, "Payload": io.BytesIO(body)}
         return {"Payload": io.BytesIO(SkillResult.message("ran").model_dump_json().encode())}
+
+    def get_waiter(self, waiter_name: str) -> _FakeWaiter:
+        self.waiter_names.append(waiter_name)
+        return _FakeWaiter(self, self._waiter_error)
 
 
 def _command() -> CommandInput:
     return CommandInput(name="math", values={"expression": "1"})
 
 
+async def _send(client: _FakeLambda, **kwargs: Any) -> SkillResult:
+    transport = LambdaTransport("petbot-core", client, **kwargs)
+    return await ProcessClient(transport).respond(_command(), _ctx())
+
+
 @pytest.mark.parametrize("code", ["ResourceConflictException", "ResourceNotReadyException"])
 async def test_lambda_transport_waits_out_a_function_that_is_not_active(code: str) -> None:
     # A container-image function idle for ~2 weeks goes Inactive: the next invoke is rejected
     # while Lambda re-pulls the image. That rejection must not become the user's answer.
-    client = _FakeLambda(_not_ready(code), _not_ready(code))
-    transport = LambdaTransport("petbot-core", client, retry_delay=0)
-    result = await ProcessClient(transport).respond(_command(), _ctx())
+    client = _FakeLambda(active=False, not_ready_code=code)
+    result = await _send(client, ready_timeout=10)
     assert result.text == "ran"
-    assert client.calls == 3
+    assert client.calls == 2  # the rejected invoke, then one after the wait
+    assert client.waiter_names == ["function_active"]
+    assert client.waits[0]["FunctionName"] == "petbot-core"
+    # The waiter's budget is the ready timeout: 2 s polls, 5 of them.
+    assert client.waits[0]["WaiterConfig"] == {"Delay": 2, "MaxAttempts": 5}
 
 
-async def test_lambda_transport_gives_up_after_the_ready_timeout() -> None:
-    client = _FakeLambda(*[_not_ready("ResourceConflictException")] * 10)
-    transport = LambdaTransport("petbot-core", client, ready_timeout=0, retry_delay=0.01)
-    with pytest.raises(ClientError):
-        await ProcessClient(transport).respond(_command(), _ctx())
+async def test_lambda_transport_gives_up_when_the_function_never_becomes_active() -> None:
+    timeout = WaiterError("FunctionActive", "Max attempts exceeded", {})
+    client = _FakeLambda(active=False, waiter_error=timeout)
+    with pytest.raises(WaiterError):
+        await _send(client, ready_timeout=10)
     assert client.calls == 1
 
 
-async def test_lambda_transport_does_not_retry_other_errors() -> None:
+async def test_lambda_transport_does_not_wait_on_other_errors() -> None:
     denied = ClientError({"Error": {"Code": "AccessDeniedException", "Message": "no"}}, "Invoke")
-    client = _FakeLambda(denied)
+    client = _FakeLambda(invoke_error=denied)
     with pytest.raises(ClientError):
-        await ProcessClient(LambdaTransport("petbot-core", client, retry_delay=0)).respond(
-            _command(), _ctx()
-        )
-    assert client.calls == 1
+        await _send(client)
+    assert (client.calls, client.waits) == (1, [])
 
 
 async def test_lambda_transport_raises_the_runtime_error_on_function_error() -> None:
     client = _FakeLambda(function_error="Unhandled")
     with pytest.raises(RuntimeError, match="Task timed out"):
-        await ProcessClient(LambdaTransport("petbot-core", client)).respond(_command(), _ctx())
+        await _send(client)
+
+
+def test_lambda_client_never_re_sends_an_invocation(monkeypatch: pytest.MonkeyPatch) -> None:
+    # An SDK retry or a read timeout below the function's would re-run a whole turn.
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    config = LambdaTransport.from_function_name("petbot-core")._client.meta.config  # type: ignore[attr-defined]
+    assert config.retries["total_max_attempts"] == 1
+    assert config.read_timeout > 900  # Lambda's maximum function timeout

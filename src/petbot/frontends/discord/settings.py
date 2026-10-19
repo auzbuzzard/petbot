@@ -53,7 +53,7 @@ class DiscordSettings(BaseSettings):
     history_max_turns: int = 25
     #: Seconds a conversational turn may run on the typing indicator alone before PetBot
     #: posts a "thinking…" placeholder. Env ``THINKING_AFTER_SECONDS``.
-    thinking_after_seconds: float = THINKING_AFTER_SECONDS
+    thinking_after_seconds: float = Field(default=THINKING_AFTER_SECONDS, gt=0)
     #: The compute service to dispatch to (required; see ``SERVICE__*``).
     service: ServiceTarget
 
