@@ -51,8 +51,8 @@ class DiscordSettings(BaseSettings):
     #: How many reply-chain ancestors to fetch when reconstructing conversation history
     #: (a Discord-API cost bound, not a model-context bound). Env ``HISTORY_MAX_TURNS``.
     history_max_turns: int = 25
-    #: Seconds a conversational turn may run on the typing indicator alone before PetBot
-    #: posts a "thinking…" placeholder. Env ``THINKING_AFTER_SECONDS``.
+    #: Seconds into a conversational turn at which the typing indicator pauses once, as a
+    #: person's would, before it resumes. Env ``THINKING_AFTER_SECONDS``.
     thinking_after_seconds: float = Field(default=THINKING_AFTER_SECONDS, gt=0)
     #: The compute service to dispatch to (required; see ``SERVICE__*``).
     service: ServiceTarget
