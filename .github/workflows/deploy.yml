@@ -20,25 +20,6 @@ concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  TF_DIR: deploy/terraform
-  # Non-secret deploy config, supplied as GitHub Actions Variables and read by
-  # Terraform as TF_VAR_* (secret *values* stay in SSM, referenced by name).
-  TF_VAR_aws_region: ${{ vars.AWS_REGION }}
-  TF_VAR_chat_llm_kind: ${{ vars.CHAT_LLM_KIND }}
-  TF_VAR_chat_llm_model: ${{ vars.CHAT_LLM_MODEL }}
-  TF_VAR_chat_llm_base_url: ${{ vars.CHAT_LLM_BASE_URL }}
-  TF_VAR_chat_llm_api_key_ssm_parameter: ${{ vars.CHAT_LLM_API_KEY_SSM_PARAMETER }}
-  # Optional: the web_search tool's Tavily key (unset => keyless ddgs search only).
-  TF_VAR_tavily_api_key_ssm_parameter: ${{ vars.TAVILY_API_KEY_SSM_PARAMETER }}
-  # Observability (off unless OBSERVABILITY_ENABLED is set to "true"). The `|| 'default'`
-  # fallbacks matter: an unset GitHub Variable renders as an empty string, and Terraform
-  # would reject "" for a bool/number var — so unset must resolve to a valid default,
-  # keeping a deploy without these Variables byte-identical to before.
-  TF_VAR_observability_enabled: ${{ vars.OBSERVABILITY_ENABLED || 'false' }}
-  TF_VAR_observability_sample_ratio: ${{ vars.OBSERVABILITY_SAMPLE_RATIO || '1.0' }}
-  TF_VAR_telemetry_id_salt_ssm_parameter: ${{ vars.TELEMETRY_ID_SALT_SSM_PARAMETER }}
-
 jobs:
   deploy:
     # arm64 runner matches the worker Lambda's Graviton architecture, so that
@@ -48,6 +29,26 @@ jobs:
     # The deploy role's trust names this environment; the environment admits only
     # main and needs a required reviewer's approval, so a merge alone ships nothing.
     environment: production
+    env:
+      TF_DIR: deploy/terraform
+      # Non-secret deploy config, supplied as GitHub Actions Variables (the
+      # `production` environment's, or the repo's) and read by Terraform as TF_VAR_*;
+      # secret *values* stay in SSM, referenced by name. Job-level, because only a job
+      # that references an environment can see that environment's variables.
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_chat_llm_kind: ${{ vars.CHAT_LLM_KIND }}
+      TF_VAR_chat_llm_model: ${{ vars.CHAT_LLM_MODEL }}
+      TF_VAR_chat_llm_base_url: ${{ vars.CHAT_LLM_BASE_URL }}
+      TF_VAR_chat_llm_api_key_ssm_parameter: ${{ vars.CHAT_LLM_API_KEY_SSM_PARAMETER }}
+      # Optional: the web_search tool's Tavily key (unset => keyless ddgs search only).
+      TF_VAR_tavily_api_key_ssm_parameter: ${{ vars.TAVILY_API_KEY_SSM_PARAMETER }}
+      # Observability (off unless OBSERVABILITY_ENABLED is set to "true"). The `|| 'default'`
+      # fallbacks matter: an unset GitHub Variable renders as an empty string, and Terraform
+      # would reject "" for a bool/number var — so unset must resolve to a valid default,
+      # keeping a deploy without these Variables byte-identical to before.
+      TF_VAR_observability_enabled: ${{ vars.OBSERVABILITY_ENABLED || 'false' }}
+      TF_VAR_observability_sample_ratio: ${{ vars.OBSERVABILITY_SAMPLE_RATIO || '1.0' }}
+      TF_VAR_telemetry_id_salt_ssm_parameter: ${{ vars.TELEMETRY_ID_SALT_SSM_PARAMETER }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 

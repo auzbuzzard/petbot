@@ -145,22 +145,29 @@ cd .. && cp backend.hcl.example backend.hcl   # root stack backend
 Then set the GitHub variables below from `terraform output`. From here on, no one
 applies bootstrap by hand.
 
-Set the following repo **Variables** (Settings → Secrets and variables → Actions
-→ Variables — these are non-secret; the actual secret *values* live in SSM,
-referenced here only by parameter name). The deploy reads them as `TF_VAR_*`:
+Set the following **Variables** (non-secret; the actual secret *values* live in SSM,
+referenced here only by parameter name). Each lives where it's used: in the one
+environment whose jobs read it (Settings → Environments → *name* → Environment
+variables), or at repo level (Settings → Secrets and variables → Actions →
+Variables) when both pipelines read it. An environment variable is visible only to
+jobs that reference that environment. The deploy reads its config as `TF_VAR_*`:
 
-| GitHub Actions variable | Value | Where it comes from |
-| --- | --- | --- |
-| `DEPLOY_ROLE_ARN` | the deploy role ARN | `terraform -chdir=bootstrap output deploy_role_arn` |
-| `BOOTSTRAP_PLAN_ROLE_ARN` | the bootstrap plan role ARN | `terraform -chdir=bootstrap output bootstrap_plan_role_arn` |
-| `BOOTSTRAP_APPLY_ROLE_ARN` | the bootstrap apply role ARN | `terraform -chdir=bootstrap output bootstrap_apply_role_arn` |
-| `AWS_REGION` | e.g. `us-east-1` | your choice (match `backend.hcl` / SSM region) |
-| `TF_STATE_BUCKET` | the state bucket name | the `state_bucket` you chose above |
-| `CHAT_LLM_KIND` | `bedrock` \| `openai_compatible` \| `openrouter` | your choice of provider |
-| `CHAT_LLM_MODEL` | the model id | e.g. `google.gemma-4-31b` (Gemma 4 via mantle), a Bedrock Converse model, or an OpenRouter model |
-| `CHAT_LLM_BASE_URL` | endpoint URL | **only** for `openai_compatible`, e.g. `https://bedrock-mantle.us-east-1.api.aws/openai/v1`; unset otherwise |
-| `CHAT_LLM_API_KEY_SSM_PARAMETER` | e.g. `/petbot/core/bedrock_api_key` | for `openai_compatible` + `openrouter`; **unset** for `bedrock` |
-| `TAVILY_API_KEY_SSM_PARAMETER` | e.g. `/petbot/core/tavily_api_key` | optional; the web search key. Unset ⇒ keyless `ddgs` search only |
+| GitHub Actions variable | Scope | Value | Where it comes from |
+| --- | --- | --- | --- |
+| `AWS_REGION` | repo | e.g. `us-east-1` | your choice (match `backend.hcl` / SSM region) |
+| `TF_STATE_BUCKET` | repo | the state bucket name | the `state_bucket` you chose above |
+| `DEPLOY_ROLE_ARN` | `production` | the deploy role ARN | `terraform -chdir=bootstrap output deploy_role_arn` |
+| `BOOTSTRAP_PLAN_ROLE_ARN` | `bootstrap-plan` | the bootstrap plan role ARN | `terraform -chdir=bootstrap output bootstrap_plan_role_arn` |
+| `BOOTSTRAP_APPLY_ROLE_ARN` | `bootstrap` | the bootstrap apply role ARN | `terraform -chdir=bootstrap output bootstrap_apply_role_arn` |
+| `CHAT_LLM_KIND` | `production` | `bedrock` \| `openai_compatible` \| `openrouter` | your choice of provider |
+| `CHAT_LLM_MODEL` | `production` | the model id | e.g. `google.gemma-4-31b` (Gemma 4 via mantle), a Bedrock Converse model, or an OpenRouter model |
+| `CHAT_LLM_BASE_URL` | `production` | endpoint URL | **only** for `openai_compatible`, e.g. `https://bedrock-mantle.us-east-1.api.aws/openai/v1`; unset otherwise |
+| `CHAT_LLM_API_KEY_SSM_PARAMETER` | `production` | e.g. `/petbot/core/bedrock_api_key` | for `openai_compatible` + `openrouter`; **unset** for `bedrock` |
+| `TAVILY_API_KEY_SSM_PARAMETER` | `production` | e.g. `/petbot/core/tavily_api_key` | optional; the web search key. Unset ⇒ keyless `ddgs` search only |
+| `OBSERVABILITY_ENABLED`, `OBSERVABILITY_SAMPLE_RATIO`, `TELEMETRY_ID_SALT_SSM_PARAMETER` | `production` | see `observability.tf` | optional |
+
+Scoping is hygiene, not the security boundary: none of these is secret, and AWS
+enforces who may assume each role by the token's environment claim.
 
 **Provider notes.** `bedrock` = the Converse API with IAM auth (no key) — Nova /
 Claude. **Gemma 4 is served only via Bedrock's OpenAI-compatible "mantle"
