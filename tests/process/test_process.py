@@ -742,7 +742,11 @@ async def test_chat_answers_with_a_fallback_when_the_turn_runs_out_of_time() -> 
         await asyncio.sleep(5)
         return ModelResponse(parts=[TextPart(content="too late")])
 
-    chat = ChatProcess(_registry(), model=FunctionModel(slow))
+    class _ModelBackedStyle(StylePort):
+        async def stylize(self, result: SkillResult, ctx: SkillContext) -> SkillResult:
+            raise AssertionError("the out-of-time reply must not be restyled")
+
+    chat = ChatProcess(_registry(), model=FunctionModel(slow), style=_ModelBackedStyle())
     with budget(0.05):
         result = await chat.respond(TextInput(text="hi", history=Recalled(turns=())), _ctx())
     assert result.text is not None and "took me too long" in result.text

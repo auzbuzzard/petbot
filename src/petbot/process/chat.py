@@ -196,7 +196,9 @@ class ChatProcess(Process):
                 extra={"user": hash_user_id(ctx.user.id, self._id_salt)},
             )
             _OUT_OF_TIME_RUNS.add(1)
-            return await self._style.stylize(SkillResult.message(_OUT_OF_TIME), ctx)
+            # Already in persona, and the budget is spent: no restyling pass, which could be
+            # another model call.
+            return SkillResult.message(_OUT_OF_TIME)
         self._log_outcome(result, ctx, recalled=recalled)
         card = next((a for a in deps.attachments if a.embed is not None), None)
         files = tuple(f for a in deps.attachments for f in a.files)

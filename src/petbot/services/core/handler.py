@@ -66,10 +66,11 @@ def handler(event: dict[str, Any], context: object = None) -> dict[str, Any]:
     """
     body = event["body"] if isinstance(event, dict) and "body" in event else json.dumps(event)
     # The invocation's own clock sets the turn's budget; a call without a Lambda context
-    # (a local test) runs unbounded.
+    # (a local test) runs unbounded. An invocation that starts inside the reserve gets a
+    # zero budget: the turn answers with its fallback at once rather than being killed.
     remaining_ms = getattr(context, "get_remaining_time_in_millis", None)
     scope = (
-        budget(remaining_ms() / 1000 - _RESERVE_SECONDS)
+        budget(max(0.0, remaining_ms() / 1000 - _RESERVE_SECONDS))
         if callable(remaining_ms)
         else nullcontext()
     )

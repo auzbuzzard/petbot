@@ -80,8 +80,15 @@ def test_handler_gives_the_turn_the_invocation_time_minus_a_reserve(
         "input": CommandInput(name="math", values={}).model_dump(mode="json"),
         "context": ctx.model_dump(mode="json"),
     }
+
+    class _AlmostOutOfTime:
+        def get_remaining_time_in_millis(self) -> int:
+            return 1_000  # less than the reserve
+
     handler_module.handler(event, _LambdaContext())
     handler_module.handler(event)  # no Lambda context: unbounded
+    handler_module.handler(event, _AlmostOutOfTime())
     reserve = handler_module._RESERVE_SECONDS
     assert seen[0] is not None and 60 - reserve - 1 < seen[0] <= 60 - reserve
     assert seen[1] is None
+    assert seen[2] == 0.0  # clamped: a zero budget, never a negative one
