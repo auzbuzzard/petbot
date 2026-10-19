@@ -48,10 +48,9 @@ Discord ⇄ [ frontend ]  --Input(JSON)-->  [ core service ]  chat(LLM) · math 
    it on the compute side. `LambdaTransport` waits out a worker that isn't `Active` yet
    (an idle container-image function goes `Inactive`, and its next invoke is rejected
    while the image is re-pulled), so the first message after a quiet spell still lands.
-   The frontend keeps typing for the whole turn and posts a placeholder reply that says
-   what the turn is doing: `waking up…` as soon as the transport reports the worker is
-   down, `thinking…` past 10 s or once the worker is up. It deletes the placeholder once
-   the answer is sent.
+   The frontend keeps typing for the whole turn and pauses the indicator, as a person
+   would, at each checkpoint: 10 s in, and each phase the transport reports (the worker
+   found waking, then up). It posts nothing but the answer.
 3. A `RouterProcess` picks — by the input *type*, the one place anything branches —
    the **chat process** (the pydantic-ai brain, which voices itself; it feeds
    `TextInput.history` to the agent as message history and reactively compacts it — a

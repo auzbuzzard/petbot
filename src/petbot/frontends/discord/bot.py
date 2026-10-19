@@ -28,7 +28,7 @@ from petbot.frontends.discord.history import (
 from petbot.frontends.discord.render import SERVICE_UNREACHABLE, respond
 from petbot.frontends.discord.settings import DiscordSettings, HttpService, LambdaService
 from petbot.frontends.discord.slash import build_commands
-from petbot.frontends.discord.thinking import clear, think
+from petbot.frontends.discord.thinking import think
 from petbot.logging_setup import configure_logging
 from petbot.observability import ObservabilitySettings, configure_observability
 from petbot.platform import HttpTransport, LambdaTransport, ProcessClient
@@ -96,15 +96,12 @@ class PetBot(commands.Bot):
         text = strip_self_mention(message.content, bot_user_id).strip()
         if not text:
             return
-        result, placeholder = await think(
+        result = await think(
             message,
             self._turn(text, message, bot_user_id),
             after=self.settings.thinking_after_seconds,
         )
-        try:
-            await respond(message.channel, result, reference=message)
-        finally:
-            await clear(placeholder)
+        await respond(message.channel, result, reference=message)
 
     async def _turn(self, text: str, message: discord.Message, bot_user_id: int) -> SkillResult:
         """Recall the reply chain, then dispatch — the whole turn :func:`think` waits on, so
