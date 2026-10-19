@@ -22,6 +22,7 @@ from petbot.domain import (
     User,
 )
 from petbot.platform import (
+    DynamoClaims,
     HttpTransport,
     LambdaTransport,
     Phase,
@@ -254,3 +255,68 @@ async def test_lambda_transport_reports_nothing_for_a_ready_function() -> None:
     with observe(phases.append):
         await _send(_FakeLambda())
     assert phases == []
+
+
+# --- DynamoClaims -------------------------------------------------------------
+
+
+class _FakeDynamo:
+    """A DynamoDB client stand-in with real conditional-put semantics on ``id``."""
+
+    def __init__(self, *, put_error: Exception | None = None) -> None:
+        self.items: dict[str, dict[str, Any]] = {}
+        self.updates: list[dict[str, Any]] = []
+        self._put_error = put_error
+        self.update_error: Exception | None = None
+
+    def put_item(self, **kwargs: Any) -> Any:
+        if self._put_error is not None:
+            raise self._put_error
+        item = kwargs["Item"]
+        assert kwargs["ConditionExpression"] == "attribute_not_exists(id)"
+        if item["id"]["S"] in self.items:
+            raise ClientError(
+                {"Error": {"Code": "ConditionalCheckFailedException", "Message": "exists"}},
+                "PutItem",
+            )
+        self.items[item["id"]["S"]] = item
+        return {}
+
+    def update_item(self, **kwargs: Any) -> Any:
+        self.updates.append(kwargs)
+        if self.update_error is not None:
+            raise self.update_error
+        return {}
+
+
+async def test_first_claim_wins_and_records_its_holder() -> None:
+    client = _FakeDynamo()
+    claims = DynamoClaims("petbot-edge-claims", client, holder="edge-new", ttl_seconds=60)
+    assert await claims.claim("discord:message:1") is True
+    item = client.items["discord:message:1"]
+    assert item["claimed_by"] == {"S": "edge-new"}
+    assert int(item["expires_at"]["N"]) > 0
+
+
+async def test_a_later_claim_loses_and_records_the_duplicate_delivery() -> None:
+    # The losing copy leaves a trace: which host also received the message.
+    client = _FakeDynamo()
+    await DynamoClaims("t", client, holder="edge-new").claim("discord:message:1")
+    assert await DynamoClaims("t", client, holder="edge-old").claim("discord:message:1") is False
+    update = client.updates[0]
+    assert update["Key"] == {"id": {"S": "discord:message:1"}}
+    assert update["UpdateExpression"] == "ADD duplicate_deliveries :one, also_delivered_to :me"
+    assert update["ExpressionAttributeValues"][":me"] == {"SS": ["edge-old"]}
+
+
+async def test_failing_to_record_a_duplicate_still_refuses_the_claim() -> None:
+    client = _FakeDynamo()
+    await DynamoClaims("t", client, holder="a").claim("m")
+    client.update_error = OSError("throttled")
+    assert await DynamoClaims("t", client, holder="b").claim("m") is False
+
+
+async def test_other_claim_errors_surface() -> None:
+    denied = ClientError({"Error": {"Code": "AccessDeniedException", "Message": "no"}}, "PutItem")
+    with pytest.raises(ClientError):
+        await DynamoClaims("t", _FakeDynamo(put_error=denied), holder="a").claim("m")

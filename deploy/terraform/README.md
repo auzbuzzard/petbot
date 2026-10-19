@@ -28,7 +28,9 @@ Discord ⇄ [ edge ]  --boto3 invoke (IAM)-->  [ core worker Lambda ]  math · b
 
 The edge carries a **scoped IAM user** whose only permissions are
 `lambda:InvokeFunction` and `lambda:GetFunctionConfiguration` (to wait out an
-Inactive/Pending function) on the core worker. Its access key is injected into the
+Inactive/Pending function) on the core worker, and `dynamodb:PutItem` /
+`dynamodb:UpdateItem` on its `petbot-edge-claims` table (one copy answers each
+message; see `claims.tf`). Its access key is injected into the
 container's environment (Lightsail container services have no IAM instance roles).
 No public, unauthenticated surface exists, so there is no LLM cost-abuse vector.
 
@@ -110,6 +112,12 @@ different base URL.
 That's the complete list — once these Variables and the SSM secrets above exist,
 a push to `master` runs a green deploy. (Merging the PR alone does **not** create
 them; this one-time setup is yours to do.)
+
+**Re-apply bootstrap when it changes.** The deploy role's permissions live in
+`bootstrap/`, which CI never applies. When a change adds a resource type the role
+can't yet manage (e.g. the `petbot-edge-claims` DynamoDB table), re-run
+`terraform apply` in `bootstrap/` (same `-var`) **before** merging, or the deploy's
+`terraform apply` fails with `AccessDenied`.
 
 ## CI deploy (the steady-state path)
 

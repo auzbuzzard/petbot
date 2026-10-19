@@ -137,6 +137,7 @@ locals {
   log_group_arn     = "arn:aws:logs:${var.aws_region}:${local.account_id}:log-group:/aws/lambda/${local.core_name}"
   exec_role_arn     = "arn:aws:iam::${local.account_id}:role/${local.core_name}-role"
   edge_user_arn     = "arn:aws:iam::${local.account_id}:user/${local.edge_name}"
+  claims_table_arn  = "arn:aws:dynamodb:${var.aws_region}:${local.account_id}:table/${local.edge_name}-claims"
 }
 
 # Least-privilege permissions for the deploy workflow. Service-level action
@@ -189,6 +190,13 @@ data "aws_iam_policy_document" "deploy_permissions" {
     sid       = "ManageLambda"
     actions   = ["lambda:*"]
     resources = [local.lambda_arn, "${local.lambda_arn}:*"]
+  }
+
+  # The edge's message-claims table (claims.tf): one copy answers each message.
+  statement {
+    sid       = "ManageClaimsTable"
+    actions   = ["dynamodb:*"]
+    resources = [local.claims_table_arn]
   }
 
   statement {
