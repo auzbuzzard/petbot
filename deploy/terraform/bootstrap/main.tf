@@ -135,6 +135,7 @@ locals {
   ecr_repo_arn      = "arn:aws:ecr:${var.aws_region}:${local.account_id}:repository/${local.core_name}"
   edge_ecr_repo_arn = "arn:aws:ecr:${var.aws_region}:${local.account_id}:repository/${local.edge_name}"
   log_group_arn     = "arn:aws:logs:${var.aws_region}:${local.account_id}:log-group:/aws/lambda/${local.core_name}"
+  claims_table_arn  = "arn:aws:dynamodb:${var.aws_region}:${local.account_id}:table/${local.core_name}-claims"
   exec_role_arn     = "arn:aws:iam::${local.account_id}:role/${local.core_name}-role"
   edge_user_arn     = "arn:aws:iam::${local.account_id}:user/${local.edge_name}"
 }
@@ -189,6 +190,13 @@ data "aws_iam_policy_document" "deploy_permissions" {
     sid       = "ManageLambda"
     actions   = ["lambda:*"]
     resources = [local.lambda_arn, "${local.lambda_arn}:*"]
+  }
+
+  # The core's request-claims table (claims.tf): one answer per Discord message.
+  statement {
+    sid       = "ManageClaimsTable"
+    actions   = ["dynamodb:*"]
+    resources = [local.claims_table_arn]
   }
 
   statement {

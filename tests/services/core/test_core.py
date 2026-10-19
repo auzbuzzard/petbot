@@ -44,3 +44,18 @@ def test_handler_returns_bare_skill_result_across_warm_invocations(
         assert "statusCode" not in response  # bare result, not an API-Gateway envelope
         result = SkillResult.model_validate(response)
         assert result.text is not None and "42" in result.text
+
+
+def test_core_claims_requests_only_when_a_claims_table_is_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The Lambda deployment sets CLAIMS_TABLE so concurrent edges answer a message once;
+    # the dev HTTP service leaves it unset and answers everything directly.
+    from petbot.platform import ClaimingProcess
+    from petbot.services.core import build_process
+
+    monkeypatch.delenv("CLAIMS_TABLE", raising=False)
+    assert not isinstance(build_process(), ClaimingProcess)
+    monkeypatch.setenv("CLAIMS_TABLE", "petbot-core-claims")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    assert isinstance(build_process(), ClaimingProcess)

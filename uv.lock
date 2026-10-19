@@ -1682,6 +1682,7 @@ dependencies = [
 
 [package.optional-dependencies]
 compute-core = [
+    { name = "boto3" },
     { name = "botocore" },
     { name = "ddgs" },
     { name = "httpx" },
@@ -1746,6 +1747,7 @@ observability = [
 
 [package.metadata]
 requires-dist = [
+    { name = "boto3", marker = "extra == 'compute-core'", specifier = ">=1.43" },
     { name = "boto3", marker = "extra == 'lambda'", specifier = ">=1.43" },
     { name = "botocore", marker = "extra == 'observability'", specifier = ">=1.40" },
     { name = "ddgs", marker = "extra == 'compute-core'", specifier = ">=9.16" },

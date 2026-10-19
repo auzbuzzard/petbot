@@ -162,6 +162,20 @@ is consolidated** until scale justifies splitting:
   edge gets one finished `SkillResult` per synchronous invoke, with no stream to carry
   partial output.
 
+- Follow-on (2026-10): **one answer per message, however many edges.** Discord delivers
+  every gateway event to every session connected with the bot's token. Two sessions
+  exist whenever a Lightsail deployment rolls over (the new container connects before
+  the old one stops), or whenever a second copy runs anywhere with the token. Each copy
+  answered: right after the #89 deploy, every DM got two replies, from two Lambda runs
+  that started 30 ms apart. The frontend now sends the Discord message id as
+  `SkillContext.request_id`. The core's `ClaimingProcess` claims it with a conditional
+  put to the `petbot-core-claims` DynamoDB table (TTL-expired) before answering; a
+  later delivery of the same id gets an empty result, which renders as nothing. The
+  claim is atomic, so exactly one of two concurrent deliveries wins. If the store
+  fails, the request is answered anyway (a rare duplicate beats a dropped message).
+  Slash commands need no claim: Discord lets only one session acknowledge an
+  interaction.
+
 ### 5. Repository structure — uv workspace, hexagonal
 
 A uv workspace (one `uv.lock`, one venv, shared tool config at root). Group by

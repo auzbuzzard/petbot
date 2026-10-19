@@ -65,6 +65,7 @@ class FakeGuild:
 
 class FakeMessage:
     def __init__(self, channel: FakeChannel, guild: FakeGuild | None = None) -> None:
+        self.id = 4242
         self.author = FakeAuthor()
         self.channel = channel
         self.guild = guild
@@ -118,6 +119,13 @@ def test_build_context_reads_nsfw_and_ids() -> None:
     assert nsfw.user.display_name == "Rex"
     sfw = build_context(FakeMessage(FakeChannel(nsfw=False)))  # type: ignore[arg-type]
     assert sfw.allows_explicit is False
+
+
+def test_build_context_uses_the_message_id_as_the_request_id() -> None:
+    # Every gateway session receives the same message id, so the compute side can answer
+    # the message once however many edge copies deliver it.
+    ctx = build_context(FakeMessage(FakeChannel()))  # type: ignore[arg-type]
+    assert ctx.request_id == "discord:message:4242"
 
 
 def test_build_context_carries_server_and_channel_names() -> None:

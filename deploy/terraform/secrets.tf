@@ -54,6 +54,8 @@ locals {
       # How an over-long conversation is compacted when the model rejects it for
       # length (reactive). Default sliding_window; summarize uses the stylizer tier.
       CHAT_CONTEXT__KIND = var.context_kind
+      # Claimed request ids, so concurrent edges answer each message once (claims.tf).
+      CLAIMS_TABLE = aws_dynamodb_table.claims.name
     },
     var.chat_llm_base_url != "" ? { CHAT_LLM__BASE_URL = var.chat_llm_base_url } : {},
     var.chat_thinking != "" ? { CHAT_THINKING = var.chat_thinking } : {},

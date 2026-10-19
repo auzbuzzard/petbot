@@ -5,7 +5,9 @@ Composes the process core for everything that isn't voice: a
 search/fetch and weather, from their entry points), a
 :class:`~petbot.process.ChatProcess` (its agent calls those tools in-process), and a
 :class:`~petbot.process.CommandProcess` voiced by a :class:`~petbot.process.Stylist`,
-behind one :class:`~petbot.process.RouterProcess`.
+behind one :class:`~petbot.process.RouterProcess`. With ``CLAIMS_TABLE`` set (the Lambda
+deployment), a :class:`~petbot.platform.ClaimingProcess` in front answers each request id
+once, however many frontends deliver it.
 Served behind a transport by :mod:`petbot.services.core.handler` (Lambda) or
 ``python -m petbot.services.core`` (dev HTTP).
 """
@@ -13,12 +15,22 @@ Served behind a transport by :mod:`petbot.services.core.handler` (Lambda) or
 from __future__ import annotations
 
 from pydantic_ai.models.instrumented import InstrumentationSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from petbot.domain import Process
 from petbot.observability import ObservabilitySettings
-from petbot.platform import ToolRegistry
+from petbot.platform import ClaimingProcess, DynamoClaims, ToolRegistry
 from petbot.process import ChatProcess, CommandProcess, RouterProcess, Stylist
 from petbot.process.settings import ChatSettings
+
+
+class CoreSettings(BaseSettings):
+    """Deployment wiring for the core service."""
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", frozen=True)
+
+    #: The DynamoDB table of claimed request ids (``CLAIMS_TABLE``); unset ⇒ no claiming.
+    claims_table: str | None = None
 
 
 def build_process() -> Process:
@@ -39,7 +51,9 @@ def build_process() -> Process:
         registry, settings=settings, instrumentation=instrumentation, id_salt=obs.id_salt
     )
     command = CommandProcess(registry, Stylist(settings=settings))
-    return RouterProcess(chat=chat, command=command)
+    router = RouterProcess(chat=chat, command=command)
+    table = CoreSettings().claims_table
+    return ClaimingProcess(router, DynamoClaims.from_table_name(table)) if table else router
 
 
-__all__ = ["build_process"]
+__all__ = ["CoreSettings", "build_process"]
