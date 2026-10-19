@@ -43,7 +43,8 @@ def build_context(message: discord.Message) -> SkillContext:
 
     ``allows_explicit`` comes from the channel's NSFW flag; the conversation id is
     the channel (the natural session unit on Discord); the server and channel names
-    ground the chat agent in where it is talking.
+    ground the chat agent in where it is talking. The message id is the request id, so
+    the compute side answers a message once however many gateway sessions deliver it.
     """
     author = message.author
     user = User(
@@ -59,6 +60,7 @@ def build_context(message: discord.Message) -> SkillContext:
         allows_explicit=_channel_is_nsfw(message.channel),
         community_name=community,
         channel_name=channel,
+        request_id=f"discord:message:{message.id}",
     )
 
 

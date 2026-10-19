@@ -1,7 +1,9 @@
-"""The tool registry, the serve boundary, the ProcessClient, and the HTTP + Lambda transports."""
+"""The tool registry, the serve boundary, the ProcessClient, the HTTP + Lambda transports, and
+request claiming."""
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 from typing import Any
@@ -22,6 +24,8 @@ from petbot.domain import (
     User,
 )
 from petbot.platform import (
+    ClaimingProcess,
+    DynamoClaims,
     HttpTransport,
     LambdaTransport,
     Phase,
@@ -254,3 +258,102 @@ async def test_lambda_transport_reports_nothing_for_a_ready_function() -> None:
     with observe(phases.append):
         await _send(_FakeLambda())
     assert phases == []
+
+
+# --- ClaimingProcess / DynamoClaims -------------------------------------------
+
+
+class _AtomicClaims:
+    """An in-memory ClaimStore: the first claim of an id wins."""
+
+    def __init__(self, *, error: Exception | None = None) -> None:
+        self.taken: set[str] = set()
+        self._error = error
+
+    async def claim(self, request_id: str) -> bool:
+        if self._error is not None:
+            raise self._error
+        await asyncio.sleep(0)  # let a concurrent delivery interleave
+        if request_id in self.taken:
+            return False
+        self.taken.add(request_id)
+        return True
+
+
+class _CountingProcess(Process):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def respond(self, inp: object, ctx: SkillContext) -> SkillResult:
+        self.calls += 1
+        return SkillResult.message("the answer")
+
+
+def _ctx_for(request_id: str | None) -> SkillContext:
+    return _ctx().model_copy(update={"request_id": request_id})
+
+
+async def test_concurrent_deliveries_of_one_message_get_one_answer() -> None:
+    # Two edge copies on the gateway both deliver the same Discord message at once.
+    inner = _CountingProcess()
+    process = ClaimingProcess(inner, _AtomicClaims())
+    results = await asyncio.gather(
+        process.respond(_command(), _ctx_for("discord:message:1")),
+        process.respond(_command(), _ctx_for("discord:message:1")),
+    )
+    assert inner.calls == 1
+    assert sorted(r.text or "" for r in results) == ["", "the answer"]
+    assert any(r == SkillResult() for r in results)  # the loser renders as nothing
+
+
+async def test_distinct_requests_and_unidentified_ones_are_all_answered() -> None:
+    inner = _CountingProcess()
+    process = ClaimingProcess(inner, _AtomicClaims())
+    await process.respond(_command(), _ctx_for("discord:message:1"))
+    await process.respond(_command(), _ctx_for("discord:message:2"))
+    await process.respond(_command(), _ctx_for(None))  # e.g. a slash command
+    await process.respond(_command(), _ctx_for(None))
+    assert inner.calls == 4
+
+
+async def test_a_failing_claim_store_still_answers() -> None:
+    # A rare duplicate beats a dropped message.
+    inner = _CountingProcess()
+    process = ClaimingProcess(inner, _AtomicClaims(error=OSError("dynamodb down")))
+    result = await process.respond(_command(), _ctx_for("discord:message:1"))
+    assert result.text == "the answer"
+
+
+class _FakeDynamo:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self._error = error
+
+    def put_item(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        if self._error is not None:
+            raise self._error
+        return {}
+
+
+async def test_dynamo_claim_is_a_conditional_create_with_a_ttl() -> None:
+    client = _FakeDynamo()
+    assert await DynamoClaims("petbot-core-claims", client, ttl_seconds=60).claim("m:1") is True
+    call = client.calls[0]
+    assert call["TableName"] == "petbot-core-claims"
+    assert call["ConditionExpression"] == "attribute_not_exists(id)"
+    assert call["Item"]["id"] == {"S": "m:1"}
+    assert int(call["Item"]["expires_at"]["N"]) > 0
+
+
+async def test_dynamo_claim_of_a_taken_id_is_refused() -> None:
+    taken = ClientError(
+        {"Error": {"Code": "ConditionalCheckFailedException", "Message": "exists"}}, "PutItem"
+    )
+    assert await DynamoClaims("t", _FakeDynamo(taken)).claim("m:1") is False
+
+
+async def test_dynamo_claim_surfaces_other_errors() -> None:
+    denied = ClientError({"Error": {"Code": "AccessDeniedException", "Message": "no"}}, "PutItem")
+    with pytest.raises(ClientError):
+        await DynamoClaims("t", _FakeDynamo(denied)).claim("m:1")

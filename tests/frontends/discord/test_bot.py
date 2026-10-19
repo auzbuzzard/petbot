@@ -47,6 +47,7 @@ class _Message:
     """An @mention of the bot in a guild, replying to nothing."""
 
     def __init__(self) -> None:
+        self.id = 4242
         self.author = _User(2, "Alice")
         self.content = f"<@{_BOT_ID}> hi"
         self.mentions = [_User(_BOT_ID, "PetBot", bot=True)]
@@ -112,3 +113,17 @@ def test_thinking_threshold_must_be_positive(value: float) -> None:
             service=HttpService(url="http://svc/dispatch"),
             thinking_after_seconds=value,
         )
+
+
+class _AlreadyAnswered(Process):
+    """The compute side's reply to a duplicate delivery: an empty result."""
+
+    async def respond(self, inp: Input, ctx: SkillContext) -> SkillResult:
+        return SkillResult()
+
+
+async def test_a_duplicate_delivery_posts_nothing() -> None:
+    # A second gateway session got the same message; the other copy answers it.
+    message = _Message()
+    await _bot(_AlreadyAnswered(), thinking_after=1).on_message(message)  # type: ignore[arg-type]
+    assert all(event == "typing" for event in message.channel.events)

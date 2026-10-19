@@ -53,3 +53,6 @@ class SkillContext(Frozen):
     #: Discord server and channel). Both ``None`` means a direct message.
     community_name: str | None = None
     channel_name: str | None = None
+    #: The platform's id for the event that started this request (a Discord message). Every
+    #: delivery of one event carries the same id, so the request can be answered once.
+    request_id: str | None = None
