@@ -140,7 +140,7 @@ is consolidated** until scale justifies splitting:
   maximum), since a re-send would run the whole turn twice. A `FunctionError` response is
   raised with the runtime's own message instead of mis-parsed as a `SkillResult`. A
   deploy's brief `Pending` window is covered too. Letting the function go `Inactive` is
-  accepted: no keep-warm ping. The wait is made visible instead. An @mention turn runs
+  accepted: no keep-warm ping. The wait is made visible instead. A message turn (DM, @mention or reply) runs
   under the typing indicator, and past 10 s (`THINKING_AFTER_SECONDS`) the edge also posts
   a `-# 💭 thinking…` placeholder reply, deleted once the answer is sent. Ten seconds is
   Nielsen's attention limit and one typing trigger's life, and it clears a normal cold

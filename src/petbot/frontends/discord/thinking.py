@@ -1,9 +1,10 @@
 """A Discord-native "thinking" state for a slow conversational turn.
 
-Discord gives an @mention no built-in progress UI (a slash command gets "PetBot is
-thinking…" from its deferred response; a message gets nothing). The typing indicator is the
-first line of feedback: one trigger lasts ~10 s, so :func:`think` re-triggers it every
-:data:`TYPING_REFRESH_SECONDS` for as long as the turn runs. Past
+Discord gives a plain message no built-in progress UI, whether it is a DM, an @mention or a
+reply to PetBot (a slash command gets "PetBot is thinking…" from its deferred response).
+The typing indicator is the first line of feedback: one trigger lasts ~10 s, so
+:func:`think` re-triggers it every :data:`TYPING_REFRESH_SECONDS` for as long as the turn
+runs. Past
 :data:`THINKING_AFTER_SECONDS` a typing dot alone stops reading as "working on it", so
 :func:`think` also posts a small placeholder reply (:data:`THINKING`, Discord ``-#``
 subtext) and keeps typing. The caller retires the placeholder with :func:`clear` once the
