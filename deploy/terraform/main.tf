@@ -34,8 +34,9 @@ data "aws_iam_policy_document" "assume" {
 }
 
 resource "aws_iam_role" "lambda" {
-  name               = "${local.core_name}-role"
-  assume_role_policy = data.aws_iam_policy_document.assume.json
+  name                 = "${local.core_name}-role"
+  assume_role_policy   = data.aws_iam_policy_document.assume.json
+  permissions_boundary = local.workload_boundary_arn
 }
 
 # CloudWatch Logs only — secrets are injected as env at deploy, so the function

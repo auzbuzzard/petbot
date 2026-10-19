@@ -104,7 +104,8 @@ data "aws_ssm_parameter" "discord_token" {
 # transport can wait for an Inactive/Pending function to become Active), nothing else.
 
 resource "aws_iam_user" "edge" {
-  name = local.edge_name
+  name                 = local.edge_name
+  permissions_boundary = local.workload_boundary_arn
 }
 
 resource "aws_iam_access_key" "edge" {
