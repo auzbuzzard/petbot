@@ -107,7 +107,8 @@ data "aws_ssm_parameter" "discord_token" {
 # messages in the claims table (claims.tf), nothing else.
 
 resource "aws_iam_user" "edge" {
-  name = local.edge_name
+  name                 = local.edge_name
+  permissions_boundary = local.workload_boundary_arn
 }
 
 resource "aws_iam_access_key" "edge" {
