@@ -26,7 +26,9 @@ _client: httpx.AsyncClient | None = None
 def _shared_client() -> httpx.AsyncClient:
     global _client
     if _client is None:
-        _client = httpx.AsyncClient(timeout=15.0)
+        # Short per-step timeouts: a run may chain search -> fallback -> fetch inside the
+        # Lambda's 60s budget, alongside several model calls.
+        _client = httpx.AsyncClient(timeout=10.0)
     return _client
 
 
@@ -42,4 +44,4 @@ def build_search() -> WebSearchSkill:
 
 def build_fetch() -> WebFetchSkill:
     """Build the page-fetch skill from the environment."""
-    return WebFetchSkill(WebSettings().user_agent)
+    return WebFetchSkill(_shared_client(), WebSettings().user_agent)

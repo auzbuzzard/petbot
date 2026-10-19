@@ -2,7 +2,9 @@
 
 Tavily (keyed, built for LLM consumers) runs first; ``ddgs`` (keyless metasearch over
 public result pages) is the fallback for a missing key, an exhausted quota, or an outage.
-The results come back as a compact numbered list the agent reads and cites from.
+The results come back as a compact numbered list the agent reads and cites from. Outside an
+age-gated channel the search asks for safe results where the provider supports it (ddgs's
+``safesearch``; Tavily has no such filter, so there the persona's SFW rule is the gate).
 """
 
 from __future__ import annotations
@@ -47,14 +49,19 @@ class SearchHit:
 
 
 class SearchProvider(Protocol):
-    """A web search backend. Raises on failure; an empty list means no results."""
+    """A web search backend. Raises on failure; an empty list means no results. ``safe``
+    asks for safe-rated results, where the backend can filter."""
 
     name: str
 
-    async def search(self, query: str) -> list[SearchHit]: ...
+    async def search(self, query: str, *, safe: bool) -> list[SearchHit]: ...
 
 
-class TavilyProvider:
+def _text(value: object) -> str:
+    return value if isinstance(value, str) else ""
+
+
+class TavilyProvider(SearchProvider):
     """Tavily's search API (``search_depth=basic``: one credit per query)."""
 
     name = "tavily"
@@ -63,7 +70,7 @@ class TavilyProvider:
         self._client = client
         self._api_key = api_key
 
-    async def search(self, query: str) -> list[SearchHit]:
+    async def search(self, query: str, *, safe: bool) -> list[SearchHit]:
         response = await self._client.post(
             TAVILY_URL,
             headers={"Authorization": f"Bearer {self._api_key}"},
@@ -71,13 +78,13 @@ class TavilyProvider:
         )
         response.raise_for_status()
         return [
-            SearchHit(title=r.get("title", ""), url=r["url"], snippet=r.get("content", ""))
-            for r in response.json().get("results", [])
-            if r.get("url")
+            SearchHit(title=_text(r.get("title")), url=r["url"], snippet=_text(r.get("content")))
+            for r in response.json().get("results") or []
+            if isinstance(r.get("url"), str) and r["url"]
         ]
 
 
-class DdgsProvider:
+class DdgsProvider(SearchProvider):
     """Keyless metasearch via ``ddgs``, pinned to the engines that answer cloud IPs."""
 
     name = "ddgs"
@@ -85,17 +92,29 @@ class DdgsProvider:
     def __init__(self, backend: str = "duckduckgo,startpage") -> None:
         self._backend = backend
 
-    def _search_sync(self, query: str) -> list[SearchHit]:
-        rows = DDGS(timeout=10).text(query, max_results=MAX_RESULTS, backend=self._backend)
+    def _search_sync(self, query: str, safe: bool) -> list[SearchHit]:
+        try:
+            rows = DDGS(timeout=8).text(
+                query,
+                max_results=MAX_RESULTS,
+                backend=self._backend,
+                safesearch="on" if safe else "off",
+            )
+        except DDGSException as exc:
+            # ddgs raises this exact message when every engine answered with nothing; any
+            # engine error replaces it, so it reliably means "no results", not an outage.
+            if str(exc) == "No results found.":
+                return []
+            raise
         return [
-            SearchHit(title=r.get("title", ""), url=r["href"], snippet=r.get("body", ""))
+            SearchHit(title=_text(r.get("title")), url=r["href"], snippet=_text(r.get("body")))
             for r in rows
-            if r.get("href")
+            if isinstance(r.get("href"), str) and r["href"]
         ]
 
-    async def search(self, query: str) -> list[SearchHit]:
+    async def search(self, query: str, *, safe: bool) -> list[SearchHit]:
         # ddgs is synchronous (threaded HTTP); keep it off the event loop.
-        return await asyncio.to_thread(self._search_sync, query)
+        return await asyncio.to_thread(self._search_sync, query, safe)
 
 
 def _clip(text: str, limit: int) -> str:
@@ -132,7 +151,7 @@ class WebSearchSkill(Skill[WebSearchArgs]):
         failures = 0
         for provider in self._providers:
             try:
-                hits = await provider.search(query)
+                hits = await provider.search(query, safe=not ctx.allows_explicit)
             except (httpx.HTTPError, DDGSException, KeyError, ValueError) as exc:
                 # A quota/outage/parse failure on one provider falls through to the next.
                 failures += 1

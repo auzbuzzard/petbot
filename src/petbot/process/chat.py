@@ -62,12 +62,20 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def _quoted(name: str) -> str:
+    """A user-controlled name as one quoted, single-line token, so a display/server/channel
+    name can't pose as another line of the instructions."""
+    flat = " ".join(name.replace('"', "'").split())[:100]
+    return f'"{flat}"'
+
+
 def _place(ctx: SkillContext) -> str:
     if ctx.community_name is None:
         return "a direct message"
+    server = f"the server {_quoted(ctx.community_name)}"
     if ctx.channel_name is None:
-        return f"the {ctx.community_name} server"
-    return f"#{ctx.channel_name} in the {ctx.community_name} server"
+        return server
+    return f"channel {_quoted(ctx.channel_name)} in {server}"
 
 
 def run_context(ctx: SkillContext, now: datetime) -> str:
@@ -83,7 +91,7 @@ def run_context(ctx: SkillContext, now: datetime) -> str:
         (
             "Current context:",
             f"- Now: {utc:%A, %d %B %Y, %H:%M} UTC (Unix time {int(utc.timestamp())}).",
-            f"- You are answering {ctx.user.display_name}, in {_place(ctx)}.",
+            f"- You are answering {_quoted(ctx.user.display_name)}, in {_place(ctx)}.",
             f"- This channel is {rating}.",
         )
     )

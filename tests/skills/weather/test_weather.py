@@ -98,3 +98,23 @@ async def test_weather_upstream_error_is_unavailable() -> None:
     async with httpx.AsyncClient() as client:
         with pytest.raises(UpstreamUnavailable):
             await WeatherSkill(client).run(WeatherArgs(location="Paris"), _ctx())
+
+
+def test_pick_never_matches_a_qualifier_by_substring() -> None:
+    from petbot.skills.weather.skill import _pick
+
+    au = {"name": "Melbourne", "admin1": "Victoria", "country": "Australia", "country_code": "AU"}
+    fl = {
+        "name": "Melbourne",
+        "admin1": "Florida",
+        "country": "United States",
+        "country_code": "US",
+    }
+    assert _pick([au, fl], "US") is fl
+    assert _pick([au, fl], "FL") is fl
+    assert _pick([au, fl], "Australia") is au
+    assert _pick([fl, au], "Vic") is au  # a name's start still matches
+    paris_fr = _PLACES[1]
+    paris_tx = _PLACES[0]
+    assert _pick([paris_fr, paris_tx], "TX") is paris_tx
+    assert _pick([paris_fr, paris_tx], "Nowhere") is paris_fr  # no match: top hit

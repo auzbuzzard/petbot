@@ -8,6 +8,7 @@ alongside, so the answer suits whoever asks.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -70,14 +71,50 @@ def _temp(celsius: object) -> str:
     return f"{celsius:.0f}°C / {celsius * 9 / 5 + 32:.0f}°F"
 
 
+#: US state / DC postal codes, for the common "City, ST" form (Open-Meteo returns the full
+#: state name in ``admin1``).
+_US_STATES: dict[str, str] = dict(
+    pair.split(":")
+    for pair in (
+        "al:alabama|ak:alaska|az:arizona|ar:arkansas|ca:california|co:colorado|"
+        "ct:connecticut|de:delaware|dc:district of columbia|fl:florida|ga:georgia|"
+        "hi:hawaii|id:idaho|il:illinois|in:indiana|ia:iowa|ks:kansas|ky:kentucky|"
+        "la:louisiana|me:maine|md:maryland|ma:massachusetts|mi:michigan|mn:minnesota|"
+        "ms:mississippi|mo:missouri|mt:montana|ne:nebraska|nv:nevada|nh:new hampshire|"
+        "nj:new jersey|nm:new mexico|ny:new york|nc:north carolina|nd:north dakota|"
+        "oh:ohio|ok:oklahoma|or:oregon|pa:pennsylvania|ri:rhode island|sc:south carolina|"
+        "sd:south dakota|tn:tennessee|tx:texas|ut:utah|vt:vermont|va:virginia|"
+        "wa:washington|wv:west virginia|wi:wisconsin|wy:wyoming"
+    ).split("|")
+)
+
+
 def _pick(results: list[dict[str, Any]], qualifier: str) -> dict[str, Any]:
-    """The geocoding hit matching the place's qualifier ("WA", "France"), else the top hit."""
-    q = qualifier.lower()
-    if q:
-        for r in results:
-            fields = (r.get("admin1", ""), r.get("country", ""), r.get("country_code", ""))
-            if any(q == str(f).lower() or q in str(f).lower() for f in fields if f):
-                return r
+    """The geocoding hit matching the place's qualifier ("WA", "Texas", "FR", "France"), else
+    the top hit. Matches whole names, codes, or a name's start — never a substring, so "US"
+    can't match "Australia"."""
+    q = qualifier.strip().lower()
+    if not q:
+        return results[0]
+    state = _US_STATES.get(q, "")
+
+    def norm(r: dict[str, Any], key: str) -> str:
+        return str(r.get(key) or "").lower()
+
+    def us_state(r: dict[str, Any]) -> bool:
+        return bool(state) and norm(r, "country_code") == "us" and norm(r, "admin1") == state
+
+    def exact(r: dict[str, Any]) -> bool:
+        return q in (norm(r, "admin1"), norm(r, "country"), norm(r, "country_code"))
+
+    def prefix(r: dict[str, Any]) -> bool:
+        return norm(r, "admin1").startswith(q) or norm(r, "country").startswith(q)
+
+    tiers: tuple[Callable[[dict[str, Any]], bool], ...] = (us_state, exact, prefix)
+    for matches in tiers:
+        hit = next((r for r in results if matches(r)), None)
+        if hit is not None:
+            return hit
     return results[0]
 
 
