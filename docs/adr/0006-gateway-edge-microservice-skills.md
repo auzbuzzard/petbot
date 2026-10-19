@@ -140,16 +140,18 @@ is consolidated** until scale justifies splitting:
   maximum), since a re-send would run the whole turn twice. A `FunctionError` response is
   raised with the runtime's own message instead of mis-parsed as a `SkillResult`. A
   deploy's brief `Pending` window is covered too. Letting the function go `Inactive` is
-  accepted: no keep-warm ping. The wait is made visible instead. A message turn (DM,
-  @mention or reply) runs under the typing indicator, and the edge posts a `-#` subtext
-  placeholder reply, deleted once the answer is sent, that says what the turn is doing.
-  The transport reports the turn's phase through `petbot.platform.progress` (a context
-  variable, so concurrent turns stay separate). `💤 waking up…` shows at once when the
-  transport reports the worker isn't up, since that wait is known to be long. `💭
-  thinking…` shows past 10 s (`THINKING_AFTER_SECONDS`) or replaces the waking line once
-  the worker is up. Ten seconds is Nielsen's attention limit and one typing trigger's
-  life, and it clears a normal cold start (~9 s end to end), so routine turns never get a
-  placeholder. Slash commands already show Discord's own "thinking…" from their deferred
+  accepted: no keep-warm ping. The wait is made visible instead, with the typing
+  indicator only: Discord's intended signal for a reply that takes a few seconds. A
+  message turn (DM, @mention or reply) types for its whole length and, at each
+  checkpoint, pauses the way a person does: it stops re-triggering, lets the current
+  trigger lapse (~10 s; Discord has no "stop typing" call), stays quiet ~2 s, then types
+  again. The checkpoints are the 10 s mark (`THINKING_AFTER_SECONDS`) and each phase the
+  transport reports through `petbot.platform.progress` (a context variable, so concurrent
+  turns stay separate): the worker found waking, then up. An earlier iteration posted a
+  `-#` "thinking…" placeholder reply and deleted it after the answer. It was dropped:
+  each slow turn cost two extra API calls (deletes are the first to be rate-limited),
+  bumped the channel twice, and landed in servers' message-delete logs (Dyno and the
+  like). Slash commands already show Discord's own "thinking…" from their deferred
   response.
 - Follow-on (2026-10): the agent can reason before answering (`CHAT_THINKING`, set to
   `high` in prod by Terraform's `chat_thinking`). The reasoning only improves the answer:

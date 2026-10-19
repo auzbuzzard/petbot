@@ -1,5 +1,5 @@
 """The message entrypoint (DM, @mention, reply) end to end: trigger, recall, dispatch,
-render, retire the placeholder — against fakes, without a gateway."""
+type while working, render — against fakes, without a gateway."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ import pytest
 from petbot.domain import Input, Process, Recalled, SkillContext, SkillResult, TextInput
 from petbot.frontends.discord.bot import PetBot
 from petbot.frontends.discord.settings import DiscordSettings, HttpService
-from petbot.frontends.discord.thinking import THINKING
 
 _BOT_ID = 1
 
@@ -35,14 +34,6 @@ class _Channel:
         self.events.append(f"send:{content}")
 
 
-class _Placeholder:
-    def __init__(self, channel: _Channel) -> None:
-        self._channel = channel
-
-    async def delete(self) -> None:
-        self._channel.events.append("placeholder:delete")
-
-
 class _Message:
     """An @mention of the bot in a guild, replying to nothing."""
 
@@ -54,10 +45,6 @@ class _Message:
         self.guild = object()
         self.reference = None
         self.channel = _Channel()
-
-    async def reply(self, content: str, **kwargs: Any) -> _Placeholder:
-        self.channel.events.append(f"reply:{content}")
-        return _Placeholder(self.channel)
 
 
 class _SlowProcess(Process):
@@ -92,17 +79,12 @@ async def test_quick_mention_answers_without_a_placeholder() -> None:
     assert process.inputs == [TextInput(text="hi", history=Recalled())]
 
 
-async def test_slow_mention_sends_the_answer_before_retiring_the_placeholder() -> None:
+async def test_slow_mention_only_types_then_answers() -> None:
+    # Past the checkpoint the turn still posts nothing but its answer: no placeholder.
     message = _Message()
     await _bot(_SlowProcess(0.05), thinking_after=0.01).on_message(message)  # type: ignore[arg-type]
-    # The answer lands before the placeholder goes, so the reply is never missing from view.
-    assert message.channel.events == [
-        "typing",
-        f"reply:{THINKING}",
-        "typing",
-        "send:the answer",
-        "placeholder:delete",
-    ]
+    assert [e for e in message.channel.events if e != "typing"] == ["send:the answer"]
+    assert message.channel.events[0] == "typing"
 
 
 @pytest.mark.parametrize("value", [0, -1])
