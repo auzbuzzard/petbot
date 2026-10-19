@@ -113,12 +113,6 @@ That's the complete list — once these Variables and the SSM secrets above exis
 a push to `master` runs a green deploy. (Merging the PR alone does **not** create
 them; this one-time setup is yours to do.)
 
-**Re-apply bootstrap when it changes.** The deploy role's permissions live in
-`bootstrap/`, which CI never applies. When a change adds a resource type the role
-can't yet manage (e.g. the `petbot-edge-claims` DynamoDB table), re-run
-`terraform apply` in `bootstrap/` (same `-var`) **before** merging, or the deploy's
-`terraform apply` fails with `AccessDenied`.
-
 ## CI deploy (the steady-state path)
 
 `.github/workflows/deploy.yml` does the whole rollout via OIDC: build + push both
