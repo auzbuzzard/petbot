@@ -126,7 +126,7 @@ def test_format_hits_numbers_results_and_clips_snippets() -> None:
     lines = text.splitlines()
     assert lines[1] == "1. A — <https://a.test> (date unknown)"
     assert len(lines[2].strip()) <= 400 and lines[2].endswith("…")
-    assert "Never state a date that isn't shown here" in lines[-1]
+    assert "never state a date that isn't shown here" in lines[-1]
     assert "end your reply with the links you used" in lines[-1]
 
 
