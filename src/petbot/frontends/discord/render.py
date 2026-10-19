@@ -8,6 +8,7 @@ shape the result identically via :func:`_plan`.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable
 
 import discord
@@ -40,11 +41,22 @@ def to_embed(spec: EmbedSpec) -> discord.Embed:
     return embed
 
 
+#: A Discord timestamp markup (``<t:1700000000:t>``) wrapped in inline code, which Discord
+#: would show as raw code instead of a time.
+_CODED_TIMESTAMP = re.compile(r"`(<t:-?\d+(?::[tTdDfFR])?>)`")
+
+
+def unwrap_timestamps(text: str) -> str:
+    """Strip inline-code backticks from around Discord timestamps so they render as times
+    in each reader's timezone. The model sometimes formats them as code."""
+    return _CODED_TIMESTAMP.sub(r"\1", text)
+
+
 def _plan(result: SkillResult) -> list[tuple[str | None, discord.Embed | None]]:
     """The ordered messages a result becomes: the text is chunked and the embed rides
     only the first chunk. A voiced failure is just text, rendered the same way."""
     embed = to_embed(result.embed) if result.embed is not None else None
-    chunks = chunk_text(result.text or "", limit=DISCORD_MAX_TEXT)
+    chunks = chunk_text(unwrap_timestamps(result.text or ""), limit=DISCORD_MAX_TEXT)
     if not chunks:
         # No text: the embed alone, or nothing if the result is truly empty.
         return [(None, embed)] if embed is not None else []
