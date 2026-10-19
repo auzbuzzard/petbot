@@ -1,15 +1,15 @@
 name: Bootstrap
 
 # Applies deploy/terraform/bootstrap, the root of trust: the CI roles, the workload
-# boundary, the operator's access and the state bucket. A change merged to master is
+# boundary, the operator's access and the state bucket. A change merged to main is
 # planned with a read-only role, and that exact plan is applied only after a required
 # reviewer approves the `bootstrap` environment, having read the plan in the run's
 # summary. Each job assumes its role from its environment, and both environments admit
-# only master, so no branch, pull request or other workflow can reach these roles. See
+# only main, so no branch, pull request or other workflow can reach these roles. See
 # deploy/terraform/README.md "Bootstrap".
 on:
   push:
-    branches: [master]
+    branches: [main]
     paths:
       - "deploy/terraform/bootstrap/**"
       - ".github/workflows/bootstrap.yml"

@@ -6,7 +6,7 @@
 #   petbot-github-bootstrap-apply  writes; trusted from the `bootstrap` environment, whose
 #                                  required reviewer approves each run after reading the plan
 #
-# Both environments admit only master. The apply role can edit every resource here,
+# Both environments admit only main. The apply role can edit every resource here,
 # itself included, so it is as powerful as this stack: the reviewer's approval is the
 # control that guards it, which is why the deploy role (no approval) can never assume or
 # edit it.

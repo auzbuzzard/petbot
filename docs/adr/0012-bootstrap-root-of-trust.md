@@ -27,7 +27,7 @@ Two of its choices made every infrastructure addition a manual ordeal:
   "Baseline" (an account-wide guardrail layer such as Control Tower's) is a different,
   org-level concept this single-account project doesn't need.
 - **Every OIDC role trusts exactly one GitHub environment** (`sub` =
-  `repo:<repo>:environment:<name>`), and each environment admits only `master`:
+  `repo:<repo>:environment:<name>`), and each environment admits only `main`:
   `production` for the deploy role, `bootstrap-plan` and `bootstrap` for the pipeline.
 - Bootstrap's state is **remote**, in the bucket it manages (`bootstrap/terraform.tfstate`,
   native S3 locking). A new account creates the bucket first and imports it.
@@ -51,7 +51,7 @@ Two of its choices made every infrastructure addition a manual ordeal:
   does, and that bootstrap change lands (and is approved and applied) first.
 - The blast radius of a stolen deploy token grows from "the resources that exist today"
   to "any resource named `petbot-*` of the listed services"; getting such a token needs a
-  job running in `production` on `master`, approved by its required reviewer. Every
+  job running in `production` on `main`, approved by its required reviewer. Every
   deploy therefore waits on that approval: a merge alone ships nothing.
 - A workload needing a permission outside the boundary is a bootstrap change, as is
   a new service.
@@ -96,8 +96,8 @@ An audit of the CI trust found:
 Decision:
 
 - Each OIDC role trusts one environment's `sub` exactly (`StringEquals`), and each
-  environment's deployment-branch rule admits only `master`. A job can only get a role
-  by running on `master` in that environment.
+  environment's deployment-branch rule admits only `main`. A job can only get a role
+  by running on `main` in that environment.
 - Bootstrap gets its own two roles: plan (read-only, plus the state lock) and apply
   (scoped to what bootstrap manages, no deleting the state bucket, no minting the
   operator's credentials). Apply runs only the plan the reviewer saw, and only after

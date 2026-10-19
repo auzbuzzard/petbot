@@ -3,7 +3,7 @@
 # permissions boundary and the operator's access (operator.tf).
 #
 # Every OIDC role trusts exactly one GitHub environment, never a branch or a PR, and the
-# environments' deployment-branch rules admit only master. The deploy workflow assumes
+# environments' deployment-branch rules admit only main. The deploy workflow assumes
 # petbot-github-deploy from `production`; the bootstrap workflow plans this stack from
 # `bootstrap-plan` and applies the reviewed plan from `bootstrap`, which needs a required
 # reviewer's approval. An admin applies this stack by hand exactly once, to seed it in a
@@ -144,7 +144,7 @@ resource "aws_iam_openid_connect_provider" "github" {
 # Trust policy: only jobs in this repo's deploy environment may assume the role. The `sub`
 # claim names the environment whenever a job references one, so a job on any other branch,
 # a pull request, or any other workflow (including the AI review bots, which hold
-# id-token: write) cannot; the environment's branch rule admits only master.
+# id-token: write) cannot; the environment's branch rule admits only main.
 data "aws_iam_policy_document" "deploy_trust" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]

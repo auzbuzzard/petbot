@@ -84,13 +84,13 @@ boundary and the operator's access. Its state lives in the same bucket, under
 
 **Who may assume what.** Every OIDC role trusts exactly one GitHub environment (the
 token's `sub` is `repo:auzbuzzard/petbot:environment:<name>` whenever a job references
-an environment), and each environment admits only `master`:
+an environment), and each environment admits only `main`:
 
 | Role | Assumed by | Environment | Gate |
 | --- | --- | --- | --- |
-| `petbot-github-deploy` | `deploy.yml` (root stack) | `production` | `master` only + required reviewer |
-| `petbot-github-bootstrap-plan` | `bootstrap.yml`, plan job (read-only) | `bootstrap-plan` | `master` only |
-| `petbot-github-bootstrap-apply` | `bootstrap.yml`, apply job | `bootstrap` | `master` only + required reviewer |
+| `petbot-github-deploy` | `deploy.yml` (root stack) | `production` | `main` only + required reviewer |
+| `petbot-github-bootstrap-plan` | `bootstrap.yml`, plan job (read-only) | `bootstrap-plan` | `main` only |
+| `petbot-github-bootstrap-apply` | `bootstrap.yml`, apply job | `bootstrap` | `main` only + required reviewer |
 | `petbot-operator` | the `claude` IAM user (`sts:AssumeRole`) | — | read-only |
 
 No pull request, other branch or other workflow (the AI review bots hold
@@ -112,15 +112,18 @@ waits on the `bootstrap` environment until a required reviewer approves, and app
 that exact plan. A PR that needs the new permission in its own deploy (a new AWS
 service) lands its bootstrap change first.
 
-**GitHub settings** (Settings → Environments; one time, by a repo admin). These are
+**GitHub settings** (Settings → Environments; one time, by a repo admin). Use
+*Selected branches and tags → Branch `main`*, not *Protected branches only*: that option
+admits every branch when the repo has no classic branch protection rules (a ruleset may
+not count), and it would admit any branch protected later. These are
 part of the trust model: without the branch rule, any branch could reference the
 environment and assume its role.
 
 | Environment | Deployment branches | Required reviewers |
 | --- | --- | --- |
-| `production` | Selected: `master` | the repo owner |
-| `bootstrap-plan` | Selected: `master` | none |
-| `bootstrap` | Selected: `master` | the repo owner |
+| `production` | Selected: `main` | the repo owner |
+| `bootstrap-plan` | Selected: `main` | none |
+| `bootstrap` | Selected: `main` | the repo owner |
 
 **Seeding (once per account, by an admin).** The pipeline can't create the roles it
 assumes, so the first apply is by hand, with admin credentials (e.g. CloudShell with
@@ -167,7 +170,7 @@ endpoint**, so for Gemma 4 use `CHAT_LLM_KIND=openai_compatible` with the
 different base URL.
 
 That's the complete list — once these Variables and the SSM secrets above exist,
-a push to `master` runs a green deploy. (Merging the PR alone does **not** create
+a push to `main` runs a green deploy. (Merging the PR alone does **not** create
 them; this one-time setup is yours to do.)
 
 ## Operator access (read-only triage)
@@ -202,7 +205,7 @@ access go through the bootstrap pipeline, never through this role.
 
 `.github/workflows/deploy.yml` does the whole rollout via OIDC: build + push both
 images to ECR (arm64 worker, amd64 edge), then `terraform apply` (the Lightsail
-edge pulls its image from ECR). A push to `master` (or a manual *Actions → Deploy
+edge pulls its image from ECR). A push to `main` (or a manual *Actions → Deploy
 → Run workflow*) ships it. **No deploy is run from a developer machine.**
 
 ## Deploy (manual / break-glass)

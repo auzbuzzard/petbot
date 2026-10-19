@@ -4,12 +4,12 @@ name: Deploy
 # then terraform apply — entirely from CI via GitHub OIDC (no static AWS keys).
 # The Lightsail edge pulls its image from ECR (private-registry access). See
 # deploy/terraform/README.md. The deploy role trusts only jobs in the `production`
-# environment (which admits only master); the root of trust itself is applied by
+# environment (which admits only main); the root of trust itself is applied by
 # bootstrap.yml. Actions are pinned to commit SHAs: this job holds AWS credentials.
 on:
   workflow_dispatch:
   push:
-    branches: [master]
+    branches: [main]
 
 # OIDC: request a short-lived token to assume the AWS deploy role.
 permissions:
@@ -46,7 +46,7 @@ jobs:
     # QEMU (cheaper to emulate than the heavy worker image).
     runs-on: ubuntu-24.04-arm
     # The deploy role's trust names this environment; the environment admits only
-    # master and needs a required reviewer's approval, so a merge alone ships nothing.
+    # main and needs a required reviewer's approval, so a merge alone ships nothing.
     environment: production
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
