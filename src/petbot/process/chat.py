@@ -12,6 +12,8 @@ styling stays uniform across processes without a second LLM pass.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import assert_never
 
 from opentelemetry import metrics
@@ -44,7 +46,7 @@ from petbot.process.context import (
 from petbot.process.history import drop_leading_assistant, to_model_messages
 from petbot.process.model import build_model
 from petbot.process.settings import ChatSettings
-from petbot.process.voice import PassthroughStyle, speaker_line
+from petbot.process.voice import PassthroughStyle
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,46 @@ _LOST_CONTEXT_NOTE = (
     "relies on that lost context, tell them you've lost the thread and ask them to recap; "
     "otherwise just answer normally."
 )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _quoted(name: str) -> str:
+    """A user-controlled name as one quoted, single-line token, so a display/server/channel
+    name can't pose as another line of the instructions."""
+    flat = " ".join(name.replace('"', "'").split())[:100]
+    return f'"{flat}"'
+
+
+def _place(ctx: SkillContext) -> str:
+    if ctx.community_name is None:
+        return "a direct message"
+    server = f"the server {_quoted(ctx.community_name)}"
+    if ctx.channel_name is None:
+        return server
+    return f"channel {_quoted(ctx.channel_name)} in {server}"
+
+
+def run_context(ctx: SkillContext, now: datetime) -> str:
+    """The per-run grounding added to the static persona: the clock, who is speaking, and
+    where. Kept out of the static instructions so that prefix stays cacheable.
+
+    The clock is UTC plus its Unix time: the agent doesn't know the reader's timezone, so
+    it writes times as Discord timestamps, which each reader's client shows in their own.
+    """
+    utc = now.astimezone(UTC)
+    rating = "age-gated (NSFW)" if ctx.allows_explicit else "not age-gated, so keep everything SFW"
+    return "\n".join(
+        (
+            "Current context:",
+            f"- Now: {utc:%A, %d %B %Y, %H:%M} UTC (Unix time {int(utc.timestamp())}).",
+            f"- You are answering {_quoted(ctx.user.display_name)}, in {_place(ctx)}.",
+            f"- This channel is {rating}.",
+        )
+    )
+
 
 # Tool decisions are also counters, so a dashboard can alarm on a zero-tool-call spike
 # without parsing logs.
@@ -83,6 +125,7 @@ class ChatProcess(Process):
         style: StylePort | None = None,
         instrumentation: InstrumentationSettings | None = None,
         id_salt: str = "",
+        clock: Callable[[], datetime] = _utc_now,
     ) -> None:
         """Wire the agent.
 
@@ -91,13 +134,15 @@ class ChatProcess(Process):
         lazily from ``settings`` on first use. ``style`` defaults to a no-op (the agent
         already voices its output). ``instrumentation`` (from the composition root) turns on
         pydantic-ai's OTel spans; ``id_salt`` salts the one user id we attach to the
-        run-outcome record. Both default off, so dev/tests stay quiet.
+        run-outcome record. Both default off, so dev/tests stay quiet. ``clock`` supplies the
+        "now" each run is grounded in (injectable for tests).
         """
         self._registry = registry
         self._settings = settings or ChatSettings()
         self._model = model
         self._style: StylePort = style or PassthroughStyle()
         self._id_salt = id_salt
+        self._clock = clock
         self._agent = build_agent(self._settings.system_prompt, instrumentation=instrumentation)
         self._compactor: Compactor = build_compactor(self._settings, model=model)
         thinking = self._settings.thinking
@@ -115,16 +160,17 @@ class ChatProcess(Process):
         deps = ChatDeps(registry=self._registry, ctx=ctx)
         match inp.history:
             case Recalled(turns=turns):
-                history, note, recalled = to_model_messages(turns), None, True
+                history, recalled = to_model_messages(turns), True
             case Unrecalled():
                 # Replied to context we couldn't read: no history, and tell the agent so it
                 # voices that it lost the thread rather than answering blind.
-                history, note, recalled = [], _LOST_CONTEXT_NOTE, False
+                history, recalled = [], False
             case _:
                 assert_never(inp.history)
-        speaker = speaker_line(ctx)
-        instructions = f"{speaker}\n\n{note}" if note else speaker
-        result = await self._run(inp.text, history, deps, instructions=instructions)
+        notes = [run_context(ctx, self._clock())]
+        if not recalled:
+            notes.append(_LOST_CONTEXT_NOTE)
+        result = await self._run(inp.text, history, deps, instructions="\n\n".join(notes))
         self._log_outcome(result, ctx, recalled=recalled)
         card = next((a for a in deps.attachments if a.embed is not None), None)
         files = tuple(f for a in deps.attachments for f in a.files)
