@@ -36,6 +36,7 @@ Attributes we set (beyond pydantic-ai's GenAI-semconv span data, which carries
 | `petbot.agent.tool_calls` | counter | `tool` | tool calls, by tool name |
 | `petbot.agent.zero_tool_runs` | counter | — | agent runs that called no tool (the e621-style alarm) |
 | `petbot.agent.lost_context_runs` | counter | — | runs answered with an unreadable reply context |
+| `petbot.agent.out_of_time_runs` | counter | — | runs stopped at the turn's time budget (answered with a fallback line) |
 | `petbot.booru.outcome` | counter | `provider`, `status` | searches by provider + outcome |
 | `gen_ai.client.token.usage` (and peers) | histogram | from pydantic-ai | token usage per request |
 
@@ -54,5 +55,8 @@ One `agent run` record per chat turn (`petbot.process.chat`, level INFO):
 | `output_len` | `44` | reply length (a count, not text) |
 | `context` | `recalled` | reply chain was read, or `unrecalled` if it couldn't be |
 | `user` | `6ac78c04e065ba99` | **salted SHA-256 hash** of the Discord user id (16 hex) |
+
+A turn stopped at its time budget logs `agent run out of time` (level WARNING) instead, with
+only the hashed `user` field.
 
 No field above contains message text, tags, the raw user id, or a display name.
