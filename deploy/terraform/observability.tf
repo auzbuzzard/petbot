@@ -37,14 +37,8 @@ variable "observability_sample_ratio" {
 
 variable "telemetry_id_salt_ssm_parameter" {
   type        = string
-  description = "SSM SecureString name holding the salt for the telemetry user-id hash. Empty => unsalted."
+  description = "SSM SecureString name holding the salt for the telemetry user-id hash (read at start through SSM_SECRETS; see secrets.tf). Empty => unsalted."
   default     = ""
-}
-
-data "aws_ssm_parameter" "telemetry_id_salt" {
-  count           = var.observability_enabled && trimspace(var.telemetry_id_salt_ssm_parameter) != "" ? 1 : 0
-  name            = var.telemetry_id_salt_ssm_parameter
-  with_decryption = true
 }
 
 locals {
@@ -54,17 +48,13 @@ locals {
   otlp_metrics_endpoint = "https://monitoring.${var.aws_region}.amazonaws.com/v1/metrics"
 
   # Shared OTLP/OBS env for any deployable; service_name is set per process below.
-  observability_common_env = var.observability_enabled ? merge(
-    {
-      OBS_ENABLED                         = "true"
-      OBS_SAMPLE_RATIO                    = tostring(var.observability_sample_ratio)
-      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT  = local.otlp_traces_endpoint
-      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT = local.otlp_metrics_endpoint
-    },
-    length(data.aws_ssm_parameter.telemetry_id_salt) > 0
-    ? { OBS_ID_SALT = data.aws_ssm_parameter.telemetry_id_salt[0].value }
-    : {},
-  ) : {}
+  # (The salt, OBS_ID_SALT, arrives through SSM_SECRETS: secrets.tf.)
+  observability_common_env = var.observability_enabled ? {
+    OBS_ENABLED                         = "true"
+    OBS_SAMPLE_RATIO                    = tostring(var.observability_sample_ratio)
+    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT  = local.otlp_traces_endpoint
+    OTEL_EXPORTER_OTLP_METRICS_ENDPOINT = local.otlp_metrics_endpoint
+  } : {}
 
   observability_core_env = var.observability_enabled ? merge(
     local.observability_common_env,

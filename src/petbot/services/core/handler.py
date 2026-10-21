@@ -25,13 +25,16 @@ from petbot.observability import (
     flush_observability,
 )
 from petbot.platform import budget, serve
+from petbot.platform.secrets import load_ssm_secrets
 from petbot.services.core import RESERVE_SECONDS, build_process
 
 # Cold start, once per execution environment. The Lambda runtime installs no app logging, so
 # without this the root logger stays at WARNING and INFO records never reach CloudWatch. The
 # Lambda always targets CloudWatch, so structured JSON; the dev HTTP entrypoint stays plain.
-# Telemetry providers are installed here too, before build_process reads them.
+# The secrets are read from SSM next, before any settings (telemetry's included) are read;
+# then the telemetry providers are installed, before build_process reads them.
 configure_logging(os.environ.get("LOG_LEVEL", "INFO"), "json")
+load_ssm_secrets()
 configure_observability(ObservabilitySettings())
 
 _process: Process | None = None

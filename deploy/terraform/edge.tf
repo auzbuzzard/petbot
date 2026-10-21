@@ -87,18 +87,15 @@ resource "aws_lightsail_container_service_deployment_version" "edge" {
       # services have no IAM instance roles, so a static key is the mechanism).
       AWS_ACCESS_KEY_ID     = aws_iam_access_key.edge.id
       AWS_SECRET_ACCESS_KEY = aws_iam_access_key.edge.secret
-      DISCORD_TOKEN         = data.aws_ssm_parameter.discord_token.value
+      # The Discord token (and the telemetry salt) by SSM name; the edge reads the values
+      # from SSM at start (secrets.tf).
+      SSM_SECRETS = jsonencode(local.edge_secret_parameters)
       # Claimed message ids, so of every connected copy exactly one answers (claims.tf).
       CLAIMS_TABLE = aws_dynamodb_table.claims.name
     }, local.observability_edge_env)
   }
 
-  depends_on = [aws_ecr_repository_policy.edge]
-}
-
-data "aws_ssm_parameter" "discord_token" {
-  name            = var.discord_token_ssm_parameter
-  with_decryption = true
+  depends_on = [aws_ecr_repository_policy.edge, aws_iam_user_policy.edge_secrets]
 }
 
 # --- The edge's scoped AWS identity -------------------------------------------

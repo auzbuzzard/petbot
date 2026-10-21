@@ -57,6 +57,8 @@ compute-core = [
     "trafilatura>=2.0",
     # Keyless web-search fallback (metasearch over public result pages).
     "ddgs>=9.16",
+    # The worker reads its secrets from SSM at start (petbot.platform.secrets).
+    "boto3>=1.43",
 ]
 # The music compute service: its own gateway plus voice playback.
 compute-music = [
