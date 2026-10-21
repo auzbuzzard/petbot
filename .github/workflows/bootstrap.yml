@@ -2,15 +2,17 @@ name: Bootstrap
 
 # Applies deploy/terraform/bootstrap, the root of trust: the CI roles, the workload
 # boundary, the operator's access and the state bucket. A change merged to main is
-# planned with a read-only role and posted to the run's summary; the apply job waits for
-# a required reviewer to approve the `bootstrap` environment, plans again, and applies only
-# if that plan is the one reviewed (same resource changes). Each job assumes its role from
-# its environment, and both environments admit only main, so no branch, pull request or
-# other workflow can reach these roles. See deploy/terraform/README.md "Bootstrap".
+# planned with a read-only role and its resource changes posted to the run's summary; the
+# apply job waits for a required reviewer to approve the `bootstrap` environment, plans
+# again, and applies only if that plan is the one reviewed (same resource changes). Each
+# job assumes its role from its environment, and both environments admit only main, so no
+# branch, pull request or other workflow can reach these roles. See
+# deploy/terraform/README.md "Bootstrap".
 #
-# The plan is in the run's log and summary, which are public like the repository: it
-# shows what the code in this directory already shows, plus the account ID. No plan file
-# or state leaves the runner.
+# The run's log and summary are public like the repository. The full plan is in the log
+# with the account ID masked: the state bucket and the role ARNs, which carry it, are
+# secrets, and the credentials step masks it everywhere after. The summary lists only the
+# resource changes. No plan file or state leaves the runner.
 on:
   push:
     branches: [main]
@@ -30,13 +32,13 @@ concurrency:
 env:
   TF_DIR: deploy/terraform/bootstrap
   TF_IN_AUTOMATION: "true"
-  # Repository variables (both environments read them), not environment ones.
+  # Repository-level (both environments read them), not environment ones.
   TF_VAR_aws_region: ${{ vars.AWS_REGION }}
-  TF_VAR_state_bucket: ${{ vars.TF_STATE_BUCKET }}
+  TF_VAR_state_bucket: ${{ secrets.TF_STATE_BUCKET }}
   # The backend, once for both jobs: terraform adds these to every `terraform init`.
   TF_CLI_ARGS_init: >-
     -input=false
-    -backend-config=bucket=${{ vars.TF_STATE_BUCKET }}
+    -backend-config=bucket=${{ secrets.TF_STATE_BUCKET }}
     -backend-config=key=bootstrap/terraform.tfstate
     -backend-config=region=${{ vars.AWS_REGION }}
     -backend-config=encrypt=true
@@ -50,22 +52,23 @@ jobs:
       changes: ${{ steps.plan.outputs.changes }}
       digest: ${{ steps.plan.outputs.digest }}
     steps:
-      - name: Check repository variables
+      - name: Check variables and secrets
         run: |
           for name in AWS_REGION TF_STATE_BUCKET BOOTSTRAP_PLAN_ROLE_ARN; do
-            [ -n "${!name}" ] || { echo "::error::$name is unset (AWS_REGION and TF_STATE_BUCKET are repository variables; BOOTSTRAP_PLAN_ROLE_ARN is bootstrap-plan's)"; exit 1; }
+            [ -n "${!name}" ] || { echo "::error::$name is unset (AWS_REGION is a repository variable, TF_STATE_BUCKET a repository secret, BOOTSTRAP_PLAN_ROLE_ARN a bootstrap-plan secret)"; exit 1; }
           done
         env:
           AWS_REGION: ${{ vars.AWS_REGION }}
-          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
-          BOOTSTRAP_PLAN_ROLE_ARN: ${{ vars.BOOTSTRAP_PLAN_ROLE_ARN }}
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+          BOOTSTRAP_PLAN_ROLE_ARN: ${{ secrets.BOOTSTRAP_PLAN_ROLE_ARN }}
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
-          role-to-assume: ${{ vars.BOOTSTRAP_PLAN_ROLE_ARN }}
+          role-to-assume: ${{ secrets.BOOTSTRAP_PLAN_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
 
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
@@ -96,17 +99,16 @@ jobs:
           digest=$(terraform show -json bootstrap.tfplan | jq -S '.resource_changes' | sha256sum | cut -d' ' -f1)
           echo "changes=$changes" >> "$GITHUB_OUTPUT"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          # Addresses and actions only: no attribute values reach the summary.
+          resources=$(terraform show -json bootstrap.tfplan \
+            | jq -r '(.resource_changes // [])[] | select(.change.actions != ["no-op"]) | "- `\(.address)`: \(.change.actions | join(", "))"')
           {
             echo "## Bootstrap plan"
             echo "Plan digest: \`$digest\`"
-            limit=900000
-            if [ "$(wc -c < plan.txt)" -gt "$limit" ]; then
-              echo "> [!WARNING]"
-              echo "> The plan is longer than the summary allows and is cut off below. Read it in full in the **Terraform plan** step's log before approving."
-            fi
-            echo '```'
-            head -c "$limit" plan.txt
-            echo '```'
+            echo
+            echo "Read the full plan in the **Terraform plan** step's log before approving."
+            echo
+            echo "${resources:-No changes.}"
           } >> "$GITHUB_STEP_SUMMARY"
 
   apply:
@@ -120,8 +122,9 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
-          role-to-assume: ${{ vars.BOOTSTRAP_APPLY_ROLE_ARN }}
+          role-to-assume: ${{ secrets.BOOTSTRAP_APPLY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
 
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
