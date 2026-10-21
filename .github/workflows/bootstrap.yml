@@ -10,9 +10,10 @@ name: Bootstrap
 # deploy/terraform/README.md "Bootstrap".
 #
 # The run's log and summary are public like the repository. The full plan is in the log
-# with the account ID masked: the state bucket and the role ARNs, which carry it, are
-# secrets, and the credentials step masks it everywhere after. The summary lists only the
-# resource changes. No plan file or state leaves the runner.
+# with the account ID masked: the state bucket and the role ARNs, which carry it, are read
+# as secrets (a variable of the same name stands in, unmasked, while no secret is set),
+# and the credentials step masks it everywhere after. The summary lists only the resource
+# changes. No plan file or state leaves the runner.
 on:
   push:
     branches: [main]
@@ -34,11 +35,11 @@ env:
   TF_IN_AUTOMATION: "true"
   # Repository-level (both environments read them), not environment ones.
   TF_VAR_aws_region: ${{ vars.AWS_REGION }}
-  TF_VAR_state_bucket: ${{ secrets.TF_STATE_BUCKET }}
+  TF_VAR_state_bucket: ${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}
   # The backend, once for both jobs: terraform adds these to every `terraform init`.
   TF_CLI_ARGS_init: >-
     -input=false
-    -backend-config=bucket=${{ secrets.TF_STATE_BUCKET }}
+    -backend-config=bucket=${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}
     -backend-config=key=bootstrap/terraform.tfstate
     -backend-config=region=${{ vars.AWS_REGION }}
     -backend-config=encrypt=true
@@ -59,14 +60,14 @@ jobs:
           done
         env:
           AWS_REGION: ${{ vars.AWS_REGION }}
-          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
-          BOOTSTRAP_PLAN_ROLE_ARN: ${{ secrets.BOOTSTRAP_PLAN_ROLE_ARN }}
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}
+          BOOTSTRAP_PLAN_ROLE_ARN: ${{ secrets.BOOTSTRAP_PLAN_ROLE_ARN || vars.BOOTSTRAP_PLAN_ROLE_ARN }}
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
-          role-to-assume: ${{ secrets.BOOTSTRAP_PLAN_ROLE_ARN }}
+          role-to-assume: ${{ secrets.BOOTSTRAP_PLAN_ROLE_ARN || vars.BOOTSTRAP_PLAN_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: true
 
@@ -122,7 +123,7 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
-          role-to-assume: ${{ secrets.BOOTSTRAP_APPLY_ROLE_ARN }}
+          role-to-assume: ${{ secrets.BOOTSTRAP_APPLY_ROLE_ARN || vars.BOOTSTRAP_APPLY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: true
 

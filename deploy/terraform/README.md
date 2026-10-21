@@ -162,7 +162,9 @@ Actions → Secrets) when both pipelines read it:
 | `BOOTSTRAP_APPLY_ROLE_ARN` | `bootstrap` | the bootstrap apply role ARN | `terraform -chdir=bootstrap output bootstrap_apply_role_arn` |
 
 The credentials step also masks the account ID wherever it appears after it (ARNs,
-registry URLs, Terraform output).
+registry URLs, Terraform output). While one of these secrets is unset, the workflows fall
+back to a variable of the same name, which works but is printed unmasked; delete such a
+variable once its secret is set.
 
 Set the following **Variables** (non-secret; the actual secret *values* live in SSM,
 referenced here only by parameter name). Each lives where it's used: in the one
