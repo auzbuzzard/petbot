@@ -39,9 +39,7 @@ resource "aws_iam_role" "lambda" {
   permissions_boundary = local.workload_boundary_arn
 }
 
-# CloudWatch Logs only — secrets are injected as env at deploy, so the function
-# needs no runtime SSM/KMS access. (A future runtime-fetch model would add a
-# scoped ssm:GetParameter policy here.)
+# CloudWatch Logs. (Reading the function's own secrets from SSM: secrets.tf.)
 resource "aws_iam_role_policy_attachment" "logs" {
   role       = aws_iam_role.lambda.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
@@ -85,8 +83,17 @@ resource "aws_lambda_function" "this" {
   }
 
   # Ensure our retention-managed log group exists before the function can be
-  # invoked, so Lambda doesn't auto-create an unmanaged, never-expiring one.
-  depends_on = [aws_cloudwatch_log_group.lambda]
+  # invoked, so Lambda doesn't auto-create an unmanaged, never-expiring one, and that
+  # it may read its secrets before its first cold start.
+  depends_on = [aws_cloudwatch_log_group.lambda, aws_iam_role_policy.core_secrets]
+
+  lifecycle {
+    # Fail at plan with a clear message when a key-based provider has no key parameter.
+    precondition {
+      condition     = !local.chat_needs_api_key || trimspace(var.chat_llm_api_key_ssm_parameter) != ""
+      error_message = "chat_llm_kind=${var.chat_llm_kind} requires chat_llm_api_key_ssm_parameter (the SSM SecureString holding the key)."
+    }
+  }
 }
 
 # No Function URL: the worker is private. The edge invokes it with the AWS SDK

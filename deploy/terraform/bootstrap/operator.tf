@@ -5,7 +5,7 @@
 # edit it (DenyAccessPrincipals). The operator's IAM user holds long-lived keys, created out
 # of band and never in Terraform state; the user may only assume petbot-operator, whose
 # sessions last at most an hour. Secrets stay out of reach: no ssm:GetParameter, and
-# no access to the state bucket (Terraform state holds the injected secrets).
+# no access to the state bucket (Terraform state holds the edge's AWS access key).
 
 variable "operator_user" {
   type        = string
@@ -179,8 +179,8 @@ resource "aws_iam_role_policy" "operator" {
 }
 
 # The operator user's only permission: assume the role above. Nothing else may reach it:
-# a broad grant such as ReadOnlyAccess would also read the state bucket, and with it every
-# secret Terraform injected. Three layers keep it that way:
+# a broad grant such as ReadOnlyAccess would also read the state bucket, and with it the
+# edge's AWS access key. Three layers keep it that way:
 #   - its permissions boundary allows only this sts:AssumeRole, so a group, attached or
 #     inline policy added by hand grants nothing;
 #   - its inline policies are exactly operator_assume, and it has no attached policies:
