@@ -8,6 +8,11 @@ name: Deploy
 # bootstrap.yml. Actions are pinned to commit SHAs: this job holds AWS credentials.
 on:
   workflow_dispatch:
+    inputs:
+      rotate_edge_key:
+        description: Replace the edge's AWS access key now, instead of on its schedule
+        type: boolean
+        default: false
   push:
     branches: [main]
 
@@ -51,6 +56,11 @@ jobs:
       TF_VAR_observability_enabled: ${{ vars.OBSERVABILITY_ENABLED || 'false' }}
       TF_VAR_observability_sample_ratio: ${{ vars.OBSERVABILITY_SAMPLE_RATIO || '1.0' }}
       TF_VAR_telemetry_id_salt_ssm_parameter: ${{ vars.TELEMETRY_ID_SALT_SSM_PARAMETER }}
+      # build-push-action otherwise uploads each build's record as a run artifact and writes
+      # a build summary, both naming the ECR image, whose host carries the account ID; the
+      # log is masked, but an artifact is not, and the repository is public.
+      DOCKER_BUILD_RECORD_UPLOAD: false
+      DOCKER_BUILD_SUMMARY: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -132,9 +142,16 @@ jobs:
       # access key id is one; the log is public, so access key ids are redacted from it.
       - name: Terraform apply
         working-directory: ${{ env.TF_DIR }}
+        env:
+          # Empty on a push, so a push never rotates; see edge.tf for the replacement order.
+          ROTATE_EDGE_KEY: ${{ inputs.rotate_edge_key }}
         run: |
           set -o pipefail
-          terraform apply -auto-approve \
+          replace=()
+          if [ "$ROTATE_EDGE_KEY" = "true" ]; then
+            replace=(-replace=aws_iam_access_key.edge)
+          fi
+          terraform apply -auto-approve "${replace[@]}" \
             -var "image_tag=$IMAGE_TAG" \
             -var "edge_image_tag=$IMAGE_TAG" 2>&1 \
             | sed -u -E 's/(AKIA|ASIA)[A-Z0-9]{16}/\1****************/g'
