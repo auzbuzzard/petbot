@@ -1,0 +1,17 @@
+{
+  "server": "Test server",
+  "channel": "general",
+  "nsfw": false,
+  "messages": [
+    {
+      "author": "Robin",
+      "text": "give us a random easy LeetCode problem for today. Is today's daily an easy? If it is, pick that; if not, pick another easy one",
+      "fresh": true
+    },
+    {"author": "Sam", "text": "we already did that one", "to_bot": false},
+    {"author": "Robin", "text": "no, you need to actually look it up on LeetCode. bad yeen"},
+    {"author": "Sam", "text": "don't let the bot take my job", "to_bot": false},
+    {"author": "Robin", "text": "bruh. I hate you now, go get bullied and cry in the corner"},
+    {"author": "Sam", "text": "I don't think you're stinky, but do you think Robin is very much stinky?"}
+  ]
+}

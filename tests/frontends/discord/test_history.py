@@ -15,9 +15,9 @@ import pytest
 from petbot.domain import Role, Turn
 from petbot.frontends.discord.history import (
     DiscordTurn,
-    _describe_card,
     aiter_until_none,
     atake,
+    describe_card,
     is_conversational_trigger,
     reconstruct,
     replying_to_self,
@@ -158,8 +158,8 @@ def test_to_turns_drops_turns_that_become_empty() -> None:
 def test_describe_card_uses_title_and_image() -> None:
     embed = discord.Embed(title="results")
     embed.set_image(url="http://i/x.png")
-    assert _describe_card(embed) == "[image] results — http://i/x.png"
-    assert _describe_card(discord.Embed()) == ""
+    assert describe_card(embed) == "[image] results — http://i/x.png"
+    assert describe_card(discord.Embed()) == ""
 
 
 # --- the trigger predicate ----------------------------------------------------

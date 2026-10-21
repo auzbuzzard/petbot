@@ -25,7 +25,7 @@ from petbot.observability import (
     flush_observability,
 )
 from petbot.platform import budget, serve
-from petbot.services.core import build_process
+from petbot.services.core import RESERVE_SECONDS, build_process
 
 # Cold start, once per execution environment. The Lambda runtime installs no app logging, so
 # without this the root logger stays at WARNING and INFO records never reach CloudWatch. The
@@ -36,10 +36,6 @@ configure_observability(ObservabilitySettings())
 
 _process: Process | None = None
 _loop: asyncio.AbstractEventLoop | None = None
-
-#: Seconds of the invocation kept back from the turn's budget for encoding the result and
-#: flushing telemetry, so a turn that runs out of budget still returns before Lambda kills it.
-_RESERVE_SECONDS = 5.0
 
 
 def _get_process() -> Process:
@@ -70,7 +66,7 @@ def handler(event: dict[str, Any], context: object = None) -> dict[str, Any]:
     # zero budget: the turn answers with its fallback at once rather than being killed.
     remaining_ms = getattr(context, "get_remaining_time_in_millis", None)
     scope = (
-        budget(max(0.0, remaining_ms() / 1000 - _RESERVE_SECONDS))
+        budget(max(0.0, remaining_ms() / 1000 - RESERVE_SECONDS))
         if callable(remaining_ms)
         else nullcontext()
     )
