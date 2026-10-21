@@ -1,0 +1,40 @@
+name: Delete workflow runs
+
+# Deletes the finished runs of the named workflows, with their logs, job summaries and
+# artifacts: a public repository's run history is public. Manual only (people with write
+# access can dispatch it), and its token may write Actions data and nothing else. Runs
+# still queued, waiting or in progress are left alone.
+on:
+  workflow_dispatch:
+    inputs:
+      workflows:
+        description: Workflow files whose finished runs to delete, space-separated
+        required: true
+        default: deploy.yml bootstrap.yml
+
+permissions:
+  actions: write
+
+concurrency:
+  group: delete-runs
+  cancel-in-progress: false
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete finished runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Through the environment, never interpolated into the script.
+          WORKFLOWS: ${{ inputs.workflows }}
+        run: |
+          for wf in $WORKFLOWS; do
+            count=0
+            for id in $(gh run list -R "$GITHUB_REPOSITORY" -w "$wf" -L 1000 \
+                --json databaseId,status -q '.[] | select(.status == "completed") | .databaseId'); do
+              gh run delete -R "$GITHUB_REPOSITORY" "$id"
+              count=$((count + 1))
+            done
+            echo "$wf: deleted $count finished run(s)" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
