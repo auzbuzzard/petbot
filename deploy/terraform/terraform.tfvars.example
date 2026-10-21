@@ -36,6 +36,7 @@ chat_llm_model = "" # REQUIRED — e.g. google.gemma-4-31b
 discord_token_ssm_parameter = "/petbot/edge/discord_token"
 edge_power                  = "nano" # 0.25 vCPU / 512 MB; bump to "micro" (1 GB) if it OOMs
 edge_scale                  = 1
+# edge_key_rotation_days    = 90 # the edge's static AWS key is replaced on the next deploy after this
 # edge_image_tag is supplied by CI (the git SHA) after pushing the edge image to ECR.
 
 # --- Observability (OpenTelemetry; off by default) ---

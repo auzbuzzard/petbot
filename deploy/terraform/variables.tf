@@ -214,6 +214,17 @@ variable "edge_scale" {
   default     = 1
 }
 
+variable "edge_key_rotation_days" {
+  type        = number
+  description = "Days after which the edge's static AWS access key is replaced, on the next deploy after that."
+  default     = 90
+
+  validation {
+    condition     = var.edge_key_rotation_days >= 1
+    error_message = "edge_key_rotation_days must be at least 1."
+  }
+}
+
 variable "edge_image_tag" {
   type        = string
   description = <<-EOT

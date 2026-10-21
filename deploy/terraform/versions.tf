@@ -6,6 +6,11 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+    # time_rotating: the edge access key's rotation schedule (edge.tf).
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.13"
+    }
   }
 
   # Remote state in S3 with native S3 locking (`use_lockfile`, GA since
