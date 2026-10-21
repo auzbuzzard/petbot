@@ -15,6 +15,7 @@ from petbot.domain import (
 )
 from petbot.platform import ToolRegistry, remaining
 from petbot.process import CommandProcess, PassthroughStyle, RouterProcess
+from petbot.services.core import RESERVE_SECONDS
 from petbot.services.core import handler as handler_module
 
 
@@ -88,7 +89,7 @@ def test_handler_gives_the_turn_the_invocation_time_minus_a_reserve(
     handler_module.handler(event, _LambdaContext())
     handler_module.handler(event)  # no Lambda context: unbounded
     handler_module.handler(event, _AlmostOutOfTime())
-    reserve = handler_module._RESERVE_SECONDS
+    reserve = RESERVE_SECONDS
     assert seen[0] is not None and 60 - reserve - 1 < seen[0] <= 60 - reserve
     assert seen[1] is None
     assert seen[2] == 0.0  # clamped: a zero budget, never a negative one

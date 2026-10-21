@@ -3,7 +3,7 @@
 The *only* place neutral results become Discord types. :func:`to_embed` is a pure
 mapping (unit-tested without a gateway); :func:`respond` wires it to a channel (the
 @mention path) and :func:`respond_interaction` to a slash-command followup. Both
-shape the result identically via :func:`_plan`.
+shape the result identically via :func:`plan`.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ def unwrap_markup(text: str) -> str:
     return _CODED_MARKUP.sub(r"\1", text)
 
 
-def _plan(result: SkillResult) -> list[tuple[str | None, discord.Embed | None]]:
+def plan(result: SkillResult) -> list[tuple[str | None, discord.Embed | None]]:
     """The ordered messages a result becomes: the text is chunked and the embed rides
     only the first chunk. A voiced failure is just text, rendered the same way."""
     embed = to_embed(result.embed) if result.embed is not None else None
@@ -93,7 +93,7 @@ async def respond(
     on the first message, the embed. When ``reference`` is given, the first message is a
     reply to it (``mention_author=False`` — an anchor, not a re-ping every turn).
     """
-    for index, (content, embed) in enumerate(_plan(result)):
+    for index, (content, embed) in enumerate(plan(result)):
         extra: dict[str, object] = (
             {"reference": reference, "mention_author": False}
             if index == 0 and reference is not None
@@ -105,8 +105,8 @@ async def respond(
 async def respond_interaction(interaction: discord.Interaction, result: SkillResult) -> None:
     """Send ``result`` as the followup to an already-deferred slash ``interaction``.
 
-    The slash output port: the same :func:`_plan` shaping as :func:`respond`, emitted
+    The slash output port: the same :func:`plan` shaping as :func:`respond`, emitted
     as ``followup.send`` (the caller has already deferred the interaction response).
     """
-    for content, embed in _plan(result):
+    for content, embed in plan(result):
         await _send(interaction.followup.send, content, embed)

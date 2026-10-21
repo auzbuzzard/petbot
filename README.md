@@ -64,6 +64,14 @@ python -m petbot.frontends.discord
 
 @mention the bot in a server it's in and start chatting.
 
+To talk to the core without Discord (how a change is tried before it deploys), replay a
+conversation through it in-process:
+
+```bash
+python -m petbot.services.core.chat conversations/leetcode-daily.json -v
+python -m petbot.services.core.chat --say "what's today's leetcode daily?"
+```
+
 ### Configuration
 
 All configuration is read from the environment (see `.env.example`). The frontend

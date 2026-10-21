@@ -84,7 +84,7 @@ class DiscordTurn:
         )
 
 
-def _describe_card(embed: discord.Embed) -> str:
+def describe_card(embed: discord.Embed) -> str:
     """A faithful one-line description of an embed (title + image URL), or ``""``."""
     parts = [part for part in (embed.title, embed.image.url) if part]
     return f"[image] {' — '.join(parts)}" if parts else ""
@@ -95,7 +95,7 @@ def _message_text(message: discord.Message) -> str:
     if message.content:
         return message.content
     for embed in message.embeds:
-        described = _describe_card(embed)
+        described = describe_card(embed)
         if described:
             return described
     return ""
