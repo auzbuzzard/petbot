@@ -152,6 +152,7 @@ def test_system_prompt_carries_the_aurora_persona_and_helpfulness(
     prompt = _settings().system_prompt
     assert "Aurora" in prompt and "hyena" in prompt and "he/him" in prompt
     assert "yeenocent" in prompt
+    assert "ferocious" not in prompt  # a quoted catchphrase gets said in every reply
     assert "Lead with the answer" in prompt
     assert "a sentence or two" not in prompt  # no length cap that starves real answers
 

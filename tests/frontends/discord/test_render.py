@@ -20,7 +20,7 @@ from petbot.frontends.discord.render import (
     respond,
     respond_interaction,
     to_embed,
-    unwrap_timestamps,
+    unwrap_markup,
 )
 from petbot.frontends.discord.settings import DiscordSettings, HttpService
 from petbot.frontends.discord.slash import _as_app_command, _with_defer, build_commands
@@ -71,10 +71,18 @@ class FakeMessage:
         self.guild = guild
 
 
-def test_unwrap_timestamps_strips_code_ticks_from_discord_timestamps_only() -> None:
-    assert unwrap_timestamps("It's `<t:1792385094:t>` now") == "It's <t:1792385094:t> now"
-    assert unwrap_timestamps("`<t:1792385094>` and `<t:5:R>`") == "<t:1792385094> and <t:5:R>"
-    assert unwrap_timestamps("run `ls -la` or `<t:x:t>`") == "run `ls -la` or `<t:x:t>`"
+def test_unwrap_markup_strips_code_ticks_from_discord_timestamps() -> None:
+    assert unwrap_markup("It's `<t:1792385094:t>` now") == "It's <t:1792385094:t> now"
+    assert unwrap_markup("`<t:1792385094>` and `<t:5:R>`") == "<t:1792385094> and <t:5:R>"
+    assert unwrap_markup("run `ls -la` or `<t:x:t>`") == "run `ls -la` or `<t:x:t>`"
+
+
+def test_unwrap_markup_strips_code_ticks_from_a_lone_link_only() -> None:
+    assert unwrap_markup("here: `https://leetcode.com/problems/two-sum/`") == (
+        "here: https://leetcode.com/problems/two-sum/"
+    )
+    assert unwrap_markup("`<https://a.test/x>`") == "<https://a.test/x>"
+    assert unwrap_markup("run `curl https://a.test`") == "run `curl https://a.test`"
 
 
 async def test_respond_renders_a_code_wrapped_timestamp() -> None:
