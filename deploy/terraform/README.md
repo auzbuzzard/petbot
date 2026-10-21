@@ -31,7 +31,8 @@ The edge carries a **scoped IAM user** whose only permissions are
 Inactive/Pending function) on the core worker, and `dynamodb:PutItem` /
 `dynamodb:UpdateItem` on its `petbot-edge-claims` table (one copy answers each
 message; see `claims.tf`). Its access key is injected into the
-container's environment (Lightsail container services have no IAM instance roles).
+container's environment (Lightsail container services have no IAM instance roles),
+and replaced every `edge_key_rotation_days` (default 90) on the next deploy after that.
 No public, unauthenticated surface exists, so there is no LLM cost-abuse vector.
 
 Both images live in **ECR**. The worker Lambda runs its image directly; the edge

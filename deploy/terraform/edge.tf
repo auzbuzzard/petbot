@@ -108,8 +108,20 @@ resource "aws_iam_user" "edge" {
   permissions_boundary = local.workload_boundary_arn
 }
 
+# Lightsail has no IAM roles, so the edge holds a static key; it is replaced every
+# var.edge_key_rotation_days, on the first deploy after that. The new key exists before
+# the new container deployment carries it, and the old key is deleted only after.
+resource "time_rotating" "edge_key" {
+  rotation_days = var.edge_key_rotation_days
+}
+
 resource "aws_iam_access_key" "edge" {
   user = aws_iam_user.edge.name
+
+  lifecycle {
+    create_before_destroy = true
+    replace_triggered_by  = [time_rotating.edge_key]
+  }
 }
 
 resource "aws_iam_user_policy" "edge_invoke" {
