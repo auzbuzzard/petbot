@@ -48,7 +48,7 @@ scraping.
   values never touch Terraform state as managed resources:
 
   ```sh
-  # The edge's Discord bot token (read into the Lightsail container env at apply).
+  # The edge's Discord bot token (the edge reads it from SSM when it starts).
   aws ssm put-parameter --type SecureString \
     --name /petbot/edge/discord_token --value "<bot token>"
 
@@ -70,10 +70,11 @@ scraping.
   # aws ssm put-parameter --type SecureString --name /petbot/core/derpibooru_api_key --value "..."
   ```
 
-  > Note: SSM values referenced by Terraform are injected into the Lambda /
-  > container environment at apply time, so they do land in Terraform **state**.
-  > The state bucket is encrypted, versioned, and private to contain this;
-  > runtime SSM fetch (state stays secret-free) is a future hardening (#17).
+  > Each process reads its secrets from SSM when it starts: Terraform passes it only
+  > the parameter *names* (`SSM_SECRETS`, see `secrets.tf`), and its IAM identity may
+  > read exactly those parameters. No secret value lands in the function's
+  > configuration or in Terraform state. The exception is the edge's own AWS access
+  > key: Lightsail has no IAM roles, so Terraform creates the key and it lives in state.
 
 ## Bootstrap (root of trust)
 
@@ -204,8 +205,8 @@ call) what triage needs and nothing more: the stack's Lambda logs, the edge's
 container logs and deployments, function config, the stack's DynamoDB tables, ECR
 images, IAM reads and policy simulation, metrics, traces and CloudTrail, plus
 `lambda:InvokeFunction` on the core worker for integration tests. No secrets
-(`ssm:GetParameter`), no state bucket (Terraform state holds the injected secrets),
-no writes.
+(`ssm:GetParameter`), no state bucket (Terraform state holds the edge's AWS access
+key), no writes.
 
 The IAM user `operator_user` (default `claude`) may only assume `petbot-operator`
 (1-hour sessions). Its access keys are created out of band (console or
