@@ -2,8 +2,10 @@
 
 Tavily (keyed, built for LLM consumers) runs first; ``ddgs`` (keyless metasearch over
 public result pages) is the fallback for a missing key, an exhausted quota, or an outage.
-The results come back as a compact numbered list the agent reads and cites from, each with
-its publication date when the provider knows it and marked undated when it doesn't, so the
+Tavily also answers the query itself, from the pages it found, the way an answer engine
+does: the agent gets that answer to voice instead of piecing one together from snippets.
+The sources come back as a compact numbered list the agent cites from, each with its
+publication date when the provider knows it and marked undated when it doesn't, so the
 model never has to guess when a snippet was written. Outside an age-gated channel both
 providers are asked for safe results (Tavily's ``safe_search``, ddgs's ``safesearch``).
 """
@@ -36,6 +38,8 @@ logger = logging.getLogger(__name__)
 MAX_RESULTS = 5
 #: Per-result snippet cap, in characters.
 MAX_SNIPPET = 400
+#: Cap on the provider's own answer, in characters.
+MAX_ANSWER = 1_200
 
 TAVILY_URL = "https://api.tavily.com/search"
 
@@ -51,13 +55,21 @@ class SearchHit:
     published: str | None = None
 
 
+@dataclass(frozen=True)
+class SearchResults:
+    """One provider's response: its hits, and its own answer to the query if it writes one."""
+
+    hits: list[SearchHit]
+    answer: str | None = None
+
+
 class SearchProvider(Protocol):
-    """A web search backend. Raises on failure; an empty list means no results. ``safe``
-    asks for safe-rated results, where the backend can filter."""
+    """A web search backend. Raises on failure; no hits means no results. ``safe`` asks for
+    safe-rated results, where the backend can filter."""
 
     name: str
 
-    async def search(self, query: str, *, safe: bool) -> list[SearchHit]: ...
+    async def search(self, query: str, *, safe: bool) -> SearchResults: ...
 
 
 def _text(value: object) -> str:
@@ -71,7 +83,8 @@ def _day(value: object) -> str | None:
 
 
 class TavilyProvider(SearchProvider):
-    """Tavily's search API (``search_depth=basic``: one credit per query)."""
+    """Tavily's search API (``search_depth=basic``: one credit per query), with its
+    LLM-written answer to the query (``include_answer``)."""
 
     name = "tavily"
 
@@ -79,7 +92,7 @@ class TavilyProvider(SearchProvider):
         self._client = client
         self._api_key = api_key
 
-    async def search(self, query: str, *, safe: bool) -> list[SearchHit]:
+    async def search(self, query: str, *, safe: bool) -> SearchResults:
         response = await self._client.post(
             TAVILY_URL,
             headers={"Authorization": f"Bearer {self._api_key}"},
@@ -87,21 +100,24 @@ class TavilyProvider(SearchProvider):
                 "query": query,
                 "max_results": MAX_RESULTS,
                 "search_depth": "basic",
+                "include_answer": "advanced",
                 "include_published_date": True,
                 "safe_search": safe,
             },
         )
         response.raise_for_status()
-        return [
+        body = response.json()
+        hits = [
             SearchHit(
                 title=_text(r.get("title")),
                 url=r["url"],
                 snippet=_text(r.get("content")),
                 published=_day(r.get("published_date")),
             )
-            for r in response.json().get("results") or []
+            for r in body.get("results") or []
             if isinstance(r.get("url"), str) and r["url"]
         ]
+        return SearchResults(hits=hits, answer=_text(body.get("answer")).strip() or None)
 
 
 class DdgsProvider(SearchProvider):
@@ -112,7 +128,7 @@ class DdgsProvider(SearchProvider):
     def __init__(self, backend: str = "duckduckgo,startpage") -> None:
         self._backend = backend
 
-    def _search_sync(self, query: str, safe: bool) -> list[SearchHit]:
+    def _search_sync(self, query: str, safe: bool) -> SearchResults:
         try:
             rows = DDGS(timeout=8).text(
                 query,
@@ -124,15 +140,17 @@ class DdgsProvider(SearchProvider):
             # ddgs raises this exact message when every engine answered with nothing; any
             # engine error replaces it, so it reliably means "no results", not an outage.
             if str(exc) == "No results found.":
-                return []
+                return SearchResults(hits=[])
             raise
-        return [
-            SearchHit(title=_text(r.get("title")), url=r["href"], snippet=_text(r.get("body")))
-            for r in rows
-            if isinstance(r.get("href"), str) and r["href"]
-        ]
+        return SearchResults(
+            hits=[
+                SearchHit(title=_text(r.get("title")), url=r["href"], snippet=_text(r.get("body")))
+                for r in rows
+                if isinstance(r.get("href"), str) and r["href"]
+            ]
+        )
 
-    async def search(self, query: str, *, safe: bool) -> list[SearchHit]:
+    async def search(self, query: str, *, safe: bool) -> SearchResults:
         # ddgs is synchronous (threaded HTTP); keep it off the event loop.
         return await asyncio.to_thread(self._search_sync, query, safe)
 
@@ -142,12 +160,15 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
-def format_hits(query: str, hits: Sequence[SearchHit]) -> str:
-    """The numbered result list handed to the model, each result dated or marked undated,
-    closed by how to use them: a small model follows an instruction next to the material
-    far more reliably than one in its system prompt."""
+def format_results(query: str, results: SearchResults) -> str:
+    """What the model reads: the provider's answer when it wrote one, then the numbered
+    sources, each dated or marked undated, closed by how to use them: a small model follows
+    an instruction next to the material far more reliably than one in its system prompt."""
     lines = [f'Web results for "{query}":']
-    for i, hit in enumerate(hits, start=1):
+    if results.answer:
+        lines.append(f"Answer, from the sources below: {_clip(results.answer, MAX_ANSWER)}")
+        lines.append("Sources:")
+    for i, hit in enumerate(results.hits, start=1):
         dated = f"published {hit.published}" if hit.published else "date unknown"
         lines.append(f"{i}. {_clip(hit.title, 120) or hit.url} — <{hit.url}> ({dated})")
         if hit.snippet:
@@ -178,15 +199,20 @@ class WebSearchSkill(Skill[WebSearchArgs]):
         failures = 0
         for provider in self._providers:
             try:
-                hits = await provider.search(query, safe=not ctx.allows_explicit)
+                results = await provider.search(query, safe=not ctx.allows_explicit)
             except (httpx.HTTPError, DDGSException, KeyError, ValueError) as exc:
                 # A quota/outage/parse failure on one provider falls through to the next.
                 failures += 1
                 logger.warning("web_search: %s failed: %s", provider.name, type(exc).__name__)
                 continue
-            if hits:
-                logger.debug("web_search: %s answered with %d hits", provider.name, len(hits))
-                return SkillResult.message(format_hits(query, hits))
+            if results.hits:
+                logger.debug(
+                    "web_search: %s answered with %d hits (answer: %s)",
+                    provider.name,
+                    len(results.hits),
+                    results.answer is not None,
+                )
+                return SkillResult.message(format_results(query, results))
         if failures == len(self._providers):
             raise UpstreamUnavailable("Web search isn't reachable right now.")
         raise EmptyResult(f'The web search for "{query}" found nothing.')

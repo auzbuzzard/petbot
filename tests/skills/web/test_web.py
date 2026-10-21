@@ -27,9 +27,10 @@ from petbot.skills.web.fetch import MAX_BYTES, WebFetchSkill
 from petbot.skills.web.search import (
     TAVILY_URL,
     SearchHit,
+    SearchResults,
     TavilyProvider,
     WebSearchSkill,
-    format_hits,
+    format_results,
 )
 from petbot.types import WebFetchArgs, WebSearchArgs
 
@@ -44,20 +45,25 @@ def _ctx() -> SkillContext:
 
 class _FakeProvider:
     def __init__(
-        self, name: str, hits: list[SearchHit] | None = None, exc: Exception | None = None
+        self,
+        name: str,
+        hits: list[SearchHit] | None = None,
+        exc: Exception | None = None,
+        answer: str | None = None,
     ) -> None:
         self.name = name
         self._hits = hits or []
         self._exc = exc
+        self._answer = answer
         self.queries: list[str] = []
         self.safe: list[bool] = []
 
-    async def search(self, query: str, *, safe: bool) -> list[SearchHit]:
+    async def search(self, query: str, *, safe: bool) -> SearchResults:
         self.queries.append(query)
         self.safe.append(safe)
         if self._exc is not None:
             raise self._exc
-        return self._hits
+        return SearchResults(hits=self._hits, answer=self._answer)
 
 
 _HIT = SearchHit(title="Gemma 4", url="https://ai.google.dev/gemma", snippet="Released in April.")
@@ -69,11 +75,27 @@ async def test_tavily_sends_the_key_as_bearer_and_maps_results() -> None:
         json={"results": [{"title": "T", "url": "https://x.test/a", "content": "body"}]}
     )
     async with httpx.AsyncClient() as client:
-        hits = await TavilyProvider(client, "tvly-secret").search("q", safe=True)
-    assert hits == [SearchHit(title="T", url="https://x.test/a", snippet="body")]
+        results = await TavilyProvider(client, "tvly-secret").search("q", safe=True)
+    assert results == SearchResults(
+        hits=[SearchHit(title="T", url="https://x.test/a", snippet="body")]
+    )
     request = route.calls.last.request
     assert request.headers["authorization"] == "Bearer tvly-secret"
     assert b'"search_depth":"basic"' in request.content
+
+
+@respx.mock
+async def test_tavily_asks_for_its_answer_and_keeps_it() -> None:
+    route = respx.post(TAVILY_URL).respond(
+        json={
+            "answer": " Today's daily is Minimum Operations to Sort a String (Medium). ",
+            "results": [{"title": "T", "url": "https://x.test/a", "content": "body"}],
+        }
+    )
+    async with httpx.AsyncClient() as client:
+        results = await TavilyProvider(client, "k").search("q", safe=True)
+    assert json.loads(route.calls.last.request.content)["include_answer"] == "advanced"
+    assert results.answer == "Today's daily is Minimum Operations to Sort a String (Medium)."
 
 
 async def test_search_returns_the_first_provider_with_hits() -> None:
@@ -121,18 +143,33 @@ async def test_search_rejects_a_blank_query() -> None:
         await WebSearchSkill([_FakeProvider("ddgs", [_HIT])]).run(WebSearchArgs(query="  "), _ctx())
 
 
-def test_format_hits_numbers_results_and_clips_snippets() -> None:
-    text = format_hits("q", [SearchHit(title="A", url="https://a.test", snippet="x" * 1000)])
-    lines = text.splitlines()
+def test_format_results_numbers_results_and_clips_snippets() -> None:
+    hits = [SearchHit(title="A", url="https://a.test", snippet="x" * 1000)]
+    lines = format_results("q", SearchResults(hits=hits)).splitlines()
     assert lines[1] == "1. A — <https://a.test> (date unknown)"
     assert len(lines[2].strip()) <= 400 and lines[2].endswith("…")
     assert "never state a date that isn't shown here" in lines[-1]
     assert "end your reply with the links you used" in lines[-1]
 
 
-def test_format_hits_shows_the_publication_date_when_known() -> None:
+def test_format_results_shows_the_publication_date_when_known() -> None:
     hit = SearchHit(title="Gemma 3 270M", url="https://n.test", snippet="s", published="2025-08-14")
-    assert format_hits("q", [hit]).splitlines()[1].endswith("(published 2025-08-14)")
+    lines = format_results("q", SearchResults(hits=[hit])).splitlines()
+    assert lines[1].endswith("(published 2025-08-14)")
+
+
+def test_format_results_leads_with_the_providers_answer() -> None:
+    text = format_results("q", SearchResults(hits=[_HIT], answer="Gemma 4 came out in April."))
+    lines = text.splitlines()
+    assert lines[1] == "Answer, from the sources below: Gemma 4 came out in April."
+    assert lines[2] == "Sources:"
+    assert lines[3].startswith("1. Gemma 4 — <https://ai.google.dev/gemma>")
+
+
+async def test_search_hands_the_answer_to_the_agent() -> None:
+    provider = _FakeProvider("tavily", [_HIT], answer="Gemma 4 came out in April.")
+    result = await WebSearchSkill([provider]).run(WebSearchArgs(query="gemma"), _ctx())
+    assert result.text is not None and "Gemma 4 came out in April." in result.text
 
 
 @respx.mock
@@ -151,9 +188,10 @@ async def test_tavily_asks_for_dates_and_safe_results_and_keeps_the_day() -> Non
         }
     )
     async with httpx.AsyncClient() as client:
-        hits = await TavilyProvider(client, "k").search("q", safe=True)
+        results = await TavilyProvider(client, "k").search("q", safe=True)
         await TavilyProvider(client, "k").search("q", safe=False)
-    assert [h.published for h in hits] == ["2025-08-14", None]
+    assert [h.published for h in results.hits] == ["2025-08-14", None]
+    assert results.answer is None
     first, second = (json.loads(c.request.content) for c in route.calls)
     assert first["include_published_date"] is True
     assert (first["safe_search"], second["safe_search"]) == (True, False)
@@ -189,7 +227,7 @@ def test_ddgs_no_results_is_empty_not_an_outage(monkeypatch: pytest.MonkeyPatch)
             raise DDGSException("No results found.")
 
     monkeypatch.setattr(search_module, "DDGS", _NoResults)
-    assert search_module.DdgsProvider()._search_sync("q", True) == []
+    assert search_module.DdgsProvider()._search_sync("q", True) == SearchResults(hits=[])
 
 
 def test_ddgs_engine_errors_still_raise(monkeypatch: pytest.MonkeyPatch) -> None:

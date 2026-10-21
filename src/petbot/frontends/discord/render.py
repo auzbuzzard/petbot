@@ -41,22 +41,23 @@ def to_embed(spec: EmbedSpec) -> discord.Embed:
     return embed
 
 
-#: A Discord timestamp markup (``<t:1700000000:t>``) wrapped in inline code, which Discord
-#: would show as raw code instead of a time.
-_CODED_TIMESTAMP = re.compile(r"`(<t:-?\d+(?::[tTdDfFR])?>)`")
+#: Markup wrapped in inline code, which Discord would show as raw code: a timestamp
+#: (``<t:1700000000:t>``) instead of a time, or a lone link instead of a clickable one.
+_CODED_MARKUP = re.compile(r"`(<t:-?\d+(?::[tTdDfFR])?>|<?https?://[^\s`<>]+>?)`")
 
 
-def unwrap_timestamps(text: str) -> str:
-    """Strip inline-code backticks from around Discord timestamps so they render as times
-    in each reader's timezone. The model sometimes formats them as code."""
-    return _CODED_TIMESTAMP.sub(r"\1", text)
+def unwrap_markup(text: str) -> str:
+    """Strip inline-code backticks from around a Discord timestamp or a lone link, so a
+    timestamp renders in each reader's timezone and a link is clickable. The model sometimes
+    formats them as code."""
+    return _CODED_MARKUP.sub(r"\1", text)
 
 
 def _plan(result: SkillResult) -> list[tuple[str | None, discord.Embed | None]]:
     """The ordered messages a result becomes: the text is chunked and the embed rides
     only the first chunk. A voiced failure is just text, rendered the same way."""
     embed = to_embed(result.embed) if result.embed is not None else None
-    chunks = chunk_text(unwrap_timestamps(result.text or ""), limit=DISCORD_MAX_TEXT)
+    chunks = chunk_text(unwrap_markup(result.text or ""), limit=DISCORD_MAX_TEXT)
     if not chunks:
         # No text: the embed alone, or nothing if the result is truly empty.
         return [(None, embed)] if embed is not None else []
