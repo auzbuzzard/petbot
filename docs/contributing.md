@@ -15,6 +15,32 @@ uv run lint-imports                                   # package boundaries
 uv run pytest                                         # offline tests
 ```
 
+## Trying a change against the real model
+
+The offline tests can't tell whether a prompt reads well or a tool answers the question.
+Before a persona, prompt or tool change merges, run it through the real model with the
+chat harness. It takes production's path with no Discord and no server: each message of a
+scripted conversation is encoded as a dispatch and handed to `serve`, which runs this
+checkout's core process in-process, so an unexpected error gets production's reply (and a
+logged traceback) and the conversation goes on. It prints each reply as the Discord
+frontend would post it, after the agent's tool calls; `-v` adds what each call returned to
+the model, and a call the model got wrong or the turn's budget cut off is marked.
+
+```bash
+python -m petbot.services.core.chat conversations/leetcode-daily.json -v
+python -m petbot.services.core.chat --say "what's the weather in Paris?" --as Ann
+```
+
+It reads the same settings as the core service (`CHAT_LLM__*`, `TAVILY_API_KEY`, the booru
+keys, `OBS_*`; see `.env.example`) from the environment or `.env`, and the frontend's
+`HISTORY_MAX_TURNS`. A conversation file lists the place (`server`, `channel`, `nsfw`) and
+the messages in order. Each goes to PetBot unless `"to_bot": false`; the messages form one
+reply chain from the last `"fresh": true` one (a new @mention) on, and PetBot's history is
+that chain as the frontend reads it back. Each turn's budget is the core Lambda's timeout
+(`--timeout`, default Terraform's 120 s) less the handler's reserve, as in production. Add a
+file under `conversations/` for any case worth re-running; use placeholder names, never a
+real server's messages.
+
 ## Adding a skill
 
 The full recipe is in [`AGENTS.md`](../AGENTS.md). In short:

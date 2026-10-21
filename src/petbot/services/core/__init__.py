@@ -20,6 +20,10 @@ from petbot.platform import ToolRegistry
 from petbot.process import ChatProcess, CommandProcess, RouterProcess, Stylist
 from petbot.process.settings import ChatSettings
 
+#: Seconds of an invocation kept back from the turn's budget for encoding the result and
+#: flushing telemetry, so a turn that runs out of budget still returns before Lambda kills it.
+RESERVE_SECONDS = 5.0
+
 
 def build_process() -> Process:
     """Build the core service's process: chat + command over the installed skills.
@@ -42,4 +46,4 @@ def build_process() -> Process:
     return RouterProcess(chat=chat, command=command)
 
 
-__all__ = ["build_process"]
+__all__ = ["RESERVE_SECONDS", "build_process"]

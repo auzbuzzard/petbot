@@ -94,6 +94,17 @@ uv run pytest                                    # offline tests
 
 python -m petbot.services.core                   # local core compute service (:8000)
 python -m petbot.frontends.discord               # the Discord frontend (talks to it)
+
+# Try a change against the real model before it deploys (no Discord, no server):
+python -m petbot.services.core.chat conversations/leetcode-daily.json -v
+python -m petbot.services.core.chat --say "what's today's leetcode daily?"
 ```
+
+The chat harness sends each message of a scripted conversation (`conversations/`) through
+`serve` to this checkout's core process, in-process, with the model and tool keys from the
+environment (`CHAT_LLM__*`, `TAVILY_API_KEY`; see `.env.example`), production's turn budget
+and reply-chain history. It prints each reply as Discord would post it, after the agent's
+tool calls (`-v`: and what each returned to the model). Run it on any prompt, persona or
+tool change before it merges; add a conversation file for a case worth keeping.
 
 CI runs lint/format/mypy/lint-imports/pytest and needs **no secrets**.
