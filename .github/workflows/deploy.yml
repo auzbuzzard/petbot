@@ -128,12 +128,16 @@ jobs:
           cache-from: type=gha,scope=edge
           cache-to: type=gha,mode=max,scope=edge
 
+      # Terraform prints each resource's id as it refreshes or creates it, and the edge's
+      # access key id is one; the log is public, so access key ids are redacted from it.
       - name: Terraform apply
         working-directory: ${{ env.TF_DIR }}
         run: |
+          set -o pipefail
           terraform apply -auto-approve \
             -var "image_tag=$IMAGE_TAG" \
-            -var "edge_image_tag=$IMAGE_TAG"
+            -var "edge_image_tag=$IMAGE_TAG" 2>&1 \
+            | sed -u -E 's/(AKIA|ASIA)[A-Z0-9]{16}/\1****************/g'
 
       - name: Show outputs
         working-directory: ${{ env.TF_DIR }}
