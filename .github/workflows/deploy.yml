@@ -31,9 +31,11 @@ jobs:
     environment: production
     env:
       TF_DIR: deploy/terraform
-      # Non-secret deploy config, read by Terraform as TF_VAR_*; secret *values* stay in
-      # SSM, referenced by name. AWS_REGION and TF_STATE_BUCKET are repository variables
-      # (bootstrap.yml reads them too); the rest are the `production` environment's.
+      # Deploy config, read by Terraform as TF_VAR_*; secret *values* stay in SSM,
+      # referenced by name. AWS_REGION is a repository variable (bootstrap.yml reads it
+      # too); the rest are the `production` environment's. The state bucket and the role
+      # ARN carry the account ID, so they are read as secrets, which the public log masks;
+      # a variable of the same name stands in while no secret is set, unmasked.
       # Job-level, because only a job that references an environment sees its variables.
       TF_VAR_aws_region: ${{ vars.AWS_REGION }}
       TF_VAR_chat_llm_kind: ${{ vars.CHAT_LLM_KIND }}
@@ -55,8 +57,10 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
-          role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN || vars.DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
+          # The log is public: mask the account ID in every ARN, URL and name after this.
+          mask-aws-account-id: true
 
       # buildx for the gha layer cache; QEMU for the amd64 edge build on arm.
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -73,7 +77,7 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: |
           terraform init \
-            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}" \
             -backend-config="key=petbot/terraform.tfstate" \
             -backend-config="region=${{ vars.AWS_REGION }}" \
             -backend-config="encrypt=true" \
