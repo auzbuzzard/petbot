@@ -27,7 +27,14 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from petbot.types.args import BooruArgs, MathArgs, WeatherArgs, WebFetchArgs, WebSearchArgs
+from petbot.types.args import (
+    BooruArgs,
+    LeetCodeArgs,
+    MathArgs,
+    WeatherArgs,
+    WebFetchArgs,
+    WebSearchArgs,
+)
 
 
 @dataclass(frozen=True)
@@ -70,5 +77,11 @@ CATALOG: tuple[Command[Any], ...] = (
         "Current weather and a 3-day forecast for a place.",
         WeatherArgs,
         slash=False,
+    ),
+    Command(
+        "leetcode",
+        "Look up LeetCode's daily problem for today, or a random free problem, optionally of "
+        "one difficulty.",
+        LeetCodeArgs,
     ),
 )

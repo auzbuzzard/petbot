@@ -16,11 +16,11 @@ Organised by **concept** (`src/`), deployed by **service** (`deploy/` + `petbot.
 |---|---|
 | `petbot.domain` | Kernel: frozen models (`SkillResult`, `SkillContext`, `EmbedSpec`, the `Input` sum type `TextInput \| CommandInput` — `TextInput` carries reply-chain `history: Recalled \| Unrecalled` — the turns PetBot recalled, or a marker that it *couldn't*), the `Process` verb + the `Skill[ArgsT]` tool ABC, ports (`VoicePort`, `StylePort`, `Notifier`), and `SkillError`. Imports nothing else first-party. |
 | `petbot.process` | **The core.** The `Process` impls: `ChatProcess` (the LLM brain — maps `history` to `message_history` and **reactively compacts** it on a provider length-rejection, via a DI-selected `SlidingWindow`/`Summarizer`), `CommandProcess`, the `RouterProcess` (the one exhaustive `match` on input type), and the persona voice (`Stylist` / `PassthroughStyle`, a `StylePort`). |
-| `petbot.skills.{math,booru,web,weather,music}` | One **tool** each (a `Skill[ArgsT]`; `web` holds two: `web_search`, `web_fetch`); the process calls them through the `ToolRegistry`. Tools *raise* `SkillError` for expected failures. |
+| `petbot.skills.{math,booru,web,weather,leetcode,music}` | One **tool** each (a `Skill[ArgsT]`; `web` holds two: `web_search`, `web_fetch`); the process calls them through the `ToolRegistry`. Tools *raise* `SkillError` for expected failures. |
 | `petbot.types` | The typed surface a frontend imports without a skill: per-skill `*Args` models + the `Command` / `CATALOG`. |
 | `petbot.platform` | Plumbing: `ToolRegistry`, `serve`, `ProcessClient`, the `Dispatch` envelope + transports (`HttpTransport`, `LambdaTransport`). |
 | `petbot.frontends.{discord}` | Driving adapters: map a platform event to an `Input`, dispatch via a `ProcessClient`, render the `SkillResult`. |
-| `petbot.services.{core,music}` | Composition roots (deploy-by-service): wire process + skills + platform and `serve` it. core = chat + command over math/booru/web/weather; music = the voice service. |
+| `petbot.services.{core,music}` | Composition roots (deploy-by-service): wire process + skills + platform and `serve` it. core = chat + command over math/booru/web/weather/leetcode; music = the voice service. |
 
 The calling pattern: a frontend builds a neutral `Input` (`TextInput` for `@mention`,
 `CommandInput` for slash) + a `SkillContext` and calls `await process.respond(inp, ctx)`

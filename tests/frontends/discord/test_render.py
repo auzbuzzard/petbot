@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import discord
+import pytest
 
 from petbot.domain import (
     CommandInput,
@@ -23,7 +26,12 @@ from petbot.frontends.discord.render import (
     unwrap_markup,
 )
 from petbot.frontends.discord.settings import DiscordSettings, HttpService
-from petbot.frontends.discord.slash import _as_app_command, _with_defer, build_commands
+from petbot.frontends.discord.slash import (
+    _as_app_command,
+    _option_type,
+    _with_defer,
+    build_commands,
+)
 from petbot.frontends.discord.text import chunk_text
 from petbot.types import CATALOG
 
@@ -207,7 +215,7 @@ def test_build_interaction_context_reads_nsfw_and_ids() -> None:
 
 def test_slash_surface_skips_agent_only_tools() -> None:
     names = {c.name for c in build_commands(_RaisingProcess())}
-    assert names == {"math", "derpi", "e621"}
+    assert names == {"math", "derpi", "e621", "leetcode"}
 
 
 async def test_respond_interaction_sends_card_as_followup() -> None:
@@ -273,3 +281,22 @@ def test_slash_command_options_are_generated_from_args_model() -> None:
     assert params["tags"].required is True
     assert params["sort"].required is False
     assert str(params["min_score"].description) == "Minimum score floor."
+
+
+def test_slash_literal_options_become_choices() -> None:
+    spec = next(s for s in CATALOG if s.name == "leetcode")
+
+    async def _noop(interaction: object, **values: object) -> None: ...
+
+    params = _as_app_command(spec, _noop)._params
+    assert params["mode"].required is False
+    assert [c.value for c in params["mode"].choices] == ["daily", "random"]
+    # An optional Literal is still a choice, just not a required one.
+    assert params["difficulty"].required is False
+    assert [c.value for c in params["difficulty"].choices] == ["easy", "medium", "hard"]
+
+
+def test_slash_rejects_a_non_string_literal() -> None:
+    assert _option_type(Literal["a", "b"] | None) == Literal["a", "b"]
+    with pytest.raises(TypeError):
+        _option_type(Literal[1, 2])

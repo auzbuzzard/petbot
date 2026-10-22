@@ -20,6 +20,11 @@ from petbot.domain import Frozen
 #: The music actions the skill understands.
 MusicAction = Literal["play", "skip", "stop", "queue", "volume"]
 
+#: What the ``leetcode`` skill looks up: today's daily problem, or a random one.
+LeetCodeMode = Literal["daily", "random"]
+#: LeetCode's three problem difficulties.
+LeetCodeDifficulty = Literal["easy", "medium", "hard"]
+
 
 class MathArgs(Frozen):
     """Arguments for the ``math`` skill."""
@@ -62,6 +67,17 @@ class WeatherArgs(Frozen):
 
     location: str = Field(
         description="A place name, optionally with region or country (e.g. 'Paris, France')."
+    )
+
+
+class LeetCodeArgs(Frozen):
+    """Arguments for the ``leetcode`` skill."""
+
+    mode: LeetCodeMode = Field(
+        default="daily", description="'daily' for today's daily problem, 'random' for any."
+    )
+    difficulty: LeetCodeDifficulty | None = Field(
+        default=None, description="For a random problem: only this difficulty."
     )
 
 

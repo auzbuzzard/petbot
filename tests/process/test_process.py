@@ -796,7 +796,7 @@ async def test_agent_offers_every_catalog_tool_including_agent_only_ones() -> No
     await ChatProcess(_registry(), model=FunctionModel(fn)).respond(
         TextInput(text="hi", history=Recalled(turns=())), _ctx()
     )
-    assert offered == {"math", "derpi", "e621", "web_search", "web_fetch", "weather"}
+    assert offered == {"math", "derpi", "e621", "web_search", "web_fetch", "weather", "leetcode"}
 
 
 async def test_chat_answers_with_a_fallback_when_the_turn_runs_out_of_time() -> None:
