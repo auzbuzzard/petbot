@@ -200,7 +200,9 @@ class ChatProcess(Process):
             # another model call.
             return SkillResult.message(_OUT_OF_TIME)
         self._log_outcome(result, ctx, recalled=recalled)
-        card = next((a for a in deps.attachments if a.embed is not None), None)
+        # The last card: when the agent calls tools more than once, a later call is the one
+        # it settled on (an earlier result it rejected and searched past isn't the answer).
+        card = next((a for a in reversed(deps.attachments) if a.embed is not None), None)
         files = tuple(f for a in deps.attachments for f in a.files)
         out = SkillResult.message(
             result.output,

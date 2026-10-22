@@ -5,16 +5,18 @@ reads, and that is what daily-problem bots call (ADR 0013). Providers are ranked
 web search's: the first that answers wins, so a hosted mirror can be added behind
 :class:`LeetCodeProvider` if the endpoint stops answering the deployed runtime.
 
-A random pick comes from the algorithms problem set (the problem list without its database
-and shell problems) and skips members-only problems, which a free account can't open. The
-endpoint ignores the list's own premium filter, so that skip happens here.
+A random pick is uniform over the algorithms problem set (the problem list without its
+database and shell problems): one problem at a random index, drawn again if it is
+members-only, which a free account can't open. The endpoint ignores the list's own premium
+filter, so that check happens here.
 """
 
 from __future__ import annotations
 
 import logging
 import random
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -29,8 +31,10 @@ GRAPHQL_URL = "https://leetcode.com/graphql/"
 PROBLEM_URL = "https://leetcode.com/problems/{slug}/"
 #: The problem set a random pick is drawn from.
 CATEGORY = "algorithms"
-#: Problems fetched around a random offset; members-only ones are dropped from it.
-PAGE_SIZE = 20
+#: Draws before a random pick gives up on landing on a free problem.
+MAX_DRAWS = 4
+#: Seconds a problem count is reused; it only grows when LeetCode adds a problem.
+TOTAL_TTL = 3600.0
 
 _QUESTION_FIELDS = (
     "questionFrontendId title titleSlug difficulty acRate paidOnly: isPaidOnly topicTags { name }"
@@ -120,8 +124,13 @@ class GraphQLProvider(LeetCodeProvider):
 
     name = "leetcode-graphql"
 
-    def __init__(self, client: httpx.AsyncClient) -> None:
+    def __init__(
+        self, client: httpx.AsyncClient, *, clock: Callable[[], float] = time.monotonic
+    ) -> None:
         self._client = client
+        self._clock = clock
+        #: Problem count per difficulty, with when it was read.
+        self._totals: dict[LeetCodeDifficulty | None, tuple[int, float]] = {}
 
     async def _query(self, operation: str, query: str, variables: dict[str, Any]) -> Any:
         response = await self._client.post(
@@ -154,23 +163,37 @@ class GraphQLProvider(LeetCodeProvider):
         listing = data.get("problemsetQuestionList")
         if not isinstance(listing, dict) or not isinstance(listing.get("total"), int):
             raise ValueError("no problem list")
+        total: int = listing["total"]
+        self._totals[difficulty] = (total, self._clock())
         questions = listing.get("questions")
-        return listing["total"], [
-            parse_problem(q) for q in (questions if isinstance(questions, list) else [])
-        ]
+        problems: list[Problem] = []
+        for raw in questions if isinstance(questions, list) else []:
+            try:
+                problems.append(parse_problem(raw))
+            except ValueError:
+                # One odd entry (a hidden problem, say) shouldn't sink the rest of the list.
+                logger.debug("leetcode: skipped an unreadable problem in the list")
+        return total, problems
+
+    async def _total(self, difficulty: LeetCodeDifficulty | None) -> int:
+        cached = self._totals.get(difficulty)
+        if cached is not None and self._clock() - cached[1] < TOTAL_TTL:
+            return cached[0]
+        total, _ = await self._page(difficulty, skip=0, limit=1)
+        return total
 
     async def random_problem(
         self, difficulty: LeetCodeDifficulty | None, rng: random.Random
     ) -> Problem | None:
-        total, _ = await self._page(difficulty, skip=0, limit=1)
-        if total <= 0:
-            return None
-        # A full page wherever the offset lands, so a run of members-only problems near
-        # the end of the list doesn't leave nothing to pick from.
-        skip = min(rng.randrange(total), max(total - PAGE_SIZE, 0))
-        _, problems = await self._page(difficulty, skip=skip, limit=PAGE_SIZE)
-        free = [p for p in problems if not p.paid_only]
-        return rng.choice(free) if free else None
+        for _ in range(MAX_DRAWS):
+            total = await self._total(difficulty)
+            if total <= 0:
+                return None
+            # Each page read refreshes the count, so a stale one corrects itself.
+            _, problems = await self._page(difficulty, skip=rng.randrange(total), limit=1)
+            if problems and not problems[0].paid_only:
+                return problems[0]
+        return None
 
 
 def _describe(problem: Problem) -> list[str]:
@@ -215,7 +238,7 @@ class LeetCodeSkill(Skill[LeetCodeArgs]):
         answered = False
         for provider in self._providers:
             try:
-                if args.mode == "daily":
+                if args.effective_mode == "daily":
                     return SkillResult.message(format_daily(await provider.daily()))
                 problem = await provider.random_problem(args.difficulty, self._rng)
             except (httpx.HTTPError, ValueError) as exc:
@@ -227,4 +250,6 @@ class LeetCodeSkill(Skill[LeetCodeArgs]):
         if not answered:
             raise UpstreamUnavailable("LeetCode isn't answering right now.")
         kind = f"{args.difficulty} " if args.difficulty else ""
-        raise EmptyResult(f"LeetCode returned no free {kind}problem to pick from.")
+        # A miss is a failed draw (members-only problems, or an empty listing), not proof
+        # that LeetCode has no free problem of this kind.
+        raise EmptyResult(f"I couldn't draw a free {kind}LeetCode problem this time; try again.")

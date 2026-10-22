@@ -32,6 +32,14 @@ _MAX_NAME = 32
 #: A fenced code block: formatted output (a math transcript) shown verbatim, never restated.
 _FENCE = re.compile(r"```.*?```", re.DOTALL)
 
+
+def _shown_verbatim(text: str) -> bool:
+    """Whether ``text`` is formatted output, shown as-is under a voiced line rather than
+    restated: a fenced code block, or a result laid out over several lines (a LeetCode
+    problem's fields), which a one-line restatement would flatten."""
+    return bool(_FENCE.search(text)) or "\n" in text.strip()
+
+
 #: The facts a restatement must keep word for word: links and numbers.
 _FACT = re.compile(r"https?://\S+|\d+(?:[.,]\d+)*")
 
@@ -58,11 +66,11 @@ def speaker_line(ctx: SkillContext) -> str:
 def _describe(result: SkillResult, ctx: SkillContext) -> str | None:
     """What the stylist is asked to voice, or ``None`` if there's nothing to say.
 
-    A result with formatted output (a fenced code block) gets a one-line introduction only,
-    since the output itself is shown verbatim beneath it. Other text is restated. A result
-    with only a card is a found image to greet over (the card is shown separately).
+    A result with formatted output (see :func:`_shown_verbatim`) gets a one-line introduction
+    only, since the output itself is shown verbatim beneath it. Other text is restated. A
+    result with only a card is a found image to greet over (the card is shown separately).
     """
-    if result.text and _FENCE.search(result.text):
+    if result.text and _shown_verbatim(result.text):
         return (
             f"{speaker_line(ctx)} This result is shown to them verbatim right below your "
             "line, so do not restate or summarise it; just introduce it."
@@ -114,7 +122,7 @@ class Stylist(StylePort):
             return result
         styled = (await self._agent.run(prompt, model=self._resolved_model())).output.strip()
         text = result.text
-        if text and _FENCE.search(text):
+        if text and _shown_verbatim(text):
             return result.model_copy(update={"text": f"{styled}\n{text}"})
         if text and not _keeps_facts(text, styled):
             logger.warning("stylist dropped a fact from the result; sending it unstyled")

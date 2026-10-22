@@ -14,7 +14,8 @@ from petbot.domain import EmptyResult, Platform, SkillContext, UpstreamUnavailab
 from petbot.skills.leetcode.skill import (
     CATEGORY,
     GRAPHQL_URL,
-    PAGE_SIZE,
+    MAX_DRAWS,
+    TOTAL_TTL,
     Daily,
     GraphQLProvider,
     LeetCodeProvider,
@@ -65,7 +66,7 @@ def _listing(total: int, questions: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 class _FixedRng(random.Random):
-    """Lands every offset on ``offset`` and picks the first candidate."""
+    """Lands every draw on ``offset``."""
 
     def __init__(self, offset: int) -> None:
         super().__init__()
@@ -73,9 +74,6 @@ class _FixedRng(random.Random):
 
     def randrange(self, *args: Any, **kwargs: Any) -> int:
         return self._offset
-
-    def choice(self, seq: Any) -> Any:
-        return seq[0]
 
 
 def _bodies(route: respx.Route) -> list[dict[str, Any]]:
@@ -108,33 +106,60 @@ async def test_daily_ignores_a_difficulty() -> None:
 
 
 @respx.mock
-async def test_random_counts_then_pages_the_algorithms_set_at_its_difficulty() -> None:
-    page = [_question("7", "Reverse Integer", paid=True), _question("9", "Palindrome Number")]
+async def test_random_draws_one_problem_at_a_uniform_index_of_its_difficulty() -> None:
     route = respx.post(GRAPHQL_URL).mock(
         side_effect=[
             httpx.Response(200, json=_listing(810, [_question("1", "Two Sum")])),
-            httpx.Response(200, json=_listing(810, page)),
+            httpx.Response(200, json=_listing(810, [_question("9", "Palindrome Number")])),
         ]
     )
     async with httpx.AsyncClient() as client:
-        skill = LeetCodeSkill([GraphQLProvider(client)], rng=random.Random(4))
+        skill = LeetCodeSkill([GraphQLProvider(client)], rng=_FixedRng(417))
         result = await skill.run(LeetCodeArgs(mode="random", difficulty="easy"), _ctx())
-    count, fetch = (body["variables"] for body in _bodies(route))
-    assert count == {
-        "categorySlug": CATEGORY,
-        "skip": 0,
-        "limit": 1,
-        "filters": {"difficulty": "EASY"},
-    }
-    assert fetch["limit"] == PAGE_SIZE and 0 <= fetch["skip"] <= 810 - PAGE_SIZE
-    assert fetch["filters"] == {"difficulty": "EASY"}
-    # The members-only problem is never the pick.
+    count, draw = (body["variables"] for body in _bodies(route))
+    easy = {"categorySlug": CATEGORY, "filters": {"difficulty": "EASY"}, "limit": 1}
+    assert count == {**easy, "skip": 0}
+    assert draw == {**easy, "skip": 417}
     assert result.text == (
         "A random Easy LeetCode problem:\n"
         "#9 Palindrome Number (Easy, 58.0% acceptance)\n"
         "Topics: Array, Hash Table\n"
         "<https://leetcode.com/problems/palindrome-number/>"
     )
+
+
+@respx.mock
+async def test_a_members_only_draw_is_drawn_again() -> None:
+    route = respx.post(GRAPHQL_URL).mock(
+        side_effect=[
+            httpx.Response(200, json=_listing(810, [])),
+            httpx.Response(200, json=_listing(810, [_question("7", "Locked", paid=True)])),
+            httpx.Response(200, json=_listing(810, [_question("9", "Palindrome Number")])),
+        ]
+    )
+    async with httpx.AsyncClient() as client:
+        result = await LeetCodeSkill([GraphQLProvider(client)]).run(
+            LeetCodeArgs(mode="random"), _ctx()
+        )
+    assert route.call_count == 3
+    assert result.text is not None and "#9 Palindrome Number" in result.text
+
+
+@respx.mock
+async def test_a_difficulty_alone_means_a_random_problem_of_it() -> None:
+    route = respx.post(GRAPHQL_URL).mock(
+        side_effect=[
+            httpx.Response(200, json=_listing(3, [])),
+            httpx.Response(200, json=_listing(3, [_question("42", "Trapping Rain Water", "Hard")])),
+        ]
+    )
+    async with httpx.AsyncClient() as client:
+        result = await LeetCodeSkill([GraphQLProvider(client)]).run(
+            LeetCodeArgs.model_validate({"difficulty": "Hard"}), _ctx()
+        )
+    assert {body["operationName"] for body in _bodies(route)} == {"problemsetQuestionList"}
+    assert _bodies(route)[0]["variables"]["filters"] == {"difficulty": "HARD"}
+    assert result.text is not None and result.text.startswith("A random Hard LeetCode problem:")
 
 
 @respx.mock
@@ -155,32 +180,50 @@ async def test_random_without_a_difficulty_draws_from_every_difficulty() -> None
 
 
 @respx.mock
-async def test_random_offset_near_the_end_still_fetches_a_full_page() -> None:
-    route = respx.post(GRAPHQL_URL).mock(
+async def test_an_unreadable_listed_problem_is_skipped_not_fatal() -> None:
+    hidden = {"questionFrontendId": "5", "title": None, "titleSlug": None}
+    respx.post(GRAPHQL_URL).mock(
         side_effect=[
-            httpx.Response(200, json=_listing(100, [])),
-            httpx.Response(200, json=_listing(100, [_question("1", "Two Sum")])),
+            httpx.Response(200, json=_listing(810, [hidden])),
+            httpx.Response(200, json=_listing(810, [hidden])),
+            httpx.Response(200, json=_listing(810, [_question("9", "Palindrome Number")])),
         ]
     )
     async with httpx.AsyncClient() as client:
-        skill = LeetCodeSkill([GraphQLProvider(client)], rng=_FixedRng(99))
-        await skill.run(LeetCodeArgs(mode="random"), _ctx())
-    assert _bodies(route)[1]["variables"]["skip"] == 100 - PAGE_SIZE
+        result = await LeetCodeSkill([GraphQLProvider(client)]).run(
+            LeetCodeArgs(mode="random"), _ctx()
+        )
+    assert result.text is not None and "#9 Palindrome Number" in result.text
 
 
 @respx.mock
-async def test_random_with_nothing_free_is_empty() -> None:
-    respx.post(GRAPHQL_URL).mock(
-        side_effect=[
-            httpx.Response(200, json=_listing(2, [])),
-            httpx.Response(200, json=_listing(2, [_question("7", "Locked", paid=True)])),
-        ]
-    )
+async def test_random_that_never_lands_on_a_free_problem_is_a_failed_draw() -> None:
+    locked = httpx.Response(200, json=_listing(2, [_question("7", "Locked", paid=True)]))
+    route = respx.post(GRAPHQL_URL).mock(return_value=locked)
     async with httpx.AsyncClient() as client:
-        with pytest.raises(EmptyResult, match="no free hard problem"):
+        # Worded as a missed draw, never as "LeetCode has no free hard problem".
+        with pytest.raises(EmptyResult, match="couldn't draw a free hard LeetCode problem"):
             await LeetCodeSkill([GraphQLProvider(client)]).run(
                 LeetCodeArgs(mode="random", difficulty="hard"), _ctx()
             )
+    assert route.call_count == 1 + MAX_DRAWS
+
+
+@respx.mock
+async def test_the_problem_count_is_reused_until_it_goes_stale() -> None:
+    route = respx.post(GRAPHQL_URL).respond(
+        json=_listing(810, [_question("9", "Palindrome Number")])
+    )
+    now = [0.0]
+    async with httpx.AsyncClient() as client:
+        skill = LeetCodeSkill([GraphQLProvider(client, clock=lambda: now[0])])
+        await skill.run(LeetCodeArgs(mode="random"), _ctx())
+        assert route.call_count == 2  # count + draw
+        await skill.run(LeetCodeArgs(mode="random"), _ctx())
+        assert route.call_count == 3  # the count is reused: draw only
+        now[0] += TOTAL_TTL + 1
+        await skill.run(LeetCodeArgs(mode="random"), _ctx())
+        assert route.call_count == 5  # stale: counted again
 
 
 @respx.mock

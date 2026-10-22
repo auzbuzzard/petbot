@@ -42,8 +42,15 @@ def test_research_tools_are_agent_only() -> None:
 
 
 def test_leetcode_args_default_to_the_daily_and_bound_their_choices() -> None:
-    assert LeetCodeArgs() == LeetCodeArgs(mode="daily", difficulty=None)
-    schema = LeetCodeArgs.model_json_schema()
-    assert schema["properties"]["mode"]["enum"] == ["daily", "random"]
+    assert LeetCodeArgs().effective_mode == "daily"
+    # A difficulty with no mode is a random problem of it, never the daily.
+    assert LeetCodeArgs(difficulty="easy").effective_mode == "random"
+    assert LeetCodeArgs(mode="daily", difficulty="easy").effective_mode == "daily"
     with pytest.raises(ValidationError):
         LeetCodeArgs.model_validate({"mode": "random", "difficulty": "impossible"})
+
+
+def test_leetcode_args_accept_leetcodes_own_spelling() -> None:
+    # Results say "Easy"; a model echoing that back must still validate.
+    args = LeetCodeArgs.model_validate({"mode": " Random", "difficulty": "Easy"})
+    assert args == LeetCodeArgs(mode="random", difficulty="easy")
