@@ -14,20 +14,23 @@ tools can't close this: the daily is dynamic data behind LeetCode's GraphQL endp
 `web_search` returns stale blog/forum posts, and `web_fetch` of `leetcode.com` gets a
 JavaScript app shell with no problem content to extract.
 
-A survey of Python LeetCode libraries found none that fit the skill constraints (async
-`httpx`, `mypy --strict`, minimal dependencies, no event-loop blocking, no auth):
+The three Python LeetCode libraries checked (from their READMEs and PyPI pages, not their
+code) fit none of the skill constraints (async `httpx`, `mypy --strict`, minimal
+dependencies, no event-loop blocking, no auth):
 
-- The maintained client requires a logged-in session (`LEETCODE_SESSION` + CSRF cookies),
-  is synchronous, and has no daily helper — auth-gating alone rules it out for a public
-  lookup.
-- A scraping package is pandas-based, synchronous, last released early 2024, and targets
-  problem pages rather than the daily.
-- The wrapper that does expose a daily call is a thin synchronous client over a third-party
-  **hosted proxy**, coupling us to someone else's free instance to wrap a single HTTP call.
+- `python-leetcode` (no release date found) requires a logged-in session
+  (`LEETCODE_SESSION` + CSRF cookies) and documents no daily helper — auth-gating alone
+  rules it out for a public lookup. Its examples are synchronous.
+- `leetscrape`, last released early 2024, scrapes problem pages rather than the daily. Its
+  examples are synchronous and suggest a pandas DataFrame workflow; its PyPI page lists no
+  dependencies, so that is inferred.
+- `leetcode-api-wrapper` lists a daily call, but wraps a third-party **hosted proxy**,
+  coupling us to someone else's free instance to wrap a single HTTP call. (Its PyPI page
+  didn't load, so its sync/async API is unconfirmed.)
 
-Every maintained bot that posts the daily just issues one unauthenticated GraphQL request;
-a library would add a dependency, a blocking call, and often an auth or proxy requirement to
-wrap `httpx.post`.
+The open-source bots sampled for this decision (a handful, not a survey) each fetch the
+daily with one unauthenticated GraphQL request; a library would add a dependency, often an
+auth or proxy requirement, and likely a blocking call to wrap `httpx.post`.
 
 The open risk was reach: LeetCode sits behind Cloudflare, and one third-party writeup
 reported cloud/datacenter IPs being bot-blocked, which would matter because the core runs on
@@ -48,8 +51,9 @@ recipe (args model in `petbot.types`, a `CATALOG` entry, a `Skill` under
   one") is resolved by the agent calling the tool — daily first, then random-by-difficulty —
   not by branching logic baked into the skill. So the daily operation exposes the problem's
   difficulty as structured data, and random-by-difficulty exists as its own path.
-- **Arguments** are `mode` (`daily` | `random`) and an optional `difficulty`
-  (`easy` | `medium` | `hard`, only meaningful for `random`).
+- **Arguments** are an optional `mode` (`daily` | `random`) and an optional `difficulty`
+  (`easy` | `medium` | `hard`, only meaningful for `random`). With no `mode`, a given
+  difficulty means `random`, so asking for "an easy one" never returns the daily.
 - **A fallback provider is deferred, but the seam is not.** The skill is written as a
   ranked-provider chain like `web_search` (primary first, fall through on failure), so a
   hosted unofficial API can be slotted in **if** the direct call is later observed to fail
