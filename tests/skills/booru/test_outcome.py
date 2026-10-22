@@ -50,6 +50,27 @@ async def test_outcome_ok() -> None:
 
 @respx.mock
 async def test_outcome_safe_limited_when_safe_floor_empties_it() -> None:
+    # safe_limited is recorded only when the floor *verifiably* caused the emptiness: the
+    # safe request (rating:s) is empty while the engine's rating-agnostic probe finds a hit.
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "rating:s" in request.url.params.get("tags", ""):
+            return httpx.Response(200, json=load_fixture("e621_empty"))
+        return httpx.Response(200, json=load_fixture("e621_success"))
+
+    respx.get("https://e621.net/posts.json").mock(side_effect=handler)
+    async with httpx.AsyncClient() as client:
+        outcome = await _outcome_of(
+            lambda: _skill(client).run(
+                BooruArgs(tags="canine"), make_context(allows_explicit=False)
+            )
+        )
+    assert outcome == "safe_limited"
+
+
+@respx.mock
+async def test_outcome_empty_when_safe_search_is_truly_empty() -> None:
+    # SFW channel but the tags have no matches at any rating (probe also empty): this is a
+    # plain EMPTY, not safe_limited — the floor is not to blame.
     respx.get("https://e621.net/posts.json").mock(
         return_value=httpx.Response(200, json=load_fixture("e621_empty"))
     )
@@ -59,7 +80,7 @@ async def test_outcome_safe_limited_when_safe_floor_empties_it() -> None:
                 BooruArgs(tags="canine"), make_context(allows_explicit=False)
             )
         )
-    assert outcome == "safe_limited"
+    assert outcome == "empty"
 
 
 @respx.mock

@@ -15,6 +15,19 @@ from enum import StrEnum
 from petbot.skills.booru.tags import FileType, NumericFilter, Rating, Sort
 
 
+class EmptyReason(StrEnum):
+    """Why a search came back empty — a *verified* fact, not a guess from the request.
+
+    ``SAFE_FLOOR`` is claimed only when a probe (a rating-agnostic re-run whose results
+    are discarded, never shown) confirms matches exist beyond the safe floor, so "try an
+    NSFW channel" is true. ``NO_MATCH`` covers a non-safe search, a safe search whose
+    probe also found nothing, and the case where the probe couldn't run — i.e. whenever we
+    cannot honestly pin the emptiness on the safe floor."""
+
+    SAFE_FLOOR = "safe_floor"
+    NO_MATCH = "no_match"
+
+
 class BooruOutcome(StrEnum):
     """The coarse, non-content result of a search, recorded as telemetry. The skill
     classifies each search into one of these: it can't be read off a single exception type,
