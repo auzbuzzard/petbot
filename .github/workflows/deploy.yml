@@ -32,7 +32,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # A push that changes the root of trust deploys only once bootstrap.yml has applied it:
+  # this stack's deploy role may not exist yet, or may lack a permission the change adds.
+  # bootstrap.yml starts this workflow when its apply is done (or had nothing to apply),
+  # so here such a push steps aside instead of racing it. The paths are bootstrap.yml's.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      defer: ${{ steps.paths.outputs.defer }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: github.event_name == 'push'
+        with:
+          fetch-depth: 0
+
+      - name: Does this push change bootstrap?
+        id: paths
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          defer=false
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ -n "${BEFORE//0/}" ] \
+            && [ -n "$(git diff --name-only "$BEFORE" "$GITHUB_SHA" -- deploy/terraform/bootstrap .github/workflows/bootstrap.yml)" ]; then
+            defer=true
+            echo "::notice::This push changes bootstrap: production deploys when bootstrap.yml has applied it."
+          fi
+          echo "defer=$defer" >> "$GITHUB_OUTPUT"
+
   deploy:
+    needs: gate
+    if: needs.gate.outputs.defer != 'true'
     # arm64 runner matches the worker Lambda's Graviton architecture, so that
     # image builds natively; the smaller edge image cross-builds for amd64 via
     # QEMU (cheaper to emulate than the heavy worker image).

@@ -289,7 +289,7 @@ owner's approval of `production` or `bootstrap`, after which its log shows the p
 applies. The old stack is operated by `.github/workflows/legacy.yml` from
 `stages/legacy.tfvars`, as its own deploy role (`petbot-github-deploy`).
 
-1. **This change.** Merging it runs three pipelines; approve them in this order:
+1. **This change.** Merging it runs two pipelines, and bootstrap's starts a third; approve them in this order:
    - `bootstrap.yml`: three moves to `["legacy"]`; a role, policy and boundary each for
      `prod` and `dev`; the parameter statements added to legacy's policy; the operator's
      and the pipeline roles' updates (`petbot-prod-core`, `petbot-dev-core`,
@@ -300,9 +300,9 @@ applies. The old stack is operated by `.github/workflows/legacy.yml` from
    - `deploy.yml` (production): creates `petbot-prod-core`, its registry, role and log
      group, and `/petbot-prod/edge/discord_token` and `/petbot-prod/core/tavily_api_key`,
      copied from the legacy parameters (their values show as write-only, never printed). No
-     edge (`edge_enabled = false`); the legacy stack keeps serving Discord. If this run
-     reached AWS before bootstrap's apply, it failed to assume `petbot-github-deploy-prod`:
-     re-run it.
+     edge (`edge_enabled = false`); the legacy stack keeps serving Discord. The push's own
+     deploy run steps aside (its `gate` job sees bootstrap changed); `bootstrap.yml` starts
+     this one once its apply is done, so it never runs before its deploy role exists.
 
    Then talk to the new core, and deploy a branch to dev:
 

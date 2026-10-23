@@ -123,6 +123,12 @@ production. The environment sets the job's GitHub environment, the stage (`prod`
 its prefix, deploy role and settings file, and the state key `<prefix>/terraform.tfstate`;
 the edge is built when the settings enable it. Runs take turns per environment.
 
+A push that also changes the root of trust deploys only after bootstrap has applied it:
+`deploy.yml`'s `gate` job sees the bootstrap paths in the push and skips the deploy, and
+`bootstrap.yml` starts production's deploy once its apply succeeds (or its plan has
+nothing to apply). A deploy can't run against a role that doesn't exist yet or lacks a
+permission the same change adds, and nobody re-runs a failed one by hand.
+
 ### Talking to it: the harness's `--lambda`
 
 `python -m petbot.services.core.chat --lambda petbot-dev-core <conversation>` sends the
