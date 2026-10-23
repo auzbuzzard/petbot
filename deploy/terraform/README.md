@@ -40,6 +40,10 @@ Inactive/Pending function) on the core worker, and `dynamodb:PutItem` /
 message; see `claims.tf`). Its access key is injected into the
 container's environment (Lightsail container services have no IAM instance roles),
 and replaced every `edge_key_rotation_days` (default 90) on the next deploy after that.
+To replace it sooner, run the Deploy workflow by hand with **rotate_edge_key** ticked; it
+acts on the edge of the stage it deploys, and fails on a stage without one. Until the
+production cutover the live edge is the legacy stack's, which `legacy.yml` operates and
+which keeps rotating on its schedule.
 No public, unauthenticated surface exists, so there is no LLM cost-abuse vector.
 
 Both images live in **ECR**. The worker Lambda runs its image directly; the edge
