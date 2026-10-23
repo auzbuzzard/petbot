@@ -222,6 +222,22 @@ locals {
     for name, env in var.environments :
     name => env.legacy ? "${var.name_prefix}-github-deploy" : "${var.name_prefix}-github-deploy-${name}"
   }
+
+  # The resource names each environment's deploy role and workload boundary cover. The
+  # legacy prefix (petbot) contains every other environment's, so the legacy environment
+  # covers only its own two deployables' names and never a petbot-prod-* or petbot-dev-*
+  # resource.
+  env_name_patterns = {
+    for name, env in var.environments :
+    name => env.legacy ? ["${env.name_prefix}-core*", "${env.name_prefix}-edge*"] : ["${env.name_prefix}-*"]
+  }
+
+  # The workflow that may assume each deploy role: a job in its GitHub environment that
+  # runs any other workflow file is refused.
+  deploy_role_workflows = {
+    for name, env in var.environments :
+    "deploy-${name}" => env.legacy ? "legacy.yml" : "deploy.yml"
+  }
 }
 
 data "aws_iam_policy_document" "github_trust" {
@@ -245,6 +261,19 @@ data "aws_iam_policy_document" "github_trust" {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
       values   = ["repo:${var.github_repo}:environment:${each.value}"]
+    }
+
+    # A deploy role is assumed only by its workflow file, so a job elsewhere (another
+    # workflow on any branch) that names the same environment is refused. IfExists: GitHub
+    # documents job_workflow_ref for jobs in reusable workflows; where a token carries it,
+    # it must name this workflow.
+    dynamic "condition" {
+      for_each = contains(keys(local.deploy_role_workflows), each.key) ? [local.deploy_role_workflows[each.key]] : []
+      content {
+        test     = "StringLikeIfExists"
+        variable = "token.actions.githubusercontent.com:job_workflow_ref"
+        values   = ["${var.github_repo}/.github/workflows/${condition.value}@*"]
+      }
     }
   }
 }
@@ -312,7 +341,7 @@ data "aws_iam_policy_document" "workload_boundary" {
   statement {
     sid       = "InvokeStackFunctions"
     actions   = ["lambda:InvokeFunction", "lambda:GetFunctionConfiguration"]
-    resources = ["arn:aws:lambda:${local.arn_region}:function:${each.value.name_prefix}-*"]
+    resources = [for p in local.env_name_patterns[each.key] : "arn:aws:lambda:${local.arn_region}:function:${p}"]
   }
 
   statement {
@@ -324,7 +353,7 @@ data "aws_iam_policy_document" "workload_boundary" {
       "dynamodb:DeleteItem",
       "dynamodb:Query",
     ]
-    resources = ["arn:aws:dynamodb:${local.arn_region}:table/${each.value.name_prefix}-*"]
+    resources = [for p in local.env_name_patterns[each.key] : "arn:aws:dynamodb:${local.arn_region}:table/${p}"]
   }
 
   statement {
@@ -443,21 +472,21 @@ data "aws_iam_policy_document" "deploy_permissions" {
   statement {
     sid       = "ManageEcrRepos"
     actions   = ["ecr:*"]
-    resources = ["arn:aws:ecr:${local.arn_region}:repository/${each.value.name_prefix}-*"]
+    resources = [for p in local.env_name_patterns[each.key] : "arn:aws:ecr:${local.arn_region}:repository/${p}"]
   }
 
   statement {
     sid     = "ManageLambda"
     actions = ["lambda:*"]
     # The trailing wildcard also covers qualified ARNs (versions, aliases).
-    resources = ["arn:aws:lambda:${local.arn_region}:function:${each.value.name_prefix}-*"]
+    resources = [for p in local.env_name_patterns[each.key] : "arn:aws:lambda:${local.arn_region}:function:${p}"]
   }
 
   statement {
     sid     = "ManageLogs"
     actions = ["logs:*"]
     # The trailing wildcard also covers the groups' streams (":log-stream:...").
-    resources = ["arn:aws:logs:${local.arn_region}:log-group:/aws/lambda/${each.value.name_prefix}-*"]
+    resources = [for p in local.env_name_patterns[each.key] : "arn:aws:logs:${local.arn_region}:log-group:/aws/lambda/${p}"]
   }
 
   # logs:DescribeLogGroups is a list operation that AWS only authorizes on "*"
@@ -473,7 +502,7 @@ data "aws_iam_policy_document" "deploy_permissions" {
   statement {
     sid       = "ManageDynamoTables"
     actions   = ["dynamodb:*"]
-    resources = ["arn:aws:dynamodb:${local.arn_region}:table/${each.value.name_prefix}-*"]
+    resources = [for p in local.env_name_patterns[each.key] : "arn:aws:dynamodb:${local.arn_region}:table/${p}"]
   }
 
   # Budgets are account-wide (any budget/* is in scope), so only an environment that sets
@@ -499,7 +528,7 @@ data "aws_iam_policy_document" "deploy_permissions" {
       "iam:PutRolePolicy",
       "iam:DeleteRolePolicy",
     ]
-    resources = ["arn:aws:iam::${local.account_id}:role/${each.value.name_prefix}-*"]
+    resources = [for p in local.env_name_patterns[each.key] : "arn:aws:iam::${local.account_id}:role/${p}"]
     condition {
       test     = "StringEquals"
       variable = "iam:PermissionsBoundary"
@@ -519,7 +548,7 @@ data "aws_iam_policy_document" "deploy_permissions" {
       "iam:TagRole",
       "iam:UntagRole",
     ]
-    resources = ["arn:aws:iam::${local.account_id}:role/${each.value.name_prefix}-*"]
+    resources = [for p in local.env_name_patterns[each.key] : "arn:aws:iam::${local.account_id}:role/${p}"]
   }
 
   # PassRole is the classic privilege-escalation lever, so it is doubly fenced:
@@ -527,7 +556,7 @@ data "aws_iam_policy_document" "deploy_permissions" {
   statement {
     sid       = "PassStackRolesToLambda"
     actions   = ["iam:PassRole"]
-    resources = ["arn:aws:iam::${local.account_id}:role/${each.value.name_prefix}-*"]
+    resources = [for p in local.env_name_patterns[each.key] : "arn:aws:iam::${local.account_id}:role/${p}"]
     condition {
       test     = "StringEquals"
       variable = "iam:PassedToService"
@@ -549,7 +578,7 @@ data "aws_iam_policy_document" "deploy_permissions" {
         "iam:PutUserPolicy",
         "iam:DeleteUserPolicy",
       ]
-      resources = ["arn:aws:iam::${local.account_id}:user/${each.value.name_prefix}-*"]
+      resources = [for p in local.env_name_patterns[each.key] : "arn:aws:iam::${local.account_id}:user/${p}"]
       condition {
         test     = "StringEquals"
         variable = "iam:PermissionsBoundary"
@@ -574,7 +603,7 @@ data "aws_iam_policy_document" "deploy_permissions" {
         "iam:ListUserPolicies",
         "iam:ListAttachedUserPolicies",
       ]
-      resources = ["arn:aws:iam::${local.account_id}:user/${each.value.name_prefix}-*"]
+      resources = [for p in local.env_name_patterns[each.key] : "arn:aws:iam::${local.account_id}:user/${p}"]
     }
   }
 
@@ -615,12 +644,12 @@ resource "aws_iam_role_policy" "github_deploy" {
 }
 
 output "deploy_role_arns" {
-  description = "Each environment's deploy role: set as the DEPLOY_ROLE_ARN secret of its GitHub environment."
+  description = "Each environment's deploy role. deploy.yml derives each ARN from its role name (.github/scripts/deploy-role.sh), so nothing needs setting."
   value       = { for name, role in aws_iam_role.github_deploy : name => role.arn }
 }
 
-# The deploy role and boundary created before environments existed are the legacy
-# environment's, unchanged, until the stack they deploy is destroyed.
+# The unkeyed deploy role, its policy and the workload boundary map onto the legacy
+# environment's instances.
 moved {
   from = aws_iam_role.github_deploy
   to   = aws_iam_role.github_deploy["legacy"]

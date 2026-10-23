@@ -170,7 +170,8 @@ variable "ssm_parameters" {
     SecureString parameters this stack owns, by name under /<name_prefix>/, each mapped to
     the existing parameter its value is copied from when it is created: read through an
     ephemeral resource and written write-only, so the value reaches neither the plan nor the
-    state (parameters.tf). "" once it exists: it then keeps its own value.
+    state (parameters.tf). Once it exists it keeps its own value and no longer reads the
+    source (var.existing_ssm_parameters).
   EOT
   default     = {}
 
@@ -178,6 +179,12 @@ variable "ssm_parameters" {
     condition     = alltrue([for name in keys(var.ssm_parameters) : startswith(name, "/${var.name_prefix}/")])
     error_message = "Every owned parameter must be under /<name_prefix>/."
   }
+}
+
+variable "existing_ssm_parameters" {
+  type        = list(string)
+  description = "The names in var.ssm_parameters that already exist, so each reads its own value rather than its source. deploy.yml lists them before planning."
+  default     = []
 }
 
 # --- Retirement (read by .github/workflows/legacy.yml, not by resources) -----------

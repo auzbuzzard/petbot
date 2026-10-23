@@ -298,7 +298,10 @@ applies. The old stack is operated by `.github/workflows/legacy.yml` from
      `prod` and `dev`; the parameter statements added to legacy's policy; the operator's
      and the pipeline roles' updates (`petbot-prod-core`, `petbot-dev-core`,
      `petbot-bedrock-key`).
-   - `legacy.yml`: its plan moves ten edge resources to `[0]` and changes nothing. A
+   - `legacy.yml`, in two approvals: approving its `plan` job changes nothing and posts
+     the plan's resource changes to the run's summary; its `apply` job, approved after
+     you've read them, applies only that same plan. The plan moves ten edge resources
+     to `[0]` and changes nothing. A
      change in it means `stages/legacy.tfvars` doesn't describe the live stack: fix the
      file in a pull request rather than applying.
    - `deploy.yml` (production): creates `petbot-prod-core`, its registry, role and log
@@ -353,7 +356,10 @@ applies. The old stack is operated by `.github/workflows/legacy.yml` from
    `moved` blocks from `bootstrap/main.tf`, the `adopt_parameters` of `prod`, the
    `retiring_users` default and the `aws_iam_user.retired` block (with its import);
    delete `stages/legacy.tfvars`, `.github/workflows/legacy.yml` and the root `moved.tf`;
-   set the source of `/petbot-prod/edge/discord_token` in `stages/prod.tfvars` to `""`.
+   set both sources in `stages/prod.tfvars`'s `ssm_parameters` to `""`. That only tidies
+   the file: each copy already reads its own value once it exists (`deploy.yml` lists the
+   existing ones before planning), which is why step 3 deleting the sources can't break a
+   production deploy.
    Bootstrap's plan deletes `petbot-github-deploy`, its policy, `petbot-workload-boundary`
    (no longer attached) and the `petbot-bedrock-key` user, with its policies and its
    service-specific credential (`force_destroy`).

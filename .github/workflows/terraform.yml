@@ -41,6 +41,10 @@ jobs:
       - name: Test (root stack)
         run: terraform -chdir=deploy/terraform test
 
+      # The real stages/*.tfvars: no undeclared setting, and each plans offline.
+      - name: Check the stage files
+        run: bash .github/scripts/check-stage-files.sh
+
       - name: Validate (bootstrap stack)
         run: |
           terraform -chdir=deploy/terraform/bootstrap init -backend=false

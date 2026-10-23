@@ -116,3 +116,38 @@ run "legacy_may_contain_the_stages" {
     }
   }
 }
+
+run "legacy_covers_only_its_own_resources" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["legacy"].statement), "function:petbot-core*"),
+      strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["legacy"].statement), "repository/petbot-edge*"),
+      !strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["legacy"].statement), "function:petbot-*\""),
+      !strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["legacy"].statement), "role/petbot-*\""),
+      !strcontains(aws_iam_policy.workload_boundary["legacy"].policy, "function:petbot-*\""),
+    ])
+    error_message = "The legacy role and boundary must not cover petbot-* (which holds petbot-prod-* and petbot-dev-*)."
+  }
+
+  assert {
+    condition     = strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["prod"].statement), "function:petbot-prod-*")
+    error_message = "A stage's role covers its own prefix."
+  }
+}
+
+run "deploy_roles_are_pinned_to_their_workflow" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      strcontains(jsonencode(data.aws_iam_policy_document.github_trust["deploy-dev"].statement), "auzbuzzard/petbot/.github/workflows/deploy.yml@*"),
+      strcontains(jsonencode(data.aws_iam_policy_document.github_trust["deploy-prod"].statement), "auzbuzzard/petbot/.github/workflows/deploy.yml@*"),
+      strcontains(jsonencode(data.aws_iam_policy_document.github_trust["deploy-legacy"].statement), "auzbuzzard/petbot/.github/workflows/legacy.yml@*"),
+      strcontains(jsonencode(data.aws_iam_policy_document.github_trust["deploy-dev"].statement), "StringLikeIfExists"),
+      !strcontains(jsonencode(data.aws_iam_policy_document.github_trust["bootstrap-apply"].statement), "job_workflow_ref"),
+    ])
+    error_message = "Each deploy role trusts only its workflow file; the bootstrap pipeline roles are unchanged."
+  }
+}
