@@ -75,8 +75,8 @@ class LeetCodeArgs(Frozen):
 
     mode: LeetCodeMode | None = Field(
         default=None,
-        description="'daily' for today's daily problem, 'random' for any other. Defaults to "
-        "'random' when a difficulty is given, else 'daily'.",
+        description="'daily' for today's daily problem; 'random' for any other problem. With no "
+        "mode, a difficulty means 'random' and no difficulty means 'daily'.",
     )
     difficulty: LeetCodeDifficulty | None = Field(
         default=None, description="For a random problem: only this difficulty."
