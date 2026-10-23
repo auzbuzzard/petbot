@@ -1,6 +1,6 @@
 # ADR 0013: LeetCode skill — direct GraphQL, no client library
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-22
 - Builds on the skill recipe in [ADR 0006](0006-gateway-edge-microservice-skills.md)
   and skills-as-agent-tools in [ADR 0007](0007-llm-agent-pydantic-ai.md).
@@ -93,6 +93,9 @@ Labelled by source class, because the result turns on where the request originat
   `leetcode-daily.json` fixture should pass against the live model.
 - Schema drift (the query is community-derived, not an official contract) is the standing
   risk, bounded by the mocked tests and the fallback seam.
+- The open Lambda-origin question is settled on the dev core ([ADR 0014](0014-dev-core-environment.md)):
+  deploy the branch there and run `python -m petbot.services.core.chat --lambda
+  petbot-dev-core conversations/leetcode-daily.json`, whose calls leave from an AWS IP.
 - If the direct call is observed failing from the deployed runtime, the fix is to implement
   the deferred fallback provider behind the seam — not to re-architect the skill.
 - Account-scoped features stay out until there is a reason to take on authenticated,
