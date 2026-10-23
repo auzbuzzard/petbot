@@ -44,6 +44,12 @@ override_resource {
   values          = { arn = "arn:aws:iam::123456789012:user/claude" }
 }
 
+override_resource {
+  target          = aws_iam_policy.workload_boundary
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:policy/BOUNDARY" }
+}
+
 run "each_stage_gets_its_own_role_and_boundary" {
   command = plan
 
@@ -68,6 +74,22 @@ run "each_stage_gets_its_own_role_and_boundary" {
       strcontains(aws_iam_policy.workload_boundary["dev"].policy, "bedrock-mantle:CreateInference"),
     ])
     error_message = "Each boundary covers its own stage only."
+  }
+
+  assert {
+    condition = alltrue([
+      strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["prod"].statement), "parameter/petbot/edge/discord_token"),
+      !strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["dev"].statement), "parameter/petbot/"),
+      !strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["dev"].statement), "petbot-prod"),
+      !strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["prod"].statement), "petbot-dev"),
+      !strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["dev"].statement), "lightsail"),
+    ])
+    error_message = "Prod may read only the legacy token it adopts; neither stage's deploy role reaches the other."
+  }
+
+  assert {
+    condition     = strcontains(jsonencode(data.aws_iam_policy_document.bootstrap_apply.statement), "user/petbot-bedrock-key")
+    error_message = "Bootstrap's pipeline may manage the user it retires."
   }
 }
 

@@ -3,12 +3,13 @@ name: Deploy
 # Build + push the core worker image (arm64) and the edge image (amd64) to ECR,
 # then terraform apply — entirely from CI via GitHub OIDC (no static AWS keys).
 # The Lightsail edge pulls its image from ECR (private-registry access). See
-# deploy/terraform/README.md. A push to main deploys `production`, whose deploy role
-# trusts only jobs in that environment (which admits only main). A manual run may pick
-# `dev` instead: the dispatched branch's core, alone (no edge), into its own stack with
-# its own deploy role, to talk to through the chat harness before it merges (see
-# docs/adr/0014). The root of trust itself is applied by bootstrap.yml. Actions are
-# pinned to commit SHAs: this job holds AWS credentials.
+# deploy/terraform/README.md. A push to main deploys `production` (the prod stage), whose
+# deploy role trusts only jobs in that environment (which admits only main). A manual run
+# may pick `dev` instead: the dispatched branch's core, alone (no edge), into its own stack
+# with its own deploy role, to talk to through the chat harness before it merges (see
+# docs/adr/0014). Each stage's settings are code (deploy/terraform/stages/<stage>.tfvars).
+# The root of trust itself is applied by bootstrap.yml. Actions are pinned to commit SHAs:
+# this job holds AWS credentials.
 on:
   workflow_dispatch:
     inputs:
@@ -38,76 +39,54 @@ jobs:
     runs-on: ubuntu-24.04-arm
     # Each deploy role's trust names its environment. `production` admits only main and
     # needs a required reviewer's approval, so a merge alone ships nothing; a push always
-    # deploys there.
+    # deploys there. `dev` is created by the first run that references it, with no rules.
     environment: ${{ inputs.environment || 'production' }}
     env:
       TF_DIR: deploy/terraform
       DEPLOY_ENV: ${{ inputs.environment || 'production' }}
-      # Deploy config, read by Terraform as TF_VAR_*; secret *values* stay in SSM,
-      # referenced by name. AWS_REGION is a repository variable (bootstrap.yml reads it
-      # too); the rest are the deploy environment's. The state bucket and the role
-      # ARN carry the account ID, so they are read as secrets, which the public log masks;
-      # a variable of the same name stands in while no secret is set, unmasked.
-      # Job-level, because only a job that references an environment sees its variables.
+      # AWS_REGION is a repository variable (bootstrap.yml reads it too). The state bucket
+      # carries the account ID, so it is a secret, which the public log masks; a variable of
+      # the same name stands in while no secret is set, unmasked.
       TF_VAR_aws_region: ${{ vars.AWS_REGION }}
-      TF_VAR_chat_llm_kind: ${{ vars.CHAT_LLM_KIND }}
-      TF_VAR_chat_llm_model: ${{ vars.CHAT_LLM_MODEL }}
-      TF_VAR_chat_llm_base_url: ${{ vars.CHAT_LLM_BASE_URL }}
-      TF_VAR_chat_llm_api_key_ssm_parameter: ${{ vars.CHAT_LLM_API_KEY_SSM_PARAMETER }}
-      # Optional: the web_search tool's Tavily key (unset => keyless ddgs search only).
-      TF_VAR_tavily_api_key_ssm_parameter: ${{ vars.TAVILY_API_KEY_SSM_PARAMETER }}
-      # Observability (off unless OBSERVABILITY_ENABLED is set to "true"). The `|| 'default'`
-      # fallbacks matter: an unset GitHub Variable renders as an empty string, and Terraform
-      # would reject "" for a bool/number var — so an unset Variable resolves to the
-      # variable's default.
-      TF_VAR_observability_enabled: ${{ vars.OBSERVABILITY_ENABLED || 'false' }}
-      TF_VAR_observability_sample_ratio: ${{ vars.OBSERVABILITY_SAMPLE_RATIO || '1.0' }}
-      TF_VAR_telemetry_id_salt_ssm_parameter: ${{ vars.TELEMETRY_ID_SALT_SSM_PARAMETER }}
+      STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      # Each environment's stack: its resource prefix (bootstrap's var.environments names
-      # the same one, which its deploy role is scoped to), its state, and whether it runs
-      # the edge. Production's edge follows the `production` variable EDGE_ENABLED (unset:
-      # on), which holds it off while its core runs beside the stack it replaces
-      # (docs/adr/0014, "Migrating production"): two edges would both answer every message.
-      - name: Environment
-        env:
-          EDGE_ENABLED: ${{ vars.EDGE_ENABLED || 'true' }}
+      # Each environment's stage: its resource prefix and deploy role (bootstrap's
+      # var.environments names the same), its state and its settings file. Terraform reads
+      # the settings for every command through TF_CLI_ARGS_<command>.
+      - name: Stage
         run: |
           case "$DEPLOY_ENV" in
-            production) prefix=petbot-prod; edge=$EDGE_ENABLED; lambda_env=prod ;;
-            dev) prefix=petbot-dev; edge=false; lambda_env=dev ;;
+            production) stage=prod ;;
+            dev) stage=dev ;;
             *) echo "::error::Unknown environment: $DEPLOY_ENV"; exit 1 ;;
           esac
-          case "$edge" in
-            true | false) ;;
-            *) echo "::error::EDGE_ENABLED must be true or false, not $edge"; exit 1 ;;
-          esac
           {
-            echo "TF_STATE_KEY=$prefix/terraform.tfstate"
-            echo "TF_VAR_name_prefix=$prefix"
-            echo "TF_VAR_edge_enabled=$edge"
-            echo "TF_VAR_lambda_environment=$lambda_env"
-            echo "EDGE=$edge"
+            echo "STAGE=$stage"
+            echo "TF_STATE_KEY=petbot-$stage/terraform.tfstate"
+            echo "TF_VAR_name_prefix=petbot-$stage"
+            echo "TF_CLI_ARGS_apply=-var-file=stages/$stage.tfvars"
+            echo "TF_CLI_ARGS_console=-var-file=stages/$stage.tfvars"
           } >> "$GITHUB_ENV"
+
+      - name: Deploy role
+        env:
+          ROLE_ARN_SECRET: ${{ secrets.DEPLOY_ROLE_ARN }}
+        run: bash .github/scripts/deploy-role.sh "petbot-github-deploy-$STAGE"
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
-          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN || vars.DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.DEPLOY_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}
           # The log is public: mask the account ID in every ARN, URL and name after this.
           mask-aws-account-id: true
 
-      # buildx for the gha layer cache; QEMU for the amd64 edge build on arm.
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
-        if: env.EDGE == 'true'
-
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
           terraform_version: "1.11.4"
+          terraform_wrapper: false
 
       - name: Image tag (short git SHA)
         run: echo "IMAGE_TAG=${GITHUB_SHA::12}" >> "$GITHUB_ENV"
@@ -116,11 +95,20 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: |
           terraform init \
-            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}" \
+            -backend-config="bucket=$STATE_BUCKET" \
             -backend-config="key=$TF_STATE_KEY" \
             -backend-config="region=${{ vars.AWS_REGION }}" \
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
+
+      - name: Edge
+        working-directory: ${{ env.TF_DIR }}
+        run: echo "EDGE=$(echo 'var.edge_enabled' | terraform console)" >> "$GITHUB_ENV"
+
+      # buildx for the gha layer cache; QEMU for the amd64 edge build on arm.
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        if: env.EDGE == 'true'
 
       # The function is pinned to its image digest, and the edge service must grant
       # ECR-pull access before the deployment is created — so stand up the two ECR

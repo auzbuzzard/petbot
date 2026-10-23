@@ -164,6 +164,36 @@ variable "booru_ssm_parameters" {
   default     = {}
 }
 
+variable "ssm_parameters" {
+  type        = map(string)
+  description = <<-EOT
+    SecureString parameters this stack owns, by name under /<name_prefix>/, each mapped to
+    the existing parameter its value is copied from when it is created: read through an
+    ephemeral resource and written write-only, so the value reaches neither the plan nor the
+    state (parameters.tf). "" once it exists: it then keeps its own value.
+  EOT
+  default     = {}
+
+  validation {
+    condition     = alltrue([for name in keys(var.ssm_parameters) : startswith(name, "/${var.name_prefix}/")])
+    error_message = "Every owned parameter must be under /<name_prefix>/."
+  }
+}
+
+# --- Retirement (read by .github/workflows/legacy.yml, not by resources) -----------
+
+variable "retired" {
+  type        = bool
+  description = "This stack is to be destroyed: its pipeline destroys it, deletes retired_parameters and its state."
+  default     = false
+}
+
+variable "retired_parameters" {
+  type        = list(string)
+  description = "Parameters under /<name_prefix>/ made outside Terraform, deleted after a retired stack is destroyed."
+  default     = []
+}
+
 # --- Retention / cost controls ------------------------------------------------
 
 variable "log_retention_days" {
@@ -212,6 +242,12 @@ variable "discord_token_ssm_parameter" {
   type        = string
   description = "SSM SecureString holding the edge's Discord bot token, read by the edge at start. Empty => /<name_prefix>/edge/discord_token."
   default     = ""
+}
+
+variable "edge_paused" {
+  type        = bool
+  description = "Disable the edge's Lightsail service: its containers shut down and it leaves the Discord gateway, while every resource stays. Re-enabling is setting it back."
+  default     = false
 }
 
 variable "edge_power" {

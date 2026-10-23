@@ -65,20 +65,44 @@ stage and keeps its names: the CI roles (`petbot-github-*`), the operator
 (`petbot-operator`), the OIDC provider and the state bucket.
 
 The root stack's edge (Lightsail service and deployment, edge ECR repo, edge IAM user, key
-and policies, claims table) is counted on `var.edge_enabled`. A dev apply creates the
-core's ECR repo, role, log group and Lambda (`petbot-dev-core`) and nothing else. A
-mock-provider `terraform test` plans both stages in CI. The edge's Discord-token parameter
-defaults to `/<name_prefix>/edge/discord_token`.
+and policies, claims table) is counted on `var.edge_enabled`, and `var.edge_paused`
+disables its Lightsail service in place (its containers shut down: documented, Lightsail
+API). A dev apply creates the core's ECR repo, role, log group and Lambda
+(`petbot-dev-core`) and nothing else. The edge's Discord-token parameter defaults to
+`/<name_prefix>/edge/discord_token`.
+
+### Every setting is code: `stages/<stage>.tfvars`
+
+Infrastructure changes only by merging code and running the repository's pipelines; no
+one creates or edits a resource or a setting by hand. Each stage's deploy settings (model,
+endpoint, whether the edge runs, its parameters) are a reviewed file,
+`deploy/terraform/stages/<stage>.tfvars`, which `deploy.yml` passes to every Terraform
+command; the pipeline reads no GitHub variable but the repository's `AWS_REGION`.
+
+A secret the stack needs but can't mint is a parameter the stack owns
+(`var.ssm_parameters`, `parameters.tf`), created with the value of an existing one: read
+through an ephemeral resource and written with the write-only `value_wo`, so it reaches
+neither the plan nor the state.
+
+The only value the pipelines take from GitHub's settings is the AWS account ID, which the
+public code leaves out: each deploy role's name is code, and `.github/scripts/deploy-role.sh`
+builds its ARN with the account ID from the environment's `DEPLOY_ROLE_ARN` secret where
+one exists (`production`), else from the state bucket's name, which ends in it
+(`petbot-tfstate-<account-id>`; inference from the README's naming, not verified against
+the live bucket: the first dev deploy shows it, and fails at that step if not). The `dev`
+GitHub environment is created by the first run that references it, with no protection
+rules, so it admits every branch (documented: GitHub, *Using environments for deployment*).
 
 ### Bootstrap: one root of trust, an environment map
 
 `bootstrap/`'s `var.environments` lists each stage: `name_prefix`, its GitHub environment,
-and whether it runs the edge, sets a budget, calls mantle. Each gets a deploy role trusting
-only its GitHub environment (`petbot-github-deploy-prod` from `production`,
-`petbot-github-deploy-dev` from `dev`), its own workload boundary, and a deploy policy
-scoped to its prefix; the edge's IAM-user and Lightsail rights and Budgets only where they
-apply. One bootstrap manages all of them, so the account-global GitHub OIDC provider stays
-one resource with no toggle. The operator may invoke each stage's core.
+and whether it runs the edge, sets a budget, calls mantle, and which outside parameters it
+may read to copy. Each gets a deploy role trusting only its GitHub environment
+(`petbot-github-deploy-prod` from `production`, `petbot-github-deploy-dev` from `dev`), its
+own workload boundary, and a deploy policy scoped to its prefix, including its own
+`/<name_prefix>/*` parameters; the edge's IAM-user and Lightsail rights and Budgets only
+where they apply. One bootstrap manages all of them, so the account-global GitHub OIDC
+provider stays one resource with no toggle. The operator may invoke each stage's core.
 
 The `dev` GitHub environment admits **every branch**: deploying an unmerged branch is the
 point. Its role is the control: `petbot-dev-*` matches nothing else, and it has no
@@ -87,17 +111,17 @@ Lightsail (whose GUID ARNs can't be name-scoped), IAM-user or Budgets rights.
 A third, transitional entry, `legacy` (`name_prefix = "petbot"`), is the production stack
 as it stands: its role keeps the name `petbot-github-deploy`, and `moved` blocks keep that
 role, its policy and `petbot-workload-boundary` in place. Rendered offline against the
-code before this change, with fake credentials, they are identical. It is exempt from the
-containment rule and is removed once the stack it deploys is destroyed (below).
+code before this change, with fake credentials: the role, its trust and the boundary are
+identical, and its policy only gains the parameter statements every stage has (manage
+`/petbot/*`, which its retirement uses). It is exempt from the containment rule and is
+removed once the stack it deploys is destroyed (below).
 
 ### Deploy: `deploy.yml`'s `environment` input
 
 A manual run picks `production` (default) or `dev`; a push to `main` always deploys
-production. The environment sets the job's GitHub environment (so its role and variables),
-the prefix (`petbot-prod` | `petbot-dev`), the state key `<prefix>/terraform.tfstate` and
-whether the edge is built: never for dev; for production unless its variable
-`EDGE_ENABLED` is `false`, which holds a new production core's edge off while the old
-stack still serves. Runs take turns per environment.
+production. The environment sets the job's GitHub environment, the stage (`prod` | `dev`),
+its prefix, deploy role and settings file, and the state key `<prefix>/terraform.tfstate`;
+the edge is built when the settings enable it. Runs take turns per environment.
 
 ### Talking to it: the harness's `--lambda`
 
@@ -110,48 +134,43 @@ failed dispatch gets the frontend's fallback reply. In-process remains the defau
 A Lambda's, ECR repository's, IAM role's or user's, DynamoDB table's and Lightsail
 service's name can't change in place; a new name is a new resource. So the `petbot-prod`
 stack is built **beside** the `petbot` one, in its own state, the edge is cut over, and
-then the old stack is destroyed. Nothing is applied until the user approves each step; the
-commands are in `deploy/terraform/README.md`, "Migrating production to petbot-prod".
+then the old stack is destroyed. Each step is a pull request; merging it runs the
+pipelines, and each run waits for the owner's approval of a gated environment
+(`production`, `bootstrap`) before it changes anything. The old stack is operated by its
+own workflow, `legacy.yml`, from `stages/legacy.tfvars`. The pull requests are listed in
+`deploy/terraform/README.md`, "Migrating production to petbot-prod".
 
 | Resource | Today (`petbot`) | After (`petbot-prod`) | How |
 | --- | --- | --- | --- |
-| Core Lambda, role, log group | `petbot-core`, `petbot-core-role`, `/aws/lambda/petbot-core` | `petbot-prod-core`, … | new, beside the old; old destroyed with its stack. Its logs (30-day retention) go with it unless exported first |
-| ECR repos | `petbot-core`, `petbot-edge` | `petbot-prod-core`, `petbot-prod-edge` | new; CI pushes fresh images. The old images are deleted with their repos (`force_delete`): a rollback past the migration redeploys a commit rather than an old image |
-| Lightsail service | `petbot-edge` | `petbot-prod-edge` | new; the cutover. Its private `.service.local` name changes; nothing dials the edge, so nothing depends on it |
-| Edge IAM user and key | `petbot-edge` | `petbot-prod-edge` | new user, new key; the old ones are destroyed with their stack |
+| Core Lambda, role, log group | `petbot-core`, `petbot-core-role`, `/aws/lambda/petbot-core` | `petbot-prod-core`, … | new, beside the old; old destroyed with its stack, and its logs (30-day retention) with it |
+| ECR repos | `petbot-core`, `petbot-edge` | `petbot-prod-core`, `petbot-prod-edge` | new; CI pushes fresh images. The old images go with their repos (`force_delete`): a rollback past the migration redeploys a commit, not an old image |
+| Lightsail service | `petbot-edge` | `petbot-prod-edge` | new; the cutover. Its private `.service.local` name changes; nothing dials the edge |
+| Edge IAM user and key | `petbot-edge` | `petbot-prod-edge` | new user, new key; the old ones go with their stack |
 | Claims table | `petbot-edge-claims` | `petbot-prod-edge-claims` | new; its claims expire within the hour (TTL), so nothing carries over |
 | Budget, X-Ray log policy (if enabled) | `petbot-monthly`, `petbot-xray-transaction-search` | `petbot-prod-…` | new |
-| SSM: Discord token | `/petbot/edge/discord_token` | `/petbot-prod/edge/discord_token` | value copied by the user; old deleted after |
-| SSM: Bedrock API key | `/petbot/core/bedrock_api_key` | none | retired: production switches to `bedrock_mantle`. Its hand-made `petbot-bedrock-key` IAM user's credential can then be deleted |
-| SSM: optional keys (Tavily, salt, boorus), if set | `/petbot/core/…` | `/petbot-prod/core/…` | copied, and the `production` variables repointed |
-| State | `petbot/terraform.tfstate` | `petbot-prod/terraform.tfstate` | new; the old one is emptied by the destroy, then may be deleted |
-| Deploy role, boundary | `petbot-github-deploy`, `petbot-workload-boundary` (scope `petbot-*`) | `petbot-github-deploy-prod`, `petbot-prod-workload-boundary` | created by bootstrap now; the old pair is `legacy` until its stack is gone (a boundary can't be deleted while attached), then removed by a bootstrap PR |
-| GitHub environment | `production` | `production` | kept; its `DEPLOY_ROLE_ARN` secret and model variables change |
-
-**Order.** (1) Before merging, set `production`'s `EDGE_ENABLED=false`, so the deploy the
-merge starts brings up no second edge. (2) Merge; approve bootstrap's run once its plan
-shows the three moves to `legacy`, the new prod and dev roles, policies and boundaries, and
-the operator's update. (3) Repoint `production` (role ARN, `bedrock_mantle`, parameter
-names) and copy the parameters; then let production deploy: `petbot-prod-core` and its
-registry come up beside the live stack, which keeps serving untouched. (4) Talk to
-`petbot-prod-core` with `--lambda`. (5) Cut over. (6) After a soak, destroy the old stack,
-delete the old parameters and state, and land the bootstrap PR removing `legacy`.
+| SSM: Discord token | `/petbot/edge/discord_token` | `/petbot-prod/edge/discord_token` | copied by the prod stack (`ssm_parameters`, write-only); the old one deleted by `legacy.yml` after the destroy |
+| SSM: Bedrock API key | `/petbot/core/bedrock_api_key` | none | production moves to `bedrock_mantle`; deleted by `legacy.yml` |
+| SSM: optional keys (Tavily, salt, boorus), if production sets them | `/petbot/core/…` | `/petbot-prod/core/…` | copied the same way, if listed in `stages/prod.tfvars` and bootstrap's `adopt_parameters` |
+| Hand-made Bedrock key user | `petbot-bedrock-key` (outside Terraform) | none | bootstrap imports it (`import` block), then deletes it by removing the resource; `force_destroy` takes its policies and service-specific credentials (verified: provider source) |
+| State | `petbot/terraform.tfstate` | `petbot-prod/terraform.tfstate` | new; the old object deleted by `legacy.yml` after the destroy |
+| Deploy role, boundary | `petbot-github-deploy`, `petbot-workload-boundary` (scope `petbot-*`) | `petbot-github-deploy-prod`, `petbot-prod-workload-boundary` | created by bootstrap now; the old pair is `legacy` until its stack is gone (a boundary can't be deleted while attached), then removed |
+| GitHub environment | `production` | `production` | kept; nothing in it changes |
 
 **Cutover and downtime.** Two connected edges would both answer every message (each claims
-it in its own table), so the old edge stops before the new one starts: disable the old
-Lightsail service (its containers shut down: documented, Lightsail API), then deploy
-production with `EDGE_ENABLED` unset. PetBot is offline in Discord from the disable until
-the new container connects: one production deploy run, which builds both images (cached),
-creates the Lightsail service and pushes the deployment. No duration has been measured
-here. The alternative is no downtime at the cost of duplicates: start the new edge first
-and disable the old one once the new one is connected, so messages in between get two
-answers. Rollback, while the old stack exists: set `EDGE_ENABLED=false` and redeploy
-production (removing the new edge), and re-enable the old service. Whether re-enabling
-restarts its last deployment is not documented in what was checked; if it doesn't, the old
-stack's last deployment is recreated from the console or CLI.
+it in its own table), so the old edge is paused (`edge_paused = true` in
+`stages/legacy.tfvars`, applied by `legacy.yml`) and the new one enabled
+(`edge_enabled = true` in `stages/prod.tfvars`, applied by `deploy.yml`) in one pull
+request. Both runs wait for approval, so their order is the owner's: approving the pause
+first means PetBot is offline in Discord until the production run finishes and its
+container connects (one deploy run: both images built, cached; the Lightsail service
+created; the deployment pushed; no duration measured here); approving production first
+means no downtime, but messages sent while both are connected get two answers. Rollback,
+while the old stack exists, is reverting that pull request: the new edge is removed and the
+old service re-enabled. Whether re-enabling restarts its last deployment is not documented
+in what was checked; `legacy.yml`'s plan of the revert shows what it will do.
 
-**Between merge and cutover**, `main` deploys to `petbot-prod`, not to the stack serving
-Discord: keep that window short.
+**Between the first merge and the cutover**, `main` deploys to `petbot-prod`, not to the
+stack serving Discord: keep that window short.
 
 ## Consequences
 
@@ -163,6 +182,13 @@ Discord: keep that window short.
 - Dev is one slot: each deploy replaces the last.
 - Anyone who can push a branch can run code with the dev role and the dev core's role.
   Their reach is dev's resources and the model (cost: inference tokens).
-- GitHub's environment settings (`dev`'s branch rule, each environment's `DEPLOY_ROLE_ARN`
-  secret and model variables, `EDGE_ENABLED`) are set by hand, as for the existing
-  environments.
+- GitHub's own settings stay outside this code: the existing environments' protection
+  rules, the `TF_STATE_BUCKET` and `DEPLOY_ROLE_ARN` secrets the pipelines read, and the
+  GitHub variables `deploy.yml` no longer reads (stale, harmless). Managing them as code
+  takes the Terraform GitHub provider and a GitHub credential with admin rights on the
+  repository, which GitHub only issues through its web interface (a GitHub App or a
+  token): one hand step, like bootstrap's first apply, that this ADR does not take.
+- A secret that exists nowhere in AWS yet (a new third-party key) can't enter from code:
+  the third party issues it to a person. Copying covers every secret production has today;
+  a new one would need a source the pipeline can read (for instance the 1Password
+  Development vault through a service-account token, itself one hand-made credential).

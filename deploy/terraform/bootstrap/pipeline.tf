@@ -17,6 +17,17 @@ variable "bootstrap_plan_environment" {
   default     = "bootstrap-plan"
 }
 
+variable "retiring_users" {
+  type        = list(string)
+  description = <<-EOT
+    IAM users made outside Terraform that this stack adopts (an import) and then deletes
+    (removing the resource; force_destroy takes their keys, credentials and policies), so
+    a hand-made identity is retired through the reviewed pipeline. Listed here first, so
+    the pipeline roles may read and manage them before the import is planned.
+  EOT
+  default     = ["petbot-bedrock-key"]
+}
+
 variable "bootstrap_apply_environment" {
   type        = string
   description = "GitHub environment, with a required reviewer, whose jobs may assume the bootstrap apply role."
@@ -39,6 +50,7 @@ locals {
       for env in values(var.environments) : "arn:aws:iam::${local.account_id}:policy/${env.name_prefix}-workload-boundary"
       if !startswith("${env.name_prefix}-", "${var.name_prefix}-")
     ],
+    [for name in var.retiring_users : "arn:aws:iam::${local.account_id}:user/${name}"],
   )
 
   # Each pipeline role and its policy; the trust is github_trust["bootstrap-<key>"].

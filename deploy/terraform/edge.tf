@@ -26,6 +26,9 @@ resource "aws_lightsail_container_service" "edge" {
   power = var.edge_power
   scale = var.edge_scale
 
+  # A disabled service shuts its containers down, so the edge leaves the Discord gateway.
+  is_disabled = var.edge_paused
+
   # Activating this creates an AWS-managed ECR "image puller" principal for the
   # service; we grant it read on the edge repo below. (Same-Region requirement:
   # the repo and the service are both in var.aws_region.)
@@ -104,7 +107,7 @@ resource "aws_lightsail_container_service_deployment_version" "edge" {
     }, local.observability_edge_env)
   }
 
-  depends_on = [aws_ecr_repository_policy.edge, aws_iam_user_policy.edge_secrets]
+  depends_on = [aws_ecr_repository_policy.edge, aws_iam_user_policy.edge_secrets, aws_ssm_parameter.owned]
 }
 
 # --- The edge's scoped AWS identity -------------------------------------------

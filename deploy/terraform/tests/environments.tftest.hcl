@@ -1,17 +1,28 @@
-# Plans the stack offline (mock providers: no credentials, no AWS calls) for each kind of
-# environment: production runs the edge; a dev core runs alone, on the mantle endpoint with
-# its own IAM role and no key.
+# Plans the stack offline for each kind of environment: production runs the edge; a dev core
+# runs alone, on the mantle endpoint with its own IAM role and no key. The AWS provider has
+# fake credentials and makes no calls (the account ID and the image digest are overridden);
+# the IAM documents render from this code.
 
-mock_provider "aws" {
-  mock_data "aws_caller_identity" {
-    defaults = { account_id = "123456789012" }
-  }
-  mock_data "aws_iam_policy_document" {
-    defaults = { json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}" }
-  }
+provider "aws" {
+  region                      = "us-east-1"
+  access_key                  = "mock"
+  secret_key                  = "mock"
+  skip_credentials_validation = true
+  skip_requesting_account_id  = true
+  skip_metadata_api_check     = true
 }
 
 mock_provider "time" {}
+
+override_data {
+  target = data.aws_caller_identity.current
+  values = { account_id = "123456789012" }
+}
+
+override_data {
+  target = data.aws_ecr_image.this
+  values = { image_digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+}
 
 variables {
   chat_llm_model    = "google.gemma-4-31b"
@@ -120,4 +131,30 @@ run "mantle_needs_its_endpoint" {
   }
 
   expect_failures = [aws_lambda_function.this]
+}
+
+run "a_parameter_outside_the_prefix_is_rejected" {
+  command = plan
+
+  variables {
+    chat_llm_kind  = "bedrock_mantle"
+    edge_enabled   = false
+    ssm_parameters = { "/petbot-dev/edge/discord_token" = "" }
+  }
+
+  expect_failures = [var.ssm_parameters]
+}
+
+run "the_edge_can_be_paused_in_place" {
+  command = plan
+
+  variables {
+    chat_llm_kind = "bedrock_mantle"
+    edge_paused   = true
+  }
+
+  assert {
+    condition     = aws_lightsail_container_service.edge[0].is_disabled
+    error_message = "Pausing disables the edge's service."
+  }
 }

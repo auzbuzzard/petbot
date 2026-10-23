@@ -70,6 +70,9 @@ variable "environments" {
     # Whether its workloads may call Bedrock's mantle endpoint with their own IAM identity
     # (the root stack's chat_llm_kind = "bedrock_mantle").
     bedrock_mantle = optional(bool, false)
+    # Parameters outside its prefix that its stack copies into its own (the root stack's
+    # var.ssm_parameters): its deploy role may read exactly these.
+    adopt_parameters = optional(list(string), [])
     # The stack from before environments, under the bare prefix: its role keeps the name
     # petbot-github-deploy, and its prefix may contain the others'. It exists only until
     # that stack is destroyed (docs/adr/0014, "Migrating production").
@@ -81,6 +84,7 @@ variable "environments" {
       name_prefix        = "petbot-prod"
       github_environment = "production"
       bedrock_mantle     = true
+      adopt_parameters   = ["/petbot/edge/discord_token"]
     }
     dev = {
       name_prefix        = "petbot-dev"
@@ -383,12 +387,44 @@ data "aws_iam_policy_document" "deploy_permissions" {
     resources = ["arn:aws:ssm:${local.arn_region}:parameter/${each.value.name_prefix}/*"]
   }
 
-  # SecureString parameters are KMS-encrypted; reading them with decryption needs
-  # kms:Decrypt. Scoped via kms:ViaService so the role can only use KMS through
+  # The stack's own parameters, under /<name_prefix>/ (the root stack's ssm_parameters,
+  # and a retired stack's removal of its parameters). Listing has no resource form.
+  statement {
+    sid = "ManageStackParameters"
+    actions = [
+      "ssm:PutParameter",
+      "ssm:DeleteParameter",
+      "ssm:DeleteParameters",
+      "ssm:AddTagsToResource",
+      "ssm:RemoveTagsFromResource",
+      "ssm:ListTagsForResource",
+    ]
+    resources = ["arn:aws:ssm:${local.arn_region}:parameter/${each.value.name_prefix}/*"]
+  }
+
+  statement {
+    sid       = "DescribeParameters"
+    actions   = ["ssm:DescribeParameters"]
+    resources = ["*"]
+  }
+
+  dynamic "statement" {
+    for_each = length(each.value.adopt_parameters) > 0 ? [1] : []
+    content {
+      sid     = "ReadAdoptedParameters"
+      actions = ["ssm:GetParameter", "ssm:GetParameters"]
+      resources = [
+        for name in each.value.adopt_parameters : "arn:aws:ssm:${local.arn_region}:parameter/${trimprefix(name, "/")}"
+      ]
+    }
+  }
+
+  # SecureString parameters are KMS-encrypted; reading and writing them needs kms:Decrypt
+  # and kms:Encrypt. Scoped via kms:ViaService so the role can only use KMS through
   # SSM — never to decrypt arbitrary data directly.
   statement {
     sid       = "DecryptSecretsViaSSM"
-    actions   = ["kms:Decrypt"]
+    actions   = ["kms:Decrypt", "kms:Encrypt", "kms:GenerateDataKey"]
     resources = ["*"]
     condition {
       test     = "StringEquals"

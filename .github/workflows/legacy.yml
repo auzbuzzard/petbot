@@ -1,0 +1,125 @@
+name: Legacy stack
+
+# Operates the pre-migration production stack (name_prefix petbot, state
+# petbot/terraform.tfstate) from code until it is gone (docs/adr/0014, "Migrating
+# production"). deploy/terraform/stages/legacy.tfvars says what it should be, and a change
+# to it merged to main runs this:
+#
+#   edge_paused = true | false   pause or resume its edge (a targeted apply of the
+#                                Lightsail service: its containers stop or start)
+#   retired     = true           destroy the stack, then delete its retired_parameters
+#                                (made outside Terraform) and its state
+#
+# It runs as the legacy deploy role from the `production` environment, so a required
+# reviewer approves each run; the plan is in the log before anything changes. This
+# workflow and the legacy role go once the stack is destroyed.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/terraform/stages/legacy.tfvars"
+      - ".github/workflows/legacy.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: legacy
+  cancel-in-progress: false
+
+jobs:
+  legacy:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      TF_DIR: deploy/terraform
+      TF_IN_AUTOMATION: "true"
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_name_prefix: petbot
+      TF_CLI_ARGS_plan: -var-file=stages/legacy.tfvars
+      TF_CLI_ARGS_console: -var-file=stages/legacy.tfvars
+      STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Deploy role
+        env:
+          ROLE_ARN_SECRET: ${{ secrets.DEPLOY_ROLE_ARN }}
+        run: bash .github/scripts/deploy-role.sh petbot-github-deploy
+
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: "1.11.4"
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=$STATE_BUCKET" \
+            -backend-config="key=petbot/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+
+      # The stack's function is pinned to an image digest that its plan reads back, so the
+      # plan uses the newest tag in its registry, which is what it runs.
+      - name: Read the stack's settings
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          retired=$(echo 'var.retired' | terraform console)
+          tag=$(aws ecr describe-images --repository-name petbot-core \
+            --query 'sort_by(imageDetails, &imagePushedAt)[-1].imageTags[0]' --output text)
+          {
+            echo "RETIRED=$retired"
+            echo "TF_VAR_image_tag=$tag"
+            echo "TF_VAR_edge_image_tag=$tag"
+          } >> "$GITHUB_ENV"
+
+      # Only the edge's service changes; the rest of the stack stays as it was deployed. The
+      # resources moved.tf maps are planned too, since Terraform won't record a move it
+      # excludes from a targeted plan; their configuration is the one they were created with.
+      - name: Plan (pause or resume the edge)
+        if: env.RETIRED == 'false'
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          set -o pipefail
+          targets=$(sed -nE 's/^ *to += ([a-z_.]+)\[0\]$/-target=\1/p' moved.tf | tr '\n' ' ')
+          # shellcheck disable=SC2086 # one argument per target
+          terraform plan -input=false -lock-timeout=120s $targets -out=legacy.tfplan 2>&1 \
+            | sed -u -E 's/(AKIA|ASIA)[A-Z0-9]{16}/\1****************/g'
+
+      - name: Plan (destroy)
+        if: env.RETIRED == 'true'
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          set -o pipefail
+          terraform plan -input=false -lock-timeout=120s -destroy -out=legacy.tfplan 2>&1 \
+            | sed -u -E 's/(AKIA|ASIA)[A-Z0-9]{16}/\1****************/g'
+
+      - name: Apply
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          set -o pipefail
+          terraform apply -input=false -lock-timeout=120s legacy.tfplan 2>&1 \
+            | sed -u -E 's/(AKIA|ASIA)[A-Z0-9]{16}/\1****************/g'
+
+      # After the destroy: the parameters it read (made outside Terraform) and its state.
+      - name: Remove its parameters and state
+        if: env.RETIRED == 'true'
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          names=$(echo 'join(" ", var.retired_parameters)' | terraform console | tr -d '"')
+          if [ -n "$names" ]; then
+            # shellcheck disable=SC2086 # one argument per parameter name
+            aws ssm delete-parameters --names $names
+          fi
+          aws s3 rm "s3://$STATE_BUCKET/petbot/terraform.tfstate"
