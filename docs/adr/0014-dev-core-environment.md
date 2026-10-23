@@ -150,7 +150,7 @@ own workflow, `legacy.yml`, from `stages/legacy.tfvars`. The pull requests are l
 | Budget, X-Ray log policy (if enabled) | `petbot-monthly`, `petbot-xray-transaction-search` | `petbot-prod-…` | new |
 | SSM: Discord token | `/petbot/edge/discord_token` | `/petbot-prod/edge/discord_token` | copied by the prod stack (`ssm_parameters`, write-only); the old one deleted by `legacy.yml` after the destroy |
 | SSM: Bedrock API key | `/petbot/core/bedrock_api_key` | none | production moves to `bedrock_mantle`; deleted by `legacy.yml` |
-| SSM: optional keys (Tavily, salt, boorus), if production sets them | `/petbot/core/…` | `/petbot-prod/core/…` | copied the same way, if listed in `stages/prod.tfvars` and bootstrap's `adopt_parameters` |
+| SSM: Tavily key | `/petbot/core/tavily_api_key` | `/petbot-prod/core/tavily_api_key` | copied the same way (`stages/prod.tfvars`, bootstrap's `adopt_parameters`); the old one deleted by `legacy.yml`. Production sets no telemetry salt or booru key |
 | Hand-made Bedrock key user | `petbot-bedrock-key` (outside Terraform) | none | bootstrap imports it (`import` block), then deletes it by removing the resource; `force_destroy` takes its policies and service-specific credentials (verified: provider source) |
 | State | `petbot/terraform.tfstate` | `petbot-prod/terraform.tfstate` | new; the old object deleted by `legacy.yml` after the destroy |
 | Deploy role, boundary | `petbot-github-deploy`, `petbot-workload-boundary` (scope `petbot-*`) | `petbot-github-deploy-prod`, `petbot-prod-workload-boundary` | created by bootstrap now; the old pair is `legacy` until its stack is gone (a boundary can't be deleted while attached), then removed |

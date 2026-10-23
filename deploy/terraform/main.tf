@@ -102,8 +102,8 @@ resource "aws_lambda_function" "this" {
 
   # Ensure our retention-managed log group exists before the function can be
   # invoked, so Lambda doesn't auto-create an unmanaged, never-expiring one, and that
-  # it may read its secrets before its first cold start.
-  depends_on = [aws_cloudwatch_log_group.lambda, aws_iam_role_policy.core_secrets]
+  # its secrets exist and it may read them before its first cold start.
+  depends_on = [aws_cloudwatch_log_group.lambda, aws_iam_role_policy.core_secrets, aws_ssm_parameter.owned]
 
   lifecycle {
     # Fail at plan with a clear message when a key-based provider has no key parameter.

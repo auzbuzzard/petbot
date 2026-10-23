@@ -84,7 +84,7 @@ variable "environments" {
       name_prefix        = "petbot-prod"
       github_environment = "production"
       bedrock_mantle     = true
-      adopt_parameters   = ["/petbot/edge/discord_token"]
+      adopt_parameters   = ["/petbot/edge/discord_token", "/petbot/core/tavily_api_key"]
     }
     dev = {
       name_prefix        = "petbot-dev"

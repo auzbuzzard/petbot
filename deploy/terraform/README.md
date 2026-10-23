@@ -298,7 +298,8 @@ applies. The old stack is operated by `.github/workflows/legacy.yml` from
      change in it means `stages/legacy.tfvars` doesn't describe the live stack: fix the
      file in a pull request rather than applying.
    - `deploy.yml` (production): creates `petbot-prod-core`, its registry, role and log
-     group, and `/petbot-prod/edge/discord_token`, copied from the legacy parameter. No
+     group, and `/petbot-prod/edge/discord_token` and `/petbot-prod/core/tavily_api_key`,
+     copied from the legacy parameters (their values show as write-only, never printed). No
      edge (`edge_enabled = false`); the legacy stack keeps serving Discord. If this run
      reached AWS before bootstrap's apply, it failed to assume `petbot-github-deploy-prod`:
      re-run it.
@@ -323,8 +324,8 @@ applies. The old stack is operated by `.github/workflows/legacy.yml` from
 
 3. **Retire the old stack**, after a soak. One pull request:
    - `retired = true` in `stages/legacy.tfvars`: `legacy.yml` plans the destroy, applies
-     it once approved, then deletes `retired_parameters` (the old Discord token and
-     Bedrock API key) and the old state object;
+     it once approved, then deletes `retired_parameters` (the old Discord token, Bedrock
+     API key and Tavily key) and the old state object;
    - in `bootstrap/`, adopt the hand-made Bedrock key user, so the next step can delete
      it through the pipeline:
 
