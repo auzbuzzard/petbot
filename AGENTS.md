@@ -58,6 +58,12 @@ statically by `lint-imports`, not by packaging.
    `LOG_LEVEL`. Never log secrets/tokens.
 7. **Tests + docs accompany every behaviour change.** External APIs are mocked
    (`respx`, fixtures); the LLM is tested with pydantic-ai's `TestModel`.
+8. **Infrastructure is code, only.** Every resource change — AWS, GitHub, secrets'
+   locations — lands through Terraform (`deploy/terraform/`, its `stages/*.tfvars`) or a
+   workflow in `.github/workflows/`, by merging a pull request and approving its pipeline
+   run. No step asks a person to create, change or delete a resource by hand; if something
+   can't be expressed as code yet, say so and bring it under code rather than writing a
+   manual step.
 
 ## Typing convention
 
