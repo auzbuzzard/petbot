@@ -25,7 +25,7 @@ locals {
   )
 
   edge_secret_parameters = merge(
-    { DISCORD_TOKEN = var.discord_token_ssm_parameter },
+    { DISCORD_TOKEN = coalesce(var.discord_token_ssm_parameter, "/${var.name_prefix}/edge/discord_token") },
     local.telemetry_secret_parameters,
   )
 

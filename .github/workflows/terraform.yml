@@ -45,3 +45,7 @@ jobs:
         run: |
           terraform -chdir=deploy/terraform/bootstrap init -backend=false
           terraform -chdir=deploy/terraform/bootstrap validate
+
+      # Renders the stages' IAM with fake credentials (no AWS calls).
+      - name: Test (bootstrap stack)
+        run: terraform -chdir=deploy/terraform/bootstrap test

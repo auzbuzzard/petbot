@@ -68,13 +68,21 @@ jobs:
 
       # Each environment's stack: its resource prefix (bootstrap's var.environments names
       # the same one, which its deploy role is scoped to), its state, and whether it runs
-      # the edge. Production's is the stack as it always was: petbot, petbot/terraform.tfstate.
+      # the edge. Production's edge follows the `production` variable EDGE_ENABLED (unset:
+      # on), which holds it off while its core runs beside the stack it replaces
+      # (docs/adr/0014, "Migrating production"): two edges would both answer every message.
       - name: Environment
+        env:
+          EDGE_ENABLED: ${{ vars.EDGE_ENABLED || 'true' }}
         run: |
           case "$DEPLOY_ENV" in
-            production) prefix=petbot; edge=true; lambda_env=prod ;;
+            production) prefix=petbot-prod; edge=$EDGE_ENABLED; lambda_env=prod ;;
             dev) prefix=petbot-dev; edge=false; lambda_env=dev ;;
             *) echo "::error::Unknown environment: $DEPLOY_ENV"; exit 1 ;;
+          esac
+          case "$edge" in
+            true | false) ;;
+            *) echo "::error::EDGE_ENABLED must be true or false, not $edge"; exit 1 ;;
           esac
           {
             echo "TF_STATE_KEY=$prefix/terraform.tfstate"

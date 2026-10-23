@@ -15,8 +15,8 @@ variable "aws_region" {
 
 variable "name_prefix" {
   type        = string
-  description = "Base name for the stack; resources derive <name_prefix>-core / -edge (see locals.tf)."
-  default     = "petbot"
+  description = "Base name for the stack; resources derive <name_prefix>-core / -edge (see locals.tf). petbot-prod or petbot-dev (deploy.yml sets it)."
+  default     = "petbot-prod"
 }
 
 variable "image_tag" {
@@ -158,7 +158,7 @@ variable "booru_ssm_parameters" {
   type        = map(string)
   description = <<-EOT
     Optional booru auth, as a map of ENV-VAR-NAME => SSM-parameter-name, e.g.
-    { DERPIBOORU_API_KEY = "/petbot/interactions/derpibooru_api_key" }. Each
+    { DERPIBOORU_API_KEY = "/petbot-prod/core/derpibooru_api_key" }. Each
     referenced parameter must already exist as a SecureString.
   EOT
   default     = {}
@@ -210,8 +210,8 @@ variable "edge_enabled" {
 
 variable "discord_token_ssm_parameter" {
   type        = string
-  description = "SSM SecureString holding the edge's Discord bot token; injected into the container's environment."
-  default     = "/petbot/edge/discord_token"
+  description = "SSM SecureString holding the edge's Discord bot token, read by the edge at start. Empty => /<name_prefix>/edge/discord_token."
+  default     = ""
 }
 
 variable "edge_power" {

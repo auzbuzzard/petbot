@@ -1,6 +1,6 @@
-# ADR 0014: A dev core: any branch's engine, deployed alone, on the production model with no key
+# ADR 0014: Two stages, prod and dev: any branch's engine on the production model, with no key
 
-- Status: Proposed (the SigV4 call to mantle is unverified until the spike below runs)
+- Status: Proposed (production's migration, below, is not applied)
 - Date: 2026-10-23
 
 ## Context
@@ -26,79 +26,78 @@ What a pre-merge deploy needs, and what it must not bring:
 
 ## Decision
 
-### Model access: SigV4 with the function's own role (`chat_llm_kind = "bedrock_mantle"`)
+### Model access: SigV4 with the caller's own identity (`chat_llm_kind = "bedrock_mantle"`)
 
 AWS's endpoint table lists both Bedrock API keys and AWS credentials (SigV4) for
-`bedrock-mantle` (documented: Bedrock user guide, *Chat Completions API*). A new provider
-kind, `BedrockMantleModel` (`kind = "bedrock_mantle"`: model + base URL, no key), hands
+`bedrock-mantle` (documented: Bedrock user guide, *Chat Completions API*). A provider kind,
+`BedrockMantleModel` (`kind = "bedrock_mantle"`: model + base URL, no key), hands
 pydantic-ai's OpenAI provider an `httpx` client whose `SigV4Auth`
 (`petbot.process.sigv4`) signs each request for service `bedrock-mantle` in the Region
 named by the endpoint's host, with botocore's default credential chain: the Lambda's role
 in AWS, the developer's profile locally. The signing name is `bedrock-mantle` (documented:
-the OpenAI Node SDK's Bedrock guide signs mantle requests for it; also the IAM service
-prefix). Only `Content-Type` and `Host` are signed besides AWS's own headers, so headers
-the transport adds after signing can't break it.
+the OpenAI Node SDK's Bedrock guide; also the IAM service prefix). Only `Content-Type` and
+`Host` are signed besides AWS's own headers, so headers the transport adds after signing
+can't break it.
 
 The function's role gets `bedrock-mantle:CreateInference` on
 `arn:aws:bedrock-mantle:<region>:<account>:project/*` (documented: IAM service
 authorization reference; `CreateInference` requires the `project` resource type), and
-the environment's workload boundary allows the same. No key exists to mint, store, rotate
-or leak, and nothing secret reaches Terraform state. `bedrock-mantle:CallWithBearerToken`
-gates bearer-token calls (documented: IAM reference), so the role isn't granted it (inference:
-a SigV4 call is not a bearer-token call; a third-party guide says the same).
+the environment's workload boundary allows the same. `bedrock-mantle:CallWithBearerToken`
+gates bearer-token calls (documented: IAM reference), so the role isn't granted it
+(inference: a SigV4 call is not a bearer-token call). No key exists to mint, store,
+rotate or leak, and nothing secret reaches Terraform state.
 
-Offline, unit tests recompute the signature by the published SigV4 algorithm (not by
-botocore) over the request as it left the client, and drive a full chat turn through
-pydantic-ai to a mocked mantle. **Whether mantle accepts the signed request for this model
-is not yet observed**; the spike is a local harness run with the user's credentials
-(README *Dev core*). If it fails, the fallback is a Terraform-managed Bedrock API key
-(`aws_iam_service_specific_credential`), whose secret would land in Terraform state,
-against `secrets.tf`'s rule that no secret value does; that trade-off is the user's to
-make, not this ADR's.
+Verified: unit tests recompute the signature by the published SigV4 algorithm over the
+request as sent; and a live in-process harness run of the LeetCode branch against
+`google.gemma-4-31b`, signed with the developer's default AWS profile, got correct chat and
+slash replies (reported by the session that ran it). Not yet observed: a call signed with
+a Lambda role, i.e. the role policy and boundary above; the first dev deploy shows it.
 
-### The dev stack: the root stack with `edge_enabled = false`, under `petbot-dev`
+### Stages: `petbot-prod` and `petbot-dev`, neither containing the other
 
-The root stack's edge resources (Lightsail service and deployment, edge ECR repo and
-policy, edge IAM user, key and policies, claims table) are counted on
-`var.edge_enabled`; `moved` blocks map production's existing unindexed addresses to
-instance `[0]`, so production's state stays in place. A dev apply creates the core's ECR
-repo, role, log group and Lambda (`petbot-dev-core`) and nothing else. A mock-provider
-`terraform test` plans both shapes in CI.
+Each stage's resources are named `<name_prefix>-*`: production `petbot-prod`, dev
+`petbot-dev`. Neither prefix contains the other, so each stage's deploy role, workload
+boundary, state (`<name_prefix>/`) and parameters (`/<name_prefix>/*`) cover its own stage
+and nothing of the other's, in both directions. Bootstrap rejects an environment whose
+prefix contains another's. Rejected: `petbot` and `petbot-dev` (production's `petbot-*`
+covers dev); a non-overlapping but asymmetric `dev-petbot`. The root of trust is not a
+stage and keeps its names: the CI roles (`petbot-github-*`), the operator
+(`petbot-operator`), the OIDC provider and the state bucket.
+
+The root stack's edge (Lightsail service and deployment, edge ECR repo, edge IAM user, key
+and policies, claims table) is counted on `var.edge_enabled`. A dev apply creates the
+core's ECR repo, role, log group and Lambda (`petbot-dev-core`) and nothing else. A
+mock-provider `terraform test` plans both stages in CI. The edge's Discord-token parameter
+defaults to `/<name_prefix>/edge/discord_token`.
 
 ### Bootstrap: one root of trust, an environment map
 
-`bootstrap/`'s `var.environments` lists each deploy environment (`name_prefix`, GitHub
-environment, and whether it runs the edge, sets a budget, calls mantle). Each gets its own
-deploy role trusting only its GitHub environment, its own workload boundary and a deploy
-policy scoped to its own `<name_prefix>-*` resources, `<name_prefix>/` state and
-`/<name_prefix>/*` parameters; the edge's IAM-user and Lightsail rights, and Budgets, only
-where they apply. One bootstrap manages both, so the account-global GitHub OIDC provider
-stays one resource with no toggle. Production's role keeps its name
-(`petbot-github-deploy`); dev's is `petbot-github-deploy-dev`, inside
-`petbot-github-*`, which every deploy role is denied and bootstrap's pipeline manages.
-`moved` blocks keep production's role, policy and boundary in place; rendered offline
-against the previous code with fake credentials, production's trust, deploy permissions,
-boundary and the pipeline roles' policies are identical. The operator may additionally
-invoke `petbot-dev-core`.
+`bootstrap/`'s `var.environments` lists each stage: `name_prefix`, its GitHub environment,
+and whether it runs the edge, sets a budget, calls mantle. Each gets a deploy role trusting
+only its GitHub environment (`petbot-github-deploy-prod` from `production`,
+`petbot-github-deploy-dev` from `dev`), its own workload boundary, and a deploy policy
+scoped to its prefix; the edge's IAM-user and Lightsail rights and Budgets only where they
+apply. One bootstrap manages all of them, so the account-global GitHub OIDC provider stays
+one resource with no toggle. The operator may invoke each stage's core.
 
 The `dev` GitHub environment admits **every branch**: deploying an unmerged branch is the
-point. Its role is the control: `petbot-dev-*` matches no production resource, and it
-has no Lightsail (whose GUID ARNs can't be name-scoped), IAM-user or Budgets rights.
+point. Its role is the control: `petbot-dev-*` matches nothing else, and it has no
+Lightsail (whose GUID ARNs can't be name-scoped), IAM-user or Budgets rights.
 
-**Prefix.** `petbot-dev` sits inside production's `petbot-*` scope: production's deploy
-role could manage dev resources, and production's workload boundary would admit a grant on
-them; dev can reach nothing of production's. A prefix outside `petbot-*` would isolate both ways (the
-bootstrap code supports one: the operator's scopes and the pipeline's policy list name it
-explicitly). `petbot-dev` is the default because the exposed direction is the one `main`
-and a required reviewer already guard; the choice is open to the user before merge.
+A third, transitional entry, `legacy` (`name_prefix = "petbot"`), is the production stack
+as it stands: its role keeps the name `petbot-github-deploy`, and `moved` blocks keep that
+role, its policy and `petbot-workload-boundary` in place. Rendered offline against the
+code before this change, with fake credentials, they are identical. It is exempt from the
+containment rule and is removed once the stack it deploys is destroyed (below).
 
 ### Deploy: `deploy.yml`'s `environment` input
 
 A manual run picks `production` (default) or `dev`; a push to `main` always deploys
 production. The environment sets the job's GitHub environment (so its role and variables),
-the prefix, the state key `<prefix>/terraform.tfstate` and whether the edge is built.
-Production's values are unchanged: `petbot`, `petbot/terraform.tfstate`, the same targeted
-apply and the edge build. Runs take turns per environment.
+the prefix (`petbot-prod` | `petbot-dev`), the state key `<prefix>/terraform.tfstate` and
+whether the edge is built: never for dev; for production unless its variable
+`EDGE_ENABLED` is `false`, which holds a new production core's edge off while the old
+stack still serves. Runs take turns per environment.
 
 ### Talking to it: the harness's `--lambda`
 
@@ -106,14 +105,64 @@ apply and the edge build. Runs take turns per environment.
 same conversation through `ProcessClient` + `LambdaTransport`, the frontend's own path; a
 failed dispatch gets the frontend's fallback reply. In-process remains the default.
 
+## Migrating production: `petbot` to `petbot-prod`
+
+A Lambda's, ECR repository's, IAM role's or user's, DynamoDB table's and Lightsail
+service's name can't change in place; a new name is a new resource. So the `petbot-prod`
+stack is built **beside** the `petbot` one, in its own state, the edge is cut over, and
+then the old stack is destroyed. Nothing is applied until the user approves each step; the
+commands are in `deploy/terraform/README.md`, "Migrating production to petbot-prod".
+
+| Resource | Today (`petbot`) | After (`petbot-prod`) | How |
+| --- | --- | --- | --- |
+| Core Lambda, role, log group | `petbot-core`, `petbot-core-role`, `/aws/lambda/petbot-core` | `petbot-prod-core`, … | new, beside the old; old destroyed with its stack. Its logs (30-day retention) go with it unless exported first |
+| ECR repos | `petbot-core`, `petbot-edge` | `petbot-prod-core`, `petbot-prod-edge` | new; CI pushes fresh images. The old images are deleted with their repos (`force_delete`): a rollback past the migration redeploys a commit rather than an old image |
+| Lightsail service | `petbot-edge` | `petbot-prod-edge` | new; the cutover. Its private `.service.local` name changes; nothing dials the edge, so nothing depends on it |
+| Edge IAM user and key | `petbot-edge` | `petbot-prod-edge` | new user, new key; the old ones are destroyed with their stack |
+| Claims table | `petbot-edge-claims` | `petbot-prod-edge-claims` | new; its claims expire within the hour (TTL), so nothing carries over |
+| Budget, X-Ray log policy (if enabled) | `petbot-monthly`, `petbot-xray-transaction-search` | `petbot-prod-…` | new |
+| SSM: Discord token | `/petbot/edge/discord_token` | `/petbot-prod/edge/discord_token` | value copied by the user; old deleted after |
+| SSM: Bedrock API key | `/petbot/core/bedrock_api_key` | none | retired: production switches to `bedrock_mantle`. Its hand-made `petbot-bedrock-key` IAM user's credential can then be deleted |
+| SSM: optional keys (Tavily, salt, boorus), if set | `/petbot/core/…` | `/petbot-prod/core/…` | copied, and the `production` variables repointed |
+| State | `petbot/terraform.tfstate` | `petbot-prod/terraform.tfstate` | new; the old one is emptied by the destroy, then may be deleted |
+| Deploy role, boundary | `petbot-github-deploy`, `petbot-workload-boundary` (scope `petbot-*`) | `petbot-github-deploy-prod`, `petbot-prod-workload-boundary` | created by bootstrap now; the old pair is `legacy` until its stack is gone (a boundary can't be deleted while attached), then removed by a bootstrap PR |
+| GitHub environment | `production` | `production` | kept; its `DEPLOY_ROLE_ARN` secret and model variables change |
+
+**Order.** (1) Before merging, set `production`'s `EDGE_ENABLED=false`, so the deploy the
+merge starts brings up no second edge. (2) Merge; approve bootstrap's run once its plan
+shows the three moves to `legacy`, the new prod and dev roles, policies and boundaries, and
+the operator's update. (3) Repoint `production` (role ARN, `bedrock_mantle`, parameter
+names) and copy the parameters; then let production deploy: `petbot-prod-core` and its
+registry come up beside the live stack, which keeps serving untouched. (4) Talk to
+`petbot-prod-core` with `--lambda`. (5) Cut over. (6) After a soak, destroy the old stack,
+delete the old parameters and state, and land the bootstrap PR removing `legacy`.
+
+**Cutover and downtime.** Two connected edges would both answer every message (each claims
+it in its own table), so the old edge stops before the new one starts: disable the old
+Lightsail service (its containers shut down: documented, Lightsail API), then deploy
+production with `EDGE_ENABLED` unset. PetBot is offline in Discord from the disable until
+the new container connects: one production deploy run, which builds both images (cached),
+creates the Lightsail service and pushes the deployment. No duration has been measured
+here. The alternative is no downtime at the cost of duplicates: start the new edge first
+and disable the old one once the new one is connected, so messages in between get two
+answers. Rollback, while the old stack exists: set `EDGE_ENABLED=false` and redeploy
+production (removing the new edge), and re-enable the old service. Whether re-enabling
+restarts its last deployment is not documented in what was checked; if it doesn't, the old
+stack's last deployment is recreated from the console or CLI.
+
+**Between merge and cutover**, `main` deploys to `petbot-prod`, not to the stack serving
+Discord: keep that window short.
+
 ## Consequences
 
 - An unmerged branch is deployable and testable against production's model before merge,
   with no Discord, no edge and no secret.
-- Production can move to `bedrock_mantle` later (its boundary needs `bedrock_mantle =
-  true`), retiring the hand-minted key; not done here.
+- Neither stage's CI role or workloads can reach the other's resources, state or
+  parameters.
+- Production loses its last hand-minted credential when it moves to `bedrock_mantle`.
 - Dev is one slot: each deploy replaces the last.
 - Anyone who can push a branch can run code with the dev role and the dev core's role.
   Their reach is dev's resources and the model (cost: inference tokens).
-- GitHub's environment settings (`dev`'s branch rule, its `DEPLOY_ROLE_ARN` secret and
-  model variables) are set by hand, as for the existing environments.
+- GitHub's environment settings (`dev`'s branch rule, each environment's `DEPLOY_ROLE_ARN`
+  secret and model variables, `EDGE_ENABLED`) are set by hand, as for the existing
+  environments.

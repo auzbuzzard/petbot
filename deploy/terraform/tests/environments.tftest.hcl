@@ -23,7 +23,7 @@ run "production_runs_the_edge_on_a_keyed_model" {
 
   variables {
     chat_llm_kind                  = "openai_compatible"
-    chat_llm_api_key_ssm_parameter = "/petbot/core/bedrock_api_key"
+    chat_llm_api_key_ssm_parameter = "/petbot-prod/core/bedrock_api_key"
     edge_image_tag                 = "abc123"
   }
 
@@ -45,8 +45,23 @@ run "production_runs_the_edge_on_a_keyed_model" {
   }
 
   assert {
-    condition     = jsondecode(aws_lambda_function.this.environment[0].variables.SSM_SECRETS).CHAT_LLM__API_KEY == "/petbot/core/bedrock_api_key"
+    condition     = jsondecode(aws_lambda_function.this.environment[0].variables.SSM_SECRETS).CHAT_LLM__API_KEY == "/petbot-prod/core/bedrock_api_key"
     error_message = "A keyed provider reads its key from SSM."
+  }
+
+  assert {
+    condition = alltrue([
+      aws_lambda_function.this.function_name == "petbot-prod-core",
+      aws_lightsail_container_service.edge[0].name == "petbot-prod-edge",
+      aws_dynamodb_table.claims[0].name == "petbot-prod-edge-claims",
+      aws_iam_role.lambda.permissions_boundary == "arn:aws:iam::123456789012:policy/petbot-prod-workload-boundary",
+    ])
+    error_message = "Production's resources are petbot-prod-*, under its own boundary."
+  }
+
+  assert {
+    condition     = local.edge_secret_parameters.DISCORD_TOKEN == "/petbot-prod/edge/discord_token"
+    error_message = "The edge reads its Discord token from under its own prefix."
   }
 }
 

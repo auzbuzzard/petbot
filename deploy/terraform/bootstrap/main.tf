@@ -4,9 +4,10 @@
 #
 # Every OIDC role trusts exactly one GitHub environment, never a branch or a PR. Each
 # deploy environment (var.environments) gets its own deploy role and workload boundary,
-# scoped to its own <name_prefix>-* resources and state: the deploy workflow assumes
-# petbot-github-deploy from `production` (main only) and petbot-github-deploy-dev from
-# `dev` (any branch; see docs/adr/0014). The bootstrap workflow plans this stack from
+# scoped to its own <name_prefix>-* resources and state, and no environment's prefix
+# contains another's: the deploy workflow assumes petbot-github-deploy-prod from
+# `production` (main only) and petbot-github-deploy-dev from `dev` (any branch; see
+# docs/adr/0014). The bootstrap workflow plans this stack from
 # `bootstrap-plan` and applies the reviewed plan from `bootstrap`, which needs a required
 # reviewer's approval; both admit only main. An admin applies this stack by hand exactly
 # once, to seed it in a new account. See README "Bootstrap" and docs/adr/0012.
@@ -69,12 +70,17 @@ variable "environments" {
     # Whether its workloads may call Bedrock's mantle endpoint with their own IAM identity
     # (the root stack's chat_llm_kind = "bedrock_mantle").
     bedrock_mantle = optional(bool, false)
+    # The stack from before environments, under the bare prefix: its role keeps the name
+    # petbot-github-deploy, and its prefix may contain the others'. It exists only until
+    # that stack is destroyed (docs/adr/0014, "Migrating production").
+    legacy = optional(bool, false)
   }))
-  description = "Each deploy environment, by name: production deploys from main; dev deploys any branch's core, with no edge."
+  description = "Each deploy environment, by name: prod deploys from main; dev deploys any branch's core, with no edge; legacy is the pre-migration production stack."
   default = {
-    production = {
-      name_prefix        = "petbot"
+    prod = {
+      name_prefix        = "petbot-prod"
       github_environment = "production"
+      bedrock_mantle     = true
     }
     dev = {
       name_prefix        = "petbot-dev"
@@ -83,13 +89,28 @@ variable "environments" {
       budget             = false
       bedrock_mantle     = true
     }
+    legacy = {
+      name_prefix        = "petbot"
+      github_environment = "production"
+      legacy             = true
+    }
   }
 
   validation {
-    condition = length(distinct([for e in values(var.environments) : e.name_prefix])) == length(var.environments) && alltrue([
-      for e in values(var.environments) : !startswith(e.name_prefix, "${var.name_prefix}-github-")
-    ])
-    error_message = "Each environment needs its own name_prefix, outside <name_prefix>-github-* (the CI roles)."
+    condition = alltrue(flatten([
+      for a_name, a in var.environments : [
+        for b_name, b in var.environments :
+        a_name == b_name || a.legacy || b.legacy || !startswith("${a.name_prefix}-", "${b.name_prefix}-")
+      ]
+    ]))
+    error_message = "No environment's name_prefix may contain another's (petbot-prod and petbot-dev, not petbot and petbot-dev): each deploy role and boundary covers its own stage only."
+  }
+
+  validation {
+    condition = alltrue([
+      for e in values(var.environments) : !startswith("${e.name_prefix}-", "${var.name_prefix}-github-")
+    ]) && length([for e in values(var.environments) : e if e.legacy]) <= 1
+    error_message = "An environment's name_prefix must stay outside <name_prefix>-github-* (the CI roles), and at most one environment is legacy."
   }
 }
 
@@ -190,12 +211,12 @@ locals {
     },
   )
 
-  # Production's deploy role keeps the name it was created with; every other
-  # environment's is suffixed. All of them fall under <name_prefix>-github-*, which no
+  # Each environment's deploy role is suffixed with its name; the legacy one keeps the
+  # name it was created with. All of them fall under <name_prefix>-github-*, which no
   # deploy role may edit (DenyAccessPrincipals) and bootstrap's pipeline manages.
   deploy_role_names = {
     for name, env in var.environments :
-    name => name == "production" ? "${var.name_prefix}-github-deploy" : "${var.name_prefix}-github-deploy-${name}"
+    name => env.legacy ? "${var.name_prefix}-github-deploy" : "${var.name_prefix}-github-deploy-${name}"
   }
 }
 
@@ -562,19 +583,19 @@ output "deploy_role_arns" {
   value       = { for name, role in aws_iam_role.github_deploy : name => role.arn }
 }
 
-# Production's deploy role and boundary, created before environments existed, keep their
-# state as the "production" instances.
+# The deploy role and boundary created before environments existed are the legacy
+# environment's, unchanged, until the stack they deploy is destroyed.
 moved {
   from = aws_iam_role.github_deploy
-  to   = aws_iam_role.github_deploy["production"]
+  to   = aws_iam_role.github_deploy["legacy"]
 }
 
 moved {
   from = aws_iam_role_policy.github_deploy
-  to   = aws_iam_role_policy.github_deploy["production"]
+  to   = aws_iam_role_policy.github_deploy["legacy"]
 }
 
 moved {
   from = aws_iam_policy.workload_boundary
-  to   = aws_iam_policy.workload_boundary["production"]
+  to   = aws_iam_policy.workload_boundary["legacy"]
 }
