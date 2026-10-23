@@ -84,7 +84,9 @@ def _bodies(route: respx.Route) -> list[dict[str, Any]]:
 async def test_daily_reports_the_dated_problem_with_its_difficulty_and_link() -> None:
     route = respx.post(GRAPHQL_URL).respond(json=_DAILY)
     async with httpx.AsyncClient() as client:
-        result = await LeetCodeSkill([GraphQLProvider(client)]).run(LeetCodeArgs(), _ctx())
+        result = await LeetCodeSkill([GraphQLProvider(client)]).run(
+            LeetCodeArgs(mode="daily"), _ctx()
+        )
     assert _bodies(route)[0]["operationName"] == "questionOfToday"
     assert result.embed is None
     assert result.text == (
@@ -146,7 +148,7 @@ async def test_a_members_only_draw_is_drawn_again() -> None:
 
 
 @respx.mock
-async def test_a_difficulty_alone_means_a_random_problem_of_it() -> None:
+async def test_a_random_problem_of_a_difficulty_given_leetcodes_spelling() -> None:
     route = respx.post(GRAPHQL_URL).mock(
         side_effect=[
             httpx.Response(200, json=_listing(3, [])),
@@ -155,7 +157,7 @@ async def test_a_difficulty_alone_means_a_random_problem_of_it() -> None:
     )
     async with httpx.AsyncClient() as client:
         result = await LeetCodeSkill([GraphQLProvider(client)]).run(
-            LeetCodeArgs.model_validate({"difficulty": "Hard"}), _ctx()
+            LeetCodeArgs.model_validate({"mode": "random", "difficulty": "Hard"}), _ctx()
         )
     assert {body["operationName"] for body in _bodies(route)} == {"problemsetQuestionList"}
     assert _bodies(route)[0]["variables"]["filters"] == {"difficulty": "HARD"}
@@ -264,7 +266,7 @@ async def test_a_failed_or_malformed_answer_is_unavailable(response: httpx.Respo
     respx.post(GRAPHQL_URL).mock(return_value=response)
     async with httpx.AsyncClient() as client:
         with pytest.raises(UpstreamUnavailable):
-            await LeetCodeSkill([GraphQLProvider(client)]).run(LeetCodeArgs(), _ctx())
+            await LeetCodeSkill([GraphQLProvider(client)]).run(LeetCodeArgs(mode="daily"), _ctx())
 
 
 @respx.mock
@@ -315,7 +317,7 @@ class _Mirror(LeetCodeProvider):
 
 async def test_a_failing_provider_falls_through_to_the_next() -> None:
     skill = LeetCodeSkill([_Down(), _Mirror(_TWO_SUM)])
-    daily = await skill.run(LeetCodeArgs(), _ctx())
+    daily = await skill.run(LeetCodeArgs(mode="daily"), _ctx())
     assert daily.text == (
         "LeetCode's daily problem for 2026-10-22:\n#1 Two Sum (Easy)\n"
         "<https://leetcode.com/problems/two-sum/>"

@@ -238,7 +238,7 @@ class LeetCodeSkill(Skill[LeetCodeArgs]):
         answered = False
         for provider in self._providers:
             try:
-                if args.effective_mode == "daily":
+                if args.mode == "daily":
                     return SkillResult.message(format_daily(await provider.daily()))
                 problem = await provider.random_problem(args.difficulty, self._rng)
             except (httpx.HTTPError, ValueError) as exc:

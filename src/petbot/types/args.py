@@ -73,10 +73,10 @@ class WeatherArgs(Frozen):
 class LeetCodeArgs(Frozen):
     """Arguments for the ``leetcode`` skill."""
 
-    mode: LeetCodeMode | None = Field(
-        default=None,
-        description="'daily' for today's daily problem; 'random' for any other problem. With no "
-        "mode, a difficulty means 'random' and no difficulty means 'daily'.",
+    # Required, not defaulted: given an optional mode, the production model omitted it for
+    # "any random problem" and got the daily.
+    mode: LeetCodeMode = Field(
+        description="'daily' for today's daily problem; 'random' for any other problem."
     )
     difficulty: LeetCodeDifficulty | None = Field(
         default=None, description="For a random problem: only this difficulty."
@@ -87,13 +87,6 @@ class LeetCodeArgs(Frozen):
     def _lowercase(cls, value: object) -> object:
         # Results spell difficulties LeetCode's way ("Easy"), which a model echoes back.
         return value.strip().lower() if isinstance(value, str) else value
-
-    @property
-    def effective_mode(self) -> LeetCodeMode:
-        """The lookup asked for: a difficulty with no mode means a random problem."""
-        if self.mode is not None:
-            return self.mode
-        return "random" if self.difficulty is not None else "daily"
 
 
 class MusicArgs(Frozen):

@@ -41,11 +41,11 @@ def test_research_tools_are_agent_only() -> None:
     assert slash == {"math", "derpi", "e621", "leetcode"}
 
 
-def test_leetcode_args_default_to_the_daily_and_bound_their_choices() -> None:
-    assert LeetCodeArgs().effective_mode == "daily"
-    # A difficulty with no mode is a random problem of it, never the daily.
-    assert LeetCodeArgs(difficulty="easy").effective_mode == "random"
-    assert LeetCodeArgs(mode="daily", difficulty="easy").effective_mode == "daily"
+def test_leetcode_args_require_a_mode_and_bound_their_choices() -> None:
+    # The caller always says daily or random: an omitted mode isn't guessed.
+    assert LeetCodeArgs.model_json_schema()["required"] == ["mode"]
+    with pytest.raises(ValidationError):
+        LeetCodeArgs.model_validate({"difficulty": "easy"})
     with pytest.raises(ValidationError):
         LeetCodeArgs.model_validate({"mode": "random", "difficulty": "impossible"})
 

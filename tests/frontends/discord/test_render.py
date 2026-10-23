@@ -289,7 +289,7 @@ def test_slash_literal_options_become_choices() -> None:
     async def _noop(interaction: object, **values: object) -> None: ...
 
     params = _as_app_command(spec, _noop)._params
-    assert params["mode"].required is False
+    assert params["mode"].required is True
     assert [c.value for c in params["mode"].choices] == ["daily", "random"]
     # An optional Literal is still a choice, just not a required one.
     assert params["difficulty"].required is False
