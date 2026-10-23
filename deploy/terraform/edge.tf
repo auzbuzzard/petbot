@@ -15,8 +15,13 @@
 # arm64 image fails with "exec format error") — see Dockerfile.edge. Measured edge
 # footprint ~76 MB RSS, so `nano` (512 MB) is ample; bump var.edge_power to
 # `micro` if it ever OOMs.
+#
+# Every edge resource exists only when var.edge_enabled: a stack without it (a dev core,
+# talked to through the chat harness) has no Lightsail service, edge identity or claims.
 
 resource "aws_lightsail_container_service" "edge" {
+  count = local.edge_count
+
   name  = local.edge_name
   power = var.edge_power
   scale = var.edge_scale
@@ -33,6 +38,8 @@ resource "aws_lightsail_container_service" "edge" {
 
 # The edge's own ECR repository.
 resource "aws_ecr_repository" "edge" {
+  count = local.edge_count
+
   name                 = local.edge_name
   image_tag_mutability = "MUTABLE"
   force_delete         = true
@@ -47,14 +54,16 @@ resource "aws_ecr_repository" "edge" {
 # ARN is populated once the puller role is active; Terraform orders this after the
 # service create because it references that attribute.
 resource "aws_ecr_repository_policy" "edge" {
-  repository = aws_ecr_repository.edge.name
+  count = local.edge_count
+
+  repository = aws_ecr_repository.edge[0].name
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Sid       = "AllowLightsailPull"
       Effect    = "Allow"
-      Principal = { AWS = aws_lightsail_container_service.edge.private_registry_access[0].ecr_image_puller_role[0].principal_arn }
+      Principal = { AWS = aws_lightsail_container_service.edge[0].private_registry_access[0].ecr_image_puller_role[0].principal_arn }
       Action    = ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
     }]
   })
@@ -65,12 +74,12 @@ resource "aws_ecr_repository_policy" "edge" {
 # first. Lightsail pulls from ECR using the puller role, so the repo policy must
 # exist before the deployment is created.
 resource "aws_lightsail_container_service_deployment_version" "edge" {
-  count        = var.edge_image_tag != "" ? 1 : 0
-  service_name = aws_lightsail_container_service.edge.name
+  count        = var.edge_enabled && var.edge_image_tag != "" ? 1 : 0
+  service_name = aws_lightsail_container_service.edge[0].name
 
   container {
     container_name = "edge"
-    image          = "${aws_ecr_repository.edge.repository_url}:${var.edge_image_tag}"
+    image          = "${aws_ecr_repository.edge[0].repository_url}:${var.edge_image_tag}"
 
     # Observability env (OBS_*/OTEL_*) is empty unless var.observability_enabled
     # (see observability.tf); merged so the edge exports its dispatch spans too.
@@ -85,13 +94,13 @@ resource "aws_lightsail_container_service_deployment_version" "edge" {
       HISTORY_MAX_TURNS = tostring(var.history_max_turns)
       # Scoped identity for boto3's default credential chain (Lightsail container
       # services have no IAM instance roles, so a static key is the mechanism).
-      AWS_ACCESS_KEY_ID     = aws_iam_access_key.edge.id
-      AWS_SECRET_ACCESS_KEY = aws_iam_access_key.edge.secret
+      AWS_ACCESS_KEY_ID     = aws_iam_access_key.edge[0].id
+      AWS_SECRET_ACCESS_KEY = aws_iam_access_key.edge[0].secret
       # The Discord token (and the telemetry salt) by SSM name; the edge reads the values
       # from SSM at start (secrets.tf).
       SSM_SECRETS = jsonencode(local.edge_secret_parameters)
       # Claimed message ids, so of every connected copy exactly one answers (claims.tf).
-      CLAIMS_TABLE = aws_dynamodb_table.claims.name
+      CLAIMS_TABLE = aws_dynamodb_table.claims[0].name
     }, local.observability_edge_env)
   }
 
@@ -104,6 +113,8 @@ resource "aws_lightsail_container_service_deployment_version" "edge" {
 # messages in the claims table (claims.tf), nothing else.
 
 resource "aws_iam_user" "edge" {
+  count = local.edge_count
+
   name                 = local.edge_name
   permissions_boundary = local.workload_boundary_arn
 }
@@ -112,21 +123,27 @@ resource "aws_iam_user" "edge" {
 # var.edge_key_rotation_days, on the first deploy after that. The new key exists before
 # the new container deployment carries it, and the old key is deleted only after.
 resource "time_rotating" "edge_key" {
+  count = local.edge_count
+
   rotation_days = var.edge_key_rotation_days
 }
 
 resource "aws_iam_access_key" "edge" {
-  user = aws_iam_user.edge.name
+  count = local.edge_count
+
+  user = aws_iam_user.edge[0].name
 
   lifecycle {
     create_before_destroy = true
-    replace_triggered_by  = [time_rotating.edge_key]
+    replace_triggered_by  = [time_rotating.edge_key[count.index]]
   }
 }
 
 resource "aws_iam_user_policy" "edge_invoke" {
+  count = local.edge_count
+
   name = "${local.edge_name}-invoke-core"
-  user = aws_iam_user.edge.name
+  user = aws_iam_user.edge[0].name
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -139,7 +156,7 @@ resource "aws_iam_user_policy" "edge_invoke" {
       {
         Effect   = "Allow"
         Action   = ["dynamodb:PutItem", "dynamodb:UpdateItem"]
-        Resource = aws_dynamodb_table.claims.arn
+        Resource = aws_dynamodb_table.claims[0].arn
       },
     ]
   })

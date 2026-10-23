@@ -9,6 +9,8 @@
 # on-demand billing makes it ~free at this traffic.
 
 resource "aws_dynamodb_table" "claims" {
+  count = local.edge_count
+
   name         = "${local.edge_name}-claims"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "id"

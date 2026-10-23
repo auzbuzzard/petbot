@@ -73,21 +73,23 @@ variable "chat_llm_kind" {
   description = <<-EOT
     Chat provider discriminator:
       bedrock           - Converse API, IAM-auth, no key (Nova / Claude).
+      bedrock_mantle    - Bedrock's OpenAI-compatible "mantle" endpoint (Gemma 4) by base
+                          URL, SigV4-signed with the function's role: no key.
       openai_compatible - any OpenAI-compatible endpoint by base URL + key
-                          (Bedrock's Gemma 4 "mantle" endpoint, or Ollama/vLLM).
+                          (the mantle endpoint with a Bedrock API key, or Ollama/vLLM).
       openrouter        - OpenRouter (API key).
   EOT
   default     = "bedrock"
 
   validation {
-    condition     = contains(["bedrock", "openai_compatible", "openrouter"], var.chat_llm_kind)
-    error_message = "chat_llm_kind must be one of: bedrock, openai_compatible, openrouter."
+    condition     = contains(["bedrock", "bedrock_mantle", "openai_compatible", "openrouter"], var.chat_llm_kind)
+    error_message = "chat_llm_kind must be one of: bedrock, bedrock_mantle, openai_compatible, openrouter."
   }
 }
 
 variable "chat_llm_base_url" {
   type        = string
-  description = "Base URL for the openai_compatible provider, e.g. https://bedrock-mantle.<region>.api.aws/openai/v1. Required for that kind; ignored otherwise."
+  description = "Base URL for the bedrock_mantle and openai_compatible providers, e.g. https://bedrock-mantle.<region>.api.aws/openai/v1. Required for those kinds; ignored otherwise."
   default     = ""
 }
 
@@ -195,6 +197,16 @@ variable "budget_alert_emails" {
 }
 
 # --- Edge (Lightsail container service) ---------------------------------------
+
+variable "edge_enabled" {
+  type        = bool
+  description = <<-EOT
+    Whether this stack runs the Discord edge. false deploys the core alone (a dev core,
+    exercised through the chat harness's --lambda): no Lightsail service, edge IAM user,
+    access key, edge ECR repo or claims table.
+  EOT
+  default     = true
+}
 
 variable "discord_token_ssm_parameter" {
   type        = string

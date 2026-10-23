@@ -98,6 +98,8 @@ python -m petbot.frontends.discord               # the Discord frontend (talks t
 # Try a change against the real model before it deploys (no Discord, no server):
 python -m petbot.services.core.chat conversations/leetcode-daily.json -v
 python -m petbot.services.core.chat --say "what's today's leetcode daily?"
+# ...or against a branch deployed to the dev core (gh workflow run deploy.yml --ref <branch> -f environment=dev):
+python -m petbot.services.core.chat --lambda petbot-dev-core conversations/leetcode-daily.json
 ```
 
 The chat harness sends each message of a scripted conversation (`conversations/`) through
@@ -106,5 +108,8 @@ environment (`CHAT_LLM__*`, `TAVILY_API_KEY`; see `.env.example`), production's 
 and reply-chain history. It prints each reply as Discord would post it, after the agent's
 tool calls (`-v`: and what each returned to the model). Run it on any prompt, persona or
 tool change before it merges; add a conversation file for a case worth keeping.
+`--lambda <function>` sends the same conversation to a deployed core instead (the dev
+core, `petbot-dev-core`, runs any branch: [ADR 0014](docs/adr/0014-dev-core-environment.md)),
+for what only the deployed function shows: its network, IAM and packaging.
 
 CI runs lint/format/mypy/lint-imports/pytest and needs **no secrets**.

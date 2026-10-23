@@ -7,7 +7,7 @@
 locals {
   # Both key-based providers carry the chat API key (an OpenRouter key, or a
   # Bedrock API key for the openai_compatible "mantle" endpoint). Plain bedrock
-  # (Converse + IAM) needs no key.
+  # (Converse + IAM) and bedrock_mantle (SigV4 with the function's role) need no key.
   chat_needs_api_key = contains(["openrouter", "openai_compatible"], var.chat_llm_kind)
 
   # The salt for the telemetry user-id hash, read by both processes when telemetry is on.
@@ -84,6 +84,8 @@ resource "aws_iam_role_policy" "core_secrets" {
 }
 
 data "aws_iam_policy_document" "edge_secrets" {
+  count = local.edge_count
+
   statement {
     actions = ["ssm:GetParameters"]
     resources = [
@@ -104,7 +106,9 @@ data "aws_iam_policy_document" "edge_secrets" {
 }
 
 resource "aws_iam_user_policy" "edge_secrets" {
+  count = local.edge_count
+
   name   = "${local.edge_name}-secrets"
-  user   = aws_iam_user.edge.name
-  policy = data.aws_iam_policy_document.edge_secrets.json
+  user   = aws_iam_user.edge[0].name
+  policy = data.aws_iam_policy_document.edge_secrets[0].json
 }

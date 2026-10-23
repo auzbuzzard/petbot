@@ -24,15 +24,22 @@ variable "bootstrap_apply_environment" {
 }
 
 locals {
-  # What this stack manages, by ARN: the access roles and the policies, the operator user,
-  # the OIDC provider. Its plan and apply roles are scoped to exactly these.
-  bootstrap_iam_arns = [
-    "arn:aws:iam::${local.account_id}:role/${var.name_prefix}-github-*",
-    aws_iam_role.operator.arn,
-    "arn:aws:iam::${local.account_id}:policy/${var.name_prefix}-*",
-    aws_iam_user.operator.arn,
-    aws_iam_openid_connect_provider.github.arn,
-  ]
+  # What this stack manages, by ARN: the access roles and the policies (an environment's
+  # boundary by name when its prefix falls outside <name_prefix>-*), the operator user, the
+  # OIDC provider. Its plan and apply roles are scoped to exactly these.
+  bootstrap_iam_arns = concat(
+    [
+      "arn:aws:iam::${local.account_id}:role/${var.name_prefix}-github-*",
+      aws_iam_role.operator.arn,
+      "arn:aws:iam::${local.account_id}:policy/${var.name_prefix}-*",
+      aws_iam_user.operator.arn,
+      aws_iam_openid_connect_provider.github.arn,
+    ],
+    [
+      for env in values(var.environments) : "arn:aws:iam::${local.account_id}:policy/${env.name_prefix}-workload-boundary"
+      if !startswith("${env.name_prefix}-", "${var.name_prefix}-")
+    ],
+  )
 
   # Each pipeline role and its policy; the trust is github_trust["bootstrap-<key>"].
   bootstrap_role_policies = {

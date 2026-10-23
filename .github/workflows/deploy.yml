@@ -3,11 +3,20 @@ name: Deploy
 # Build + push the core worker image (arm64) and the edge image (amd64) to ECR,
 # then terraform apply — entirely from CI via GitHub OIDC (no static AWS keys).
 # The Lightsail edge pulls its image from ECR (private-registry access). See
-# deploy/terraform/README.md. The deploy role trusts only jobs in the `production`
-# environment (which admits only main); the root of trust itself is applied by
-# bootstrap.yml. Actions are pinned to commit SHAs: this job holds AWS credentials.
+# deploy/terraform/README.md. A push to main deploys `production`, whose deploy role
+# trusts only jobs in that environment (which admits only main). A manual run may pick
+# `dev` instead: the dispatched branch's core, alone (no edge), into its own stack with
+# its own deploy role, to talk to through the chat harness before it merges (see
+# docs/adr/0014). The root of trust itself is applied by bootstrap.yml. Actions are
+# pinned to commit SHAs: this job holds AWS credentials.
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: "Where to deploy: production (main only) or dev (any branch, core only)."
+        type: choice
+        options: [production, dev]
+        default: production
   push:
     branches: [main]
 
@@ -16,8 +25,9 @@ permissions:
   id-token: write
   contents: read
 
+# One deploy per environment at a time: two branches deployed to dev take turns.
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-${{ inputs.environment || 'production' }}
   cancel-in-progress: false
 
 jobs:
@@ -26,14 +36,16 @@ jobs:
     # image builds natively; the smaller edge image cross-builds for amd64 via
     # QEMU (cheaper to emulate than the heavy worker image).
     runs-on: ubuntu-24.04-arm
-    # The deploy role's trust names this environment; the environment admits only
-    # main and needs a required reviewer's approval, so a merge alone ships nothing.
-    environment: production
+    # Each deploy role's trust names its environment. `production` admits only main and
+    # needs a required reviewer's approval, so a merge alone ships nothing; a push always
+    # deploys there.
+    environment: ${{ inputs.environment || 'production' }}
     env:
       TF_DIR: deploy/terraform
+      DEPLOY_ENV: ${{ inputs.environment || 'production' }}
       # Deploy config, read by Terraform as TF_VAR_*; secret *values* stay in SSM,
       # referenced by name. AWS_REGION is a repository variable (bootstrap.yml reads it
-      # too); the rest are the `production` environment's. The state bucket and the role
+      # too); the rest are the deploy environment's. The state bucket and the role
       # ARN carry the account ID, so they are read as secrets, which the public log masks;
       # a variable of the same name stands in while no secret is set, unmasked.
       # Job-level, because only a job that references an environment sees its variables.
@@ -54,6 +66,24 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      # Each environment's stack: its resource prefix (bootstrap's var.environments names
+      # the same one, which its deploy role is scoped to), its state, and whether it runs
+      # the edge. Production's is the stack as it always was: petbot, petbot/terraform.tfstate.
+      - name: Environment
+        run: |
+          case "$DEPLOY_ENV" in
+            production) prefix=petbot; edge=true; lambda_env=prod ;;
+            dev) prefix=petbot-dev; edge=false; lambda_env=dev ;;
+            *) echo "::error::Unknown environment: $DEPLOY_ENV"; exit 1 ;;
+          esac
+          {
+            echo "TF_STATE_KEY=$prefix/terraform.tfstate"
+            echo "TF_VAR_name_prefix=$prefix"
+            echo "TF_VAR_edge_enabled=$edge"
+            echo "TF_VAR_lambda_environment=$lambda_env"
+            echo "EDGE=$edge"
+          } >> "$GITHUB_ENV"
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
@@ -65,6 +95,7 @@ jobs:
       # buildx for the gha layer cache; QEMU for the amd64 edge build on arm.
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        if: env.EDGE == 'true'
 
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
@@ -78,24 +109,29 @@ jobs:
         run: |
           terraform init \
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}" \
-            -backend-config="key=petbot/terraform.tfstate" \
+            -backend-config="key=$TF_STATE_KEY" \
             -backend-config="region=${{ vars.AWS_REGION }}" \
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
 
       # The function is pinned to its image digest, and the edge service must grant
       # ECR-pull access before the deployment is created — so stand up the two ECR
-      # repos, the Lightsail service, and the edge repo policy first (idempotent).
+      # repos, the Lightsail service, and the edge repo policy first (idempotent). A stack
+      # without the edge needs only the core's repo.
       - name: Ensure registries + edge service exist
         working-directory: ${{ env.TF_DIR }}
         run: |
-          terraform apply -auto-approve \
-            -target=aws_ecr_repository.this \
-            -target=aws_ecr_repository.edge \
-            -target=aws_lightsail_container_service.edge \
-            -target=aws_ecr_repository_policy.edge
+          if [ "$EDGE" = true ]; then
+            terraform apply -auto-approve \
+              -target=aws_ecr_repository.this \
+              -target=aws_ecr_repository.edge \
+              -target=aws_lightsail_container_service.edge \
+              -target=aws_ecr_repository_policy.edge
+            echo "EDGE_ECR_REPO=$(terraform output -raw edge_ecr_repository_url)" >> "$GITHUB_ENV"
+          else
+            terraform apply -auto-approve -target=aws_ecr_repository.this
+          fi
           echo "ECR_REPO=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_ENV"
-          echo "EDGE_ECR_REPO=$(terraform output -raw edge_ecr_repository_url)" >> "$GITHUB_ENV"
 
       - name: ECR login
         run: |
@@ -117,6 +153,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=worker
 
       - name: Build & push edge image (amd64)
+        if: env.EDGE == 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
@@ -143,4 +180,4 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: |
           terraform output -raw core_function_arn; echo
-          terraform output -raw edge_container_service_name; echo
+          if [ "$EDGE" = true ]; then terraform output -raw edge_container_service_name; echo; fi

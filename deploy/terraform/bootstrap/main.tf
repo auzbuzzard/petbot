@@ -2,12 +2,14 @@
 # (deploy, and bootstrap's own plan/apply pipeline in pipeline.tf), the workload
 # permissions boundary and the operator's access (operator.tf).
 #
-# Every OIDC role trusts exactly one GitHub environment, never a branch or a PR, and the
-# environments' deployment-branch rules admit only main. The deploy workflow assumes
-# petbot-github-deploy from `production`; the bootstrap workflow plans this stack from
+# Every OIDC role trusts exactly one GitHub environment, never a branch or a PR. Each
+# deploy environment (var.environments) gets its own deploy role and workload boundary,
+# scoped to its own <name_prefix>-* resources and state: the deploy workflow assumes
+# petbot-github-deploy from `production` (main only) and petbot-github-deploy-dev from
+# `dev` (any branch; see docs/adr/0014). The bootstrap workflow plans this stack from
 # `bootstrap-plan` and applies the reviewed plan from `bootstrap`, which needs a required
-# reviewer's approval. An admin applies this stack by hand exactly once, to seed it in a
-# new account. See README "Bootstrap" and docs/adr/0012.
+# reviewer's approval; both admit only main. An admin applies this stack by hand exactly
+# once, to seed it in a new account. See README "Bootstrap" and docs/adr/0012.
 #
 # Its own state lives in the bucket it manages (key bootstrap/terraform.tfstate),
 # locked natively by S3 (`use_lockfile`, Terraform >= 1.11).
@@ -46,16 +48,49 @@ variable "github_repo" {
   default     = "auzbuzzard/petbot"
 }
 
-variable "deploy_environment" {
-  type        = string
-  description = "GitHub environment whose jobs may assume the deploy role (deploy.yml's `environment:`)."
-  default     = "production"
-}
-
 variable "name_prefix" {
   type        = string
-  description = "Must match var.name_prefix in the root stack; the deploy role may manage resources named <name_prefix>-*."
+  description = "Prefix of the root of trust: the CI roles (<name_prefix>-github-*) and the operator's role and policies."
   default     = "petbot"
+}
+
+variable "environments" {
+  type = map(object({
+    # The root stack's var.name_prefix there; its deploy role manages <name_prefix>-*
+    # resources and the state under <name_prefix>/.
+    name_prefix = string
+    # GitHub environment whose jobs may assume its deploy role (deploy.yml's `environment:`).
+    github_environment = string
+    # Whether its stack runs the Discord edge (the root stack's var.edge_enabled): the
+    # edge's IAM user and Lightsail service are only in scope where it does.
+    edge = optional(bool, true)
+    # Whether its deploy role manages AWS Budgets (the root stack's monthly_budget_usd).
+    budget = optional(bool, true)
+    # Whether its workloads may call Bedrock's mantle endpoint with their own IAM identity
+    # (the root stack's chat_llm_kind = "bedrock_mantle").
+    bedrock_mantle = optional(bool, false)
+  }))
+  description = "Each deploy environment, by name: production deploys from main; dev deploys any branch's core, with no edge."
+  default = {
+    production = {
+      name_prefix        = "petbot"
+      github_environment = "production"
+    }
+    dev = {
+      name_prefix        = "petbot-dev"
+      github_environment = "dev"
+      edge               = false
+      budget             = false
+      bedrock_mantle     = true
+    }
+  }
+
+  validation {
+    condition = length(distinct([for e in values(var.environments) : e.name_prefix])) == length(var.environments) && alltrue([
+      for e in values(var.environments) : !startswith(e.name_prefix, "${var.name_prefix}-github-")
+    ])
+    error_message = "Each environment needs its own name_prefix, outside <name_prefix>-github-* (the CI roles)."
+  }
 }
 
 resource "aws_s3_bucket" "state" {
@@ -143,14 +178,24 @@ resource "aws_iam_openid_connect_provider" "github" {
 
 # The GitHub environment each CI role is assumed from. Each role trusts exactly its
 # environment's `sub`: the claim names the environment whenever a job references one, so a
-# job on any other branch, a pull request, or any other workflow (including the AI review
-# bots, which hold id-token: write) cannot assume it, and each environment's branch rule
-# admits only main.
+# job in no environment, a pull request, or any other workflow (including the AI review
+# bots, which hold id-token: write) cannot assume it. The branch rules of `production` and
+# the bootstrap environments admit only main.
 locals {
-  github_role_environments = {
-    deploy            = var.deploy_environment
-    "bootstrap-plan"  = var.bootstrap_plan_environment
-    "bootstrap-apply" = var.bootstrap_apply_environment
+  github_role_environments = merge(
+    { for name, env in var.environments : "deploy-${name}" => env.github_environment },
+    {
+      "bootstrap-plan"  = var.bootstrap_plan_environment
+      "bootstrap-apply" = var.bootstrap_apply_environment
+    },
+  )
+
+  # Production's deploy role keeps the name it was created with; every other
+  # environment's is suffixed. All of them fall under <name_prefix>-github-*, which no
+  # deploy role may edit (DenyAccessPrincipals) and bootstrap's pipeline manages.
+  deploy_role_names = {
+    for name, env in var.environments :
+    name => name == "production" ? "${var.name_prefix}-github-deploy" : "${var.name_prefix}-github-deploy-${name}"
   }
 }
 
@@ -180,26 +225,36 @@ data "aws_iam_policy_document" "github_trust" {
 }
 
 resource "aws_iam_role" "github_deploy" {
-  name               = "${var.name_prefix}-github-deploy"
-  assume_role_policy = data.aws_iam_policy_document.github_trust["deploy"].json
+  for_each = var.environments
+
+  name               = local.deploy_role_names[each.key]
+  assume_role_policy = data.aws_iam_policy_document.github_trust["deploy-${each.key}"].json
 }
 
 locals {
   account_id = data.aws_caller_identity.current.account_id
-  # ARN prefixes for "any resource of this stack": everything the root stack creates is
-  # named <name_prefix>-*, so new resources fall inside the deploy role's scope as long
+  # ARN prefixes for "any resource of this stack": everything a root stack creates is
+  # named <its name_prefix>-*, so new resources fall inside its deploy role's scope as long
   # as they follow the convention.
   arn_region = "${var.aws_region}:${local.account_id}"
   stack      = "${var.name_prefix}-*"
+  # Every environment's resources, for the operator: <name_prefix>-*, plus the pattern of
+  # any environment whose prefix falls outside it.
+  stacks = concat([local.stack], [
+    for env in values(var.environments) : "${env.name_prefix}-*"
+    if !startswith("${env.name_prefix}-", "${var.name_prefix}-")
+  ])
 }
 
 # --- The workload boundary ----------------------------------------------------
-# The ceiling for every role and user the stack creates. The deploy role may create
-# and edit IAM principals only with this boundary attached (see ManageStackRoles and
-# ManageStackUsers), and only bootstrap can change it, so whatever policy CI writes, a
-# workload can never do more than this: no IAM, and data-plane access to the stack's
-# own resources only. A workload needing more is a bootstrap change.
+# One per environment: the ceiling for every role and user its stack creates. Its deploy
+# role may create and edit IAM principals only with this boundary attached (see
+# ManageStackRoles and ManageStackUsers), and only bootstrap can change it, so whatever
+# policy CI writes, a workload can never do more than this: no IAM, and data-plane access
+# to its own stack's resources only. A workload needing more is a bootstrap change.
 data "aws_iam_policy_document" "workload_boundary" {
+  for_each = var.environments
+
   statement {
     sid       = "WriteLogs"
     actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
@@ -219,10 +274,20 @@ data "aws_iam_policy_document" "workload_boundary" {
     resources = ["*"]
   }
 
+  # Bedrock's OpenAI-compatible endpoint, signed with the workload's own identity (SigV4).
+  dynamic "statement" {
+    for_each = each.value.bedrock_mantle ? [1] : []
+    content {
+      sid       = "InvokeMantleModels"
+      actions   = ["bedrock-mantle:CreateInference"]
+      resources = ["arn:aws:bedrock-mantle:${local.arn_region}:project/*"]
+    }
+  }
+
   statement {
     sid       = "InvokeStackFunctions"
     actions   = ["lambda:InvokeFunction", "lambda:GetFunctionConfiguration"]
-    resources = ["arn:aws:lambda:${local.arn_region}:function:${local.stack}"]
+    resources = ["arn:aws:lambda:${local.arn_region}:function:${each.value.name_prefix}-*"]
   }
 
   statement {
@@ -234,13 +299,13 @@ data "aws_iam_policy_document" "workload_boundary" {
       "dynamodb:DeleteItem",
       "dynamodb:Query",
     ]
-    resources = ["arn:aws:dynamodb:${local.arn_region}:table/${local.stack}"]
+    resources = ["arn:aws:dynamodb:${local.arn_region}:table/${each.value.name_prefix}-*"]
   }
 
   statement {
     sid       = "ReadStackSecrets"
     actions   = ["ssm:GetParameter", "ssm:GetParameters"]
-    resources = ["arn:aws:ssm:${local.arn_region}:parameter/${var.name_prefix}/*"]
+    resources = ["arn:aws:ssm:${local.arn_region}:parameter/${each.value.name_prefix}/*"]
   }
 
   statement {
@@ -256,21 +321,27 @@ data "aws_iam_policy_document" "workload_boundary" {
 }
 
 resource "aws_iam_policy" "workload_boundary" {
-  name        = "${var.name_prefix}-workload-boundary"
-  description = "Permissions boundary for every IAM role and user the ${var.name_prefix} stack creates."
-  policy      = data.aws_iam_policy_document.workload_boundary.json
+  for_each = var.environments
+
+  name        = "${each.value.name_prefix}-workload-boundary"
+  description = "Permissions boundary for every IAM role and user the ${each.value.name_prefix} stack creates."
+  policy      = data.aws_iam_policy_document.workload_boundary[each.key].json
 }
 
-output "workload_boundary_arn" {
-  value = aws_iam_policy.workload_boundary.arn
+output "workload_boundary_arns" {
+  description = "Each environment's workload boundary (the root stack derives it from name_prefix)."
+  value       = { for name, policy in aws_iam_policy.workload_boundary : name => policy.arn }
 }
 
-# The deploy role's permissions. Service-level action wildcards (e.g. ecr:*) are kept
+# Each deploy role's permissions. Service-level action wildcards (e.g. ecr:*) are kept
 # where enumerating every Terraform-issued call is brittle; each statement is scoped to
-# resources named <name_prefix>-*, so a stolen CI token reaches this stack and nothing
-# else in the account. IAM writes require the workload boundary, and the CI roles are
-# carved out (DenyAccessPrincipals), so the deploy role can never widen its own permissions.
+# resources named after its environment's <name_prefix>-*, so a stolen CI token reaches that
+# stack and nothing else in the account. IAM writes require the environment's workload
+# boundary, and the CI roles are carved out (DenyAccessPrincipals), so a deploy role can
+# never widen its own permissions.
 data "aws_iam_policy_document" "deploy_permissions" {
+  for_each = var.environments
+
   # The root stack's state only (deploy.yml: key=<name_prefix>/terraform.tfstate);
   # bootstrap's own state, in the same bucket, stays out of CI's reach.
   statement {
@@ -282,13 +353,13 @@ data "aws_iam_policy_document" "deploy_permissions" {
   statement {
     sid       = "TerraformState"
     actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-    resources = ["${aws_s3_bucket.state.arn}/${var.name_prefix}/*"]
+    resources = ["${aws_s3_bucket.state.arn}/${each.value.name_prefix}/*"]
   }
 
   statement {
     sid       = "ReadRuntimeSecrets"
     actions   = ["ssm:GetParameter", "ssm:GetParameters"]
-    resources = ["arn:aws:ssm:${local.arn_region}:parameter/${var.name_prefix}/*"]
+    resources = ["arn:aws:ssm:${local.arn_region}:parameter/${each.value.name_prefix}/*"]
   }
 
   # SecureString parameters are KMS-encrypted; reading them with decryption needs
@@ -315,21 +386,21 @@ data "aws_iam_policy_document" "deploy_permissions" {
   statement {
     sid       = "ManageEcrRepos"
     actions   = ["ecr:*"]
-    resources = ["arn:aws:ecr:${local.arn_region}:repository/${local.stack}"]
+    resources = ["arn:aws:ecr:${local.arn_region}:repository/${each.value.name_prefix}-*"]
   }
 
   statement {
     sid     = "ManageLambda"
     actions = ["lambda:*"]
     # The trailing wildcard also covers qualified ARNs (versions, aliases).
-    resources = ["arn:aws:lambda:${local.arn_region}:function:${local.stack}"]
+    resources = ["arn:aws:lambda:${local.arn_region}:function:${each.value.name_prefix}-*"]
   }
 
   statement {
     sid     = "ManageLogs"
     actions = ["logs:*"]
     # The trailing wildcard also covers the groups' streams (":log-stream:...").
-    resources = ["arn:aws:logs:${local.arn_region}:log-group:/aws/lambda/${local.stack}"]
+    resources = ["arn:aws:logs:${local.arn_region}:log-group:/aws/lambda/${each.value.name_prefix}-*"]
   }
 
   # logs:DescribeLogGroups is a list operation that AWS only authorizes on "*"
@@ -345,13 +416,18 @@ data "aws_iam_policy_document" "deploy_permissions" {
   statement {
     sid       = "ManageDynamoTables"
     actions   = ["dynamodb:*"]
-    resources = ["arn:aws:dynamodb:${local.arn_region}:table/${local.stack}"]
+    resources = ["arn:aws:dynamodb:${local.arn_region}:table/${each.value.name_prefix}-*"]
   }
 
-  statement {
-    sid       = "ManageBudget"
-    actions   = ["budgets:*"]
-    resources = ["arn:aws:budgets::${local.account_id}:budget/*"]
+  # Budgets are account-wide (any budget/* is in scope), so only an environment that sets
+  # one may manage them.
+  dynamic "statement" {
+    for_each = each.value.budget ? [1] : []
+    content {
+      sid       = "ManageBudget"
+      actions   = ["budgets:*"]
+      resources = ["arn:aws:budgets::${local.account_id}:budget/*"]
+    }
   }
 
   # The stack's IAM roles (the Lambda execution role). Creating one, or changing what it
@@ -366,11 +442,11 @@ data "aws_iam_policy_document" "deploy_permissions" {
       "iam:PutRolePolicy",
       "iam:DeleteRolePolicy",
     ]
-    resources = ["arn:aws:iam::${local.account_id}:role/${local.stack}"]
+    resources = ["arn:aws:iam::${local.account_id}:role/${each.value.name_prefix}-*"]
     condition {
       test     = "StringEquals"
       variable = "iam:PermissionsBoundary"
-      values   = [aws_iam_policy.workload_boundary.arn]
+      values   = [aws_iam_policy.workload_boundary[each.key].arn]
     }
   }
 
@@ -386,7 +462,7 @@ data "aws_iam_policy_document" "deploy_permissions" {
       "iam:TagRole",
       "iam:UntagRole",
     ]
-    resources = ["arn:aws:iam::${local.account_id}:role/${local.stack}"]
+    resources = ["arn:aws:iam::${local.account_id}:role/${each.value.name_prefix}-*"]
   }
 
   # PassRole is the classic privilege-escalation lever, so it is doubly fenced:
@@ -394,7 +470,7 @@ data "aws_iam_policy_document" "deploy_permissions" {
   statement {
     sid       = "PassStackRolesToLambda"
     actions   = ["iam:PassRole"]
-    resources = ["arn:aws:iam::${local.account_id}:role/${local.stack}"]
+    resources = ["arn:aws:iam::${local.account_id}:role/${each.value.name_prefix}-*"]
     condition {
       test     = "StringEquals"
       variable = "iam:PassedToService"
@@ -404,47 +480,58 @@ data "aws_iam_policy_document" "deploy_permissions" {
 
   # The stack's IAM users (the edge's identity for invoking the core Lambda — see
   # edge.tf), with their access keys and inline policies. As for roles, creating one or
-  # changing what it may do requires the workload boundary on it.
-  statement {
-    sid = "ManageStackUsers"
-    actions = [
-      "iam:CreateUser",
-      "iam:PutUserPermissionsBoundary",
-      "iam:PutUserPolicy",
-      "iam:DeleteUserPolicy",
-    ]
-    resources = ["arn:aws:iam::${local.account_id}:user/${local.stack}"]
-    condition {
-      test     = "StringEquals"
-      variable = "iam:PermissionsBoundary"
-      values   = [aws_iam_policy.workload_boundary.arn]
+  # changing what it may do requires the workload boundary on it. Only where the stack
+  # runs the edge.
+  dynamic "statement" {
+    for_each = each.value.edge ? [1] : []
+    content {
+      sid = "ManageStackUsers"
+      actions = [
+        "iam:CreateUser",
+        "iam:PutUserPermissionsBoundary",
+        "iam:PutUserPolicy",
+        "iam:DeleteUserPolicy",
+      ]
+      resources = ["arn:aws:iam::${local.account_id}:user/${each.value.name_prefix}-*"]
+      condition {
+        test     = "StringEquals"
+        variable = "iam:PermissionsBoundary"
+        values   = [aws_iam_policy.workload_boundary[each.key].arn]
+      }
     }
   }
 
-  statement {
-    sid = "MaintainStackUsers"
-    actions = [
-      "iam:GetUser",
-      "iam:DeleteUser",
-      "iam:TagUser",
-      "iam:UntagUser",
-      "iam:CreateAccessKey",
-      "iam:DeleteAccessKey",
-      "iam:ListAccessKeys",
-      "iam:GetUserPolicy",
-      "iam:ListUserPolicies",
-      "iam:ListAttachedUserPolicies",
-    ]
-    resources = ["arn:aws:iam::${local.account_id}:user/${local.stack}"]
+  dynamic "statement" {
+    for_each = each.value.edge ? [1] : []
+    content {
+      sid = "MaintainStackUsers"
+      actions = [
+        "iam:GetUser",
+        "iam:DeleteUser",
+        "iam:TagUser",
+        "iam:UntagUser",
+        "iam:CreateAccessKey",
+        "iam:DeleteAccessKey",
+        "iam:ListAccessKeys",
+        "iam:GetUserPolicy",
+        "iam:ListUserPolicies",
+        "iam:ListAttachedUserPolicies",
+      ]
+      resources = ["arn:aws:iam::${local.account_id}:user/${each.value.name_prefix}-*"]
+    }
   }
 
   # The edge runs on Lightsail's container service. Lightsail resources are
-  # identified by random-GUID ARNs, so there is no name-based ARN to scope to.
-  # The blast radius is the account's Lightsail, which holds only this edge.
-  statement {
-    sid       = "ManageEdgeContainerService"
-    actions   = ["lightsail:*"]
-    resources = ["*"]
+  # identified by random-GUID ARNs, so there is no name-based ARN to scope to: the
+  # blast radius is the account's Lightsail, which holds only the production edge, so
+  # an environment without an edge gets none of it.
+  dynamic "statement" {
+    for_each = each.value.edge ? [1] : []
+    content {
+      sid       = "ManageEdgeContainerService"
+      actions   = ["lightsail:*"]
+      resources = ["*"]
+    }
   }
 
   # The access principals: CI's roles (<name_prefix>-github-*), and the operator's role
@@ -463,12 +550,31 @@ data "aws_iam_policy_document" "deploy_permissions" {
 }
 
 resource "aws_iam_role_policy" "github_deploy" {
+  for_each = var.environments
+
   name   = "deploy"
-  role   = aws_iam_role.github_deploy.id
-  policy = data.aws_iam_policy_document.deploy_permissions.json
+  role   = aws_iam_role.github_deploy[each.key].id
+  policy = data.aws_iam_policy_document.deploy_permissions[each.key].json
 }
 
-output "deploy_role_arn" {
-  description = "Set as the DEPLOY_ROLE_ARN GitHub Actions variable."
-  value       = aws_iam_role.github_deploy.arn
+output "deploy_role_arns" {
+  description = "Each environment's deploy role: set as the DEPLOY_ROLE_ARN secret of its GitHub environment."
+  value       = { for name, role in aws_iam_role.github_deploy : name => role.arn }
+}
+
+# Production's deploy role and boundary, created before environments existed, keep their
+# state as the "production" instances.
+moved {
+  from = aws_iam_role.github_deploy
+  to   = aws_iam_role.github_deploy["production"]
+}
+
+moved {
+  from = aws_iam_role_policy.github_deploy
+  to   = aws_iam_role_policy.github_deploy["production"]
+}
+
+moved {
+  from = aws_iam_policy.workload_boundary
+  to   = aws_iam_policy.workload_boundary["production"]
 }

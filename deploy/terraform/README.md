@@ -9,6 +9,10 @@ Infrastructure-as-code for PetBot 2.1: two deployables over one neutral core.
   service** (`nano`, flat-rate, public IPv4 bundled). It holds the gateway
   WebSocket, maps each `@mention` to a dispatched call, and invokes the worker.
 
+The same stack deploys a second environment, **dev**: a core worker alone
+(`edge_enabled = false`), built from any branch and talked to through the chat
+harness rather than Discord. See [Dev core](#dev-core-an-unmerged-branch-before-it-merges).
+
 ```
 bootstrap/        root of trust: state bucket, GitHub OIDC, CI roles, workload boundary, operator access
 *.tf              the core worker (Lambda + ECR + IAM) and edge (Lightsail) stack
@@ -86,27 +90,47 @@ boundary and the operator's access. Its state lives in the same bucket, under
 
 **Who may assume what.** Every OIDC role trusts exactly one GitHub environment (the
 token's `sub` is `repo:auzbuzzard/petbot:environment:<name>` whenever a job references
-an environment), and each environment admits only `main`:
+an environment). Every environment but `dev` admits only `main`:
 
 | Role | Assumed by | Environment | Gate |
 | --- | --- | --- | --- |
-| `petbot-github-deploy` | `deploy.yml` (root stack) | `production` | `main` only + required reviewer |
+| `petbot-github-deploy` | `deploy.yml` (production stack) | `production` | `main` only + required reviewer |
+| `petbot-github-deploy-dev` | `deploy.yml` run for `dev` (dev stack) | `dev` | any branch |
 | `petbot-github-bootstrap-plan` | `bootstrap.yml`, plan job (read-only) | `bootstrap-plan` | `main` only |
 | `petbot-github-bootstrap-apply` | `bootstrap.yml`, apply job | `bootstrap` | `main` only + required reviewer |
 | `petbot-operator` | the `claude` IAM user (`sts:AssumeRole`) | — | read-only |
 
-No pull request, other branch or other workflow (the AI review bots hold
-`id-token: write`) can assume any of them. The deploy role is explicitly denied the
-access roles (`<name_prefix>-github-*`, `<name_prefix>-operator`), so it can't widen
-its own or anyone's permissions.
+No pull request, workflow run outside an environment, or other workflow (the AI review
+bots hold `id-token: write`) can assume any of them, and no branch but `main` can assume
+any but the dev role. The deploy roles are explicitly denied the access roles
+(`petbot-github-*`, `petbot-operator`), so none can widen its own or anyone's permissions.
 
-**The deploy role** is scoped by naming convention: it may manage resources named
-`<name_prefix>-*` (ECR repos, the Lambda and its log group, DynamoDB tables, IAM
-roles and users). Every role and user it creates must carry the
+**Environments.** `var.environments` in `bootstrap/` lists each deploy environment
+with its `name_prefix`; `deploy.yml` maps the same environment to the same prefix and
+to the state key `<name_prefix>/terraform.tfstate`. Each gets its own deploy role and
+workload boundary:
+
+| Environment | `name_prefix` | Stack | State key |
+| --- | --- | --- | --- |
+| `production` | `petbot` | core + edge | `petbot/terraform.tfstate` |
+| `dev` | `petbot-dev` | core only | `petbot-dev/terraform.tfstate` |
+
+**A deploy role** is scoped by naming convention: it may manage resources named
+`<name_prefix>-*` of its environment (ECR repos, the Lambda and its log group,
+DynamoDB tables, IAM roles, plus IAM users and Lightsail where the stack runs the edge
+and AWS Budgets where it sets one), its own state, and its own SSM parameters
+(`/<name_prefix>/*`). Every role and user it creates must carry its
 **`<name_prefix>-workload-boundary`** permissions boundary, so no policy CI writes
 can grant a workload more than that ceiling (no IAM; data-plane access to the
 stack's own resources). Adding resources to the root stack therefore needs **no
 bootstrap change**; only a new AWS service does.
+
+The dev role, reachable from any branch, reaches nothing of production's:
+`petbot-dev-*` matches no production resource, its state and parameters are under
+`petbot-dev/`, and it has no Lightsail, IAM-user or Budgets rights. The reverse is not
+isolated: production's `petbot-*` scope covers `petbot-dev-*`, so the production
+deploy role (and, through its boundary, a production workload) could reach dev
+resources. That direction is the one `main` and a required reviewer already guard.
 
 **Changing bootstrap** is a PR like any other. After it merges, `bootstrap.yml`
 plans with the read-only role and posts the plan, with its digest, to the run's
@@ -127,8 +151,12 @@ environment and assume its role.
 | Environment | Deployment branches | Required reviewers |
 | --- | --- | --- |
 | `production` | Selected: `main` | the repo owner |
+| `dev` | All branches | none |
 | `bootstrap-plan` | Selected: `main` | none |
 | `bootstrap` | Selected: `main` | the repo owner |
+
+`dev` admits every branch on purpose: deploying an unmerged branch is what it is for.
+Its role's reach is what keeps that safe (above).
 
 **Seeding (once per account, by an admin).** The pipeline can't create the roles it
 assumes, so the first apply is by hand, with admin credentials (e.g. CloudShell with
@@ -159,7 +187,8 @@ Actions → Secrets) when both pipelines read it:
 | GitHub Actions secret | Scope | Value | Where it comes from |
 | --- | --- | --- | --- |
 | `TF_STATE_BUCKET` | repo | the state bucket name | the `state_bucket` you chose above |
-| `DEPLOY_ROLE_ARN` | `production` | the deploy role ARN | `terraform -chdir=bootstrap output deploy_role_arn` |
+| `DEPLOY_ROLE_ARN` | `production` | production's deploy role ARN | `terraform -chdir=bootstrap output deploy_role_arns` (`production`) |
+| `DEPLOY_ROLE_ARN` | `dev` | dev's deploy role ARN | `terraform -chdir=bootstrap output deploy_role_arns` (`dev`) |
 | `BOOTSTRAP_PLAN_ROLE_ARN` | `bootstrap-plan` | the bootstrap plan role ARN | `terraform -chdir=bootstrap output bootstrap_plan_role_arn` |
 | `BOOTSTRAP_APPLY_ROLE_ARN` | `bootstrap` | the bootstrap apply role ARN | `terraform -chdir=bootstrap output bootstrap_apply_role_arn` |
 
@@ -184,14 +213,25 @@ jobs that reference that environment. The deploy reads its config as `TF_VAR_*`:
 | `CHAT_LLM_API_KEY_SSM_PARAMETER` | `production` | e.g. `/petbot/core/bedrock_api_key` | for `openai_compatible` + `openrouter`; **unset** for `bedrock` |
 | `TAVILY_API_KEY_SSM_PARAMETER` | `production` | e.g. `/petbot/core/tavily_api_key` | optional; the web search key. Unset ⇒ keyless `ddgs` search only |
 | `OBSERVABILITY_ENABLED`, `OBSERVABILITY_SAMPLE_RATIO`, `TELEMETRY_ID_SALT_SSM_PARAMETER` | `production` | see `observability.tf` | optional |
+| `CHAT_LLM_KIND` | `dev` | `bedrock_mantle` | the model on its own IAM role: no key |
+| `CHAT_LLM_MODEL` | `dev` | `google.gemma-4-31b` | production's model |
+| `CHAT_LLM_BASE_URL` | `dev` | `https://bedrock-mantle.us-east-1.api.aws/openai/v1` | production's endpoint |
+
+The dev core reads no secret: it calls the model with its role, and its boundary can't
+read production's `/petbot/*` parameters, so web search runs on the keyless `ddgs`
+fallback and the boorus unauthenticated. A dev key, if one is ever wanted, goes under
+`/petbot-dev/` with its `*_SSM_PARAMETER` variable set on `dev`.
 
 Scoping is hygiene, not the security boundary: none of these variables is secret, and
 AWS enforces who may assume each role by the token's environment claim.
 
 **Provider notes.** `bedrock` = the Converse API with IAM auth (no key) — Nova /
 Claude. **Gemma 4 is served only via Bedrock's OpenAI-compatible "mantle"
-endpoint**, so for Gemma 4 use `CHAT_LLM_KIND=openai_compatible` with the
-`CHAT_LLM_BASE_URL` above and a **Bedrock API key** in SSM. The same
+endpoint**, reached two ways: `CHAT_LLM_KIND=bedrock_mantle` signs each request with
+the function's own role (SigV4; the role gets `bedrock-mantle:CreateInference` and no
+key exists), and `CHAT_LLM_KIND=openai_compatible` sends a **Bedrock API key** from
+SSM. `bedrock_mantle` also needs the environment's workload boundary to allow mantle
+(`bedrock_mantle = true` in `var.environments`; dev has it, production not yet). The
 `openai_compatible` kind also points at a self-hosted Ollama/vLLM later — just a
 different base URL.
 
@@ -205,7 +245,8 @@ them; this one-time setup is yours to do.)
 call) what triage needs and nothing more: the stack's Lambda logs, the edge's
 container logs and deployments, function config, the stack's DynamoDB tables, ECR
 images, IAM reads and policy simulation, metrics, traces and CloudTrail, plus
-`lambda:InvokeFunction` on the core worker for integration tests. No secrets
+`lambda:InvokeFunction` on each environment's core worker for integration tests (the
+chat harness's `--lambda`). No secrets
 (`ssm:GetParameter`), no state bucket (Terraform state holds the edge's AWS access
 key), no writes.
 
@@ -244,6 +285,29 @@ Changes to access go through the bootstrap pipeline, never through this role.
 images to ECR (arm64 worker, amd64 edge), then `terraform apply` (the Lightsail
 edge pulls its image from ECR). A push to `main` (or a manual *Actions → Deploy
 → Run workflow*) ships it. **No deploy is run from a developer machine.**
+
+## Dev core (an unmerged branch, before it merges)
+
+Deploy any branch's core to dev, then talk to it with the same conversations the
+in-process harness runs:
+
+```sh
+gh workflow run deploy.yml --ref <branch> -f environment=dev
+python -m petbot.services.core.chat --lambda petbot-dev-core conversations/leetcode-daily.json
+python -m petbot.services.core.chat --lambda petbot-dev-core --say "what's today's leetcode daily?"
+```
+
+The harness invokes the function the way the edge does (`LambdaTransport`), with
+your AWS credentials (`AWS_REGION` or a profile's region; the `petbot-operator` role
+may invoke it). The turn runs in the Lambda, on its network, configuration and time
+budget, so it answers what in-process runs can't: whether a site answers AWS's
+addresses, whether the function's IAM and packaging work. Its tool calls are in its
+log group, `/aws/lambda/petbot-dev-core`.
+
+Dev is one slot: each run replaces what the last one deployed, and runs take turns
+(`concurrency`). Idle, a Lambda costs nothing; what remains is ECR storage for its
+images (the lifecycle policy keeps the last `ecr_keep_last_images`) and its retained
+logs. `terraform destroy` with dev's state key removes it all.
 
 ## Deploy (manual / break-glass)
 
@@ -310,6 +374,7 @@ empty the versioned bucket (console → *Empty*), then
 
 ## CI checks
 
-`.github/workflows/terraform.yml` runs `fmt -check` + `validate` on PRs (no AWS
-credentials needed). `.github/workflows/deploy.yml` runs the OIDC build/apply
+`.github/workflows/terraform.yml` runs `fmt -check` + `validate` on PRs, and
+`terraform test` on the root stack (`tests/`: plans production and dev against mock
+providers), with no AWS credentials. `.github/workflows/deploy.yml` runs the OIDC build/apply
 pipeline above.

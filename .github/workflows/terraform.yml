@@ -37,6 +37,10 @@ jobs:
           terraform -chdir=deploy/terraform init -backend=false
           terraform -chdir=deploy/terraform validate
 
+      # Plans each kind of environment against mock providers (no credentials).
+      - name: Test (root stack)
+        run: terraform -chdir=deploy/terraform test
+
       - name: Validate (bootstrap stack)
         run: |
           terraform -chdir=deploy/terraform/bootstrap init -backend=false

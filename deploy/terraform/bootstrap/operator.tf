@@ -1,6 +1,7 @@
 # --- Operator access: read-only triage (plus invoking the core for integration tests) --
 # The operator (an agent or a human on call) reads logs, deployments and tables to
-# triage incidents, and invokes the core worker to test prompts end to end. It is part
+# triage incidents, and invokes each environment's core worker to test prompts end to end
+# (the chat harness's --lambda). It is part
 # of the root of trust, like the CI roles: bootstrap grants it, and the deploy role can never
 # edit it (DenyAccessPrincipals). The operator's IAM user holds long-lived keys, created out
 # of band and never in Terraform state; the user may only assume petbot-operator, whose
@@ -62,11 +63,13 @@ data "aws_iam_policy_document" "operator_permissions" {
     ]
     # The stack's Lambda log groups (the trailing wildcard also covers their streams), and
     # aws/spans, where X-Ray Transaction Search writes traces (observability.tf).
-    resources = [
-      "arn:aws:logs:${local.arn_region}:log-group:/aws/lambda/${local.stack}",
-      "arn:aws:logs:${local.arn_region}:log-group:aws/spans",
-      "arn:aws:logs:${local.arn_region}:log-group:aws/spans:*",
-    ]
+    resources = concat(
+      [for stack in local.stacks : "arn:aws:logs:${local.arn_region}:log-group:/aws/lambda/${stack}"],
+      [
+        "arn:aws:logs:${local.arn_region}:log-group:aws/spans",
+        "arn:aws:logs:${local.arn_region}:log-group:aws/spans:*",
+      ],
+    )
   }
 
   # Listing resources and fetching Logs Insights results have no resource form; listing
@@ -103,14 +106,16 @@ data "aws_iam_policy_document" "operator_permissions" {
       "lambda:ListVersionsByFunction",
       "lambda:ListAliases",
     ]
-    resources = ["arn:aws:lambda:${local.arn_region}:function:${local.stack}"]
+    resources = [for stack in local.stacks : "arn:aws:lambda:${local.arn_region}:function:${stack}"]
   }
 
-  # Integration tests send a prompt to the deployed core worker, exactly as the edge does.
+  # Integration tests send a prompt to a deployed core worker, exactly as the edge does.
   statement {
-    sid       = "InvokeCore"
-    actions   = ["lambda:InvokeFunction"]
-    resources = ["arn:aws:lambda:${local.arn_region}:function:${var.name_prefix}-core"]
+    sid     = "InvokeCore"
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      for env in values(var.environments) : "arn:aws:lambda:${local.arn_region}:function:${env.name_prefix}-core"
+    ]
   }
 
   statement {
@@ -122,13 +127,13 @@ data "aws_iam_policy_document" "operator_permissions" {
       "dynamodb:Query",
       "dynamodb:Scan",
     ]
-    resources = ["arn:aws:dynamodb:${local.arn_region}:table/${local.stack}"]
+    resources = [for stack in local.stacks : "arn:aws:dynamodb:${local.arn_region}:table/${stack}"]
   }
 
   statement {
     sid       = "ReadStackImages"
     actions   = ["ecr:DescribeRepositories", "ecr:DescribeImages"]
-    resources = ["arn:aws:ecr:${local.arn_region}:repository/${local.stack}"]
+    resources = [for stack in local.stacks : "arn:aws:ecr:${local.arn_region}:repository/${stack}"]
   }
 
   statement {
@@ -146,11 +151,13 @@ data "aws_iam_policy_document" "operator_permissions" {
       "iam:GetPolicyVersion",
       "iam:SimulatePrincipalPolicy",
     ]
-    resources = [
-      "arn:aws:iam::${local.account_id}:role/${local.stack}",
-      "arn:aws:iam::${local.account_id}:user/${local.stack}",
-      "arn:aws:iam::${local.account_id}:policy/${local.stack}",
-    ]
+    resources = flatten([
+      for stack in local.stacks : [
+        "arn:aws:iam::${local.account_id}:role/${stack}",
+        "arn:aws:iam::${local.account_id}:user/${stack}",
+        "arn:aws:iam::${local.account_id}:policy/${stack}",
+      ]
+    ])
   }
 
   # Account-level reads with no resource form: metrics, traces, the API audit trail,

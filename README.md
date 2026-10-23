@@ -72,6 +72,9 @@ python -m petbot.services.core.chat conversations/leetcode-daily.json -v
 python -m petbot.services.core.chat --say "what's today's leetcode daily?"
 ```
 
+`--lambda petbot-dev-core` sends the same conversation to a branch deployed to the dev
+core instead ([ADR 0014](docs/adr/0014-dev-core-environment.md)).
+
 ### Configuration
 
 All configuration is read from the environment (see `.env.example`). The frontend

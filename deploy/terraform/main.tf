@@ -66,6 +66,24 @@ resource "aws_iam_role_policy" "bedrock" {
   })
 }
 
+# Bedrock's OpenAI-compatible mantle endpoint, SigV4-signed with this role, so the agent
+# holds no API key. CreateInference is authorized against a mantle project; the stack names
+# none, so the grant covers the Region's projects. Only attached for bedrock_mantle.
+resource "aws_iam_role_policy" "bedrock_mantle" {
+  count = var.chat_llm_kind == "bedrock_mantle" ? 1 : 0
+  name  = "${local.core_name}-bedrock-mantle"
+  role  = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "bedrock-mantle:CreateInference"
+      Resource = "arn:aws:bedrock-mantle:${var.aws_region}:${data.aws_caller_identity.current.account_id}:project/*"
+    }]
+  })
+}
+
 # --- Function -----------------------------------------------------------------
 
 resource "aws_lambda_function" "this" {
@@ -92,6 +110,10 @@ resource "aws_lambda_function" "this" {
     precondition {
       condition     = !local.chat_needs_api_key || trimspace(var.chat_llm_api_key_ssm_parameter) != ""
       error_message = "chat_llm_kind=${var.chat_llm_kind} requires chat_llm_api_key_ssm_parameter (the SSM SecureString holding the key)."
+    }
+    precondition {
+      condition     = !contains(["bedrock_mantle", "openai_compatible"], var.chat_llm_kind) || trimspace(var.chat_llm_base_url) != ""
+      error_message = "chat_llm_kind=${var.chat_llm_kind} requires chat_llm_base_url (the endpoint)."
     }
   }
 }
