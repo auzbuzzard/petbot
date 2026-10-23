@@ -9,6 +9,12 @@ production would send (its traceback is logged) and the conversation goes on. Ea
 shown as the Discord frontend posts it, after the agent's tool calls; ``-v`` adds exactly
 what each call returned to the model.
 
+``--lambda FUNCTION`` sends the same conversation to a deployed core instead (a dev core
+running an unmerged branch), invoked over the frontend's own
+:class:`~petbot.platform.LambdaTransport` with the caller's AWS credentials. The turn then
+runs in the Lambda, on its configuration, network and time budget; its tool calls are in its
+logs, not shown here, and a failed dispatch gets the reply the frontend posts.
+
 A conversation is a JSON file (examples in ``conversations/``)::
 
     {"server": "Test server", "channel": "general", "nsfw": false,
@@ -36,8 +42,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import sys
+from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, TextIO
@@ -65,7 +73,7 @@ from petbot.domain import (
     User,
 )
 from petbot.frontends.discord.history import DiscordTurn, describe_card, to_turns
-from petbot.frontends.discord.render import plan
+from petbot.frontends.discord.render import SERVICE_UNREACHABLE, plan
 from petbot.frontends.discord.settings import DiscordSettings
 from petbot.logging_setup import configure_logging
 from petbot.observability import (
@@ -73,8 +81,10 @@ from petbot.observability import (
     configure_observability,
     flush_observability,
 )
-from petbot.platform import budget, serve
+from petbot.platform import LambdaTransport, ProcessClient, budget, serve
 from petbot.services.core import RESERVE_SECONDS, build_process
+
+logger = logging.getLogger(__name__)
 
 #: PetBot's name on his own messages.
 BOT_NAME = "PetBot"
@@ -167,16 +177,57 @@ def print_tool_calls(messages: Sequence[ModelMessage], out: TextIO, *, verbose: 
                 print("    " + detail.replace("\n", "\n    "), file=out)
 
 
+class Core(ABC):
+    """Where the harness sends each message."""
+
+    @abstractmethod
+    async def reply(
+        self, inp: TextInput, ctx: SkillContext
+    ) -> tuple[SkillResult, Sequence[ModelMessage] | None]:
+        """PetBot's reply, and the turn's agent run when it ran here (``None`` otherwise)."""
+
+
+class InProcess(Core):
+    """This checkout's core process, served in-process under a Lambda's time budget."""
+
+    def __init__(self, process: Process, *, seconds: float) -> None:
+        self._process = process
+        self._seconds = seconds
+
+    async def reply(
+        self, inp: TextInput, ctx: SkillContext
+    ) -> tuple[SkillResult, Sequence[ModelMessage] | None]:
+        with budget(self._seconds), capture_run_messages() as run:
+            result = SkillResult.model_validate_json(await serve(self._process, _wire(inp, ctx)))
+        return result, run
+
+
+class Deployed(Core):
+    """A deployed core, dispatched to as the Discord frontend dispatches: a failure is
+    logged and answered with the frontend's own fallback."""
+
+    def __init__(self, process: Process) -> None:
+        self._process = process
+
+    async def reply(
+        self, inp: TextInput, ctx: SkillContext
+    ) -> tuple[SkillResult, Sequence[ModelMessage] | None]:
+        try:
+            return await self._process.respond(inp, ctx), None
+        except Exception:
+            logger.exception("dispatch failed")
+            return SkillResult.message(SERVICE_UNREACHABLE), None
+
+
 async def replay(
-    process: Process,
+    core: Core,
     conversation: Conversation,
     out: TextIO,
     *,
-    seconds: float,
     max_turns: int,
     verbose: bool = False,
 ) -> list[str]:
-    """Send each message to ``process`` in turn, printing the exchange to ``out``. Returns
+    """Send each message to ``core`` in turn, printing the exchange to ``out``. Returns
     what PetBot posted for each message sent to him."""
     chain: list[DiscordTurn] = []  # oldest first
     replies: list[str] = []
@@ -189,10 +240,9 @@ async def replay(
             # The frontend walks back from the new message: its newest ancestors first.
             history = to_turns(chain[::-1][:max_turns], bot_user_id=_BOT_USER_ID)
             inp = TextInput(text=message.text, history=Recalled(turns=history))
-            body = _wire(inp, context_for(conversation, message.author))
-            with budget(seconds), capture_run_messages() as run:
-                result = SkillResult.model_validate_json(await serve(process, body))
-            print_tool_calls(run, out, verbose=verbose)
+            result, run = await core.reply(inp, context_for(conversation, message.author))
+            if run is not None:
+                print_tool_calls(run, out, verbose=verbose)
             for content, embed in plan(result):
                 card = describe_card(embed) if embed is not None else ""
                 # A message's text as the frontend reads it back: its content, else its card.
@@ -222,12 +272,22 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--timeout",
         type=float,
-        default=DEFAULT_TIMEOUT,
         help="the core Lambda's timeout in seconds; each turn's budget is this less the "
         f"handler's reserve, as in production (default {DEFAULT_TIMEOUT:g})",
     )
+    parser.add_argument(
+        "--lambda",
+        dest="function",
+        metavar="FUNCTION",
+        help="send the conversation to this deployed core Lambda (e.g. petbot-dev-core) "
+        "instead of running this checkout in-process",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="print tool output")
     args = parser.parse_args(argv)
+    if args.function is not None and (args.timeout is not None or args.verbose):
+        parser.error("--timeout and -v run in-process; a deployed core keeps its own")
+    if args.timeout is None:
+        args.timeout = DEFAULT_TIMEOUT
     if args.conversation is None and args.say is None:
         parser.error("give a conversation file or --say")
     if args.conversation is not None and args.say is not None:
@@ -251,22 +311,21 @@ def _conversation(args: argparse.Namespace) -> Conversation:
         raise SystemExit(f"Not a valid conversation:\n{exc}") from exc
 
 
+def _core(args: argparse.Namespace) -> Core:
+    if args.function is not None:
+        return Deployed(ProcessClient(LambdaTransport.from_function_name(args.function)))
+    return InProcess(build_process(), seconds=max(0.0, args.timeout - RESERVE_SECONDS))
+
+
 async def _run(args: argparse.Namespace, conversation: Conversation) -> None:
     try:
-        process = build_process()
+        core = _core(args)
         max_turns = ChainSettings().history_max_turns
     except ValidationError as exc:
         raise SystemExit(
             f"The core's settings are missing or invalid (see .env.example):\n{exc}"
         ) from exc
-    await replay(
-        process,
-        conversation,
-        sys.stdout,
-        seconds=max(0.0, args.timeout - RESERVE_SECONDS),
-        max_turns=max_turns,
-        verbose=args.verbose,
-    )
+    await replay(core, conversation, sys.stdout, max_turns=max_turns, verbose=args.verbose)
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart, ToolReturnPart
@@ -20,14 +22,18 @@ from petbot.domain import (
     SkillResult,
     TextInput,
 )
-from petbot.platform import ToolRegistry
+from petbot.frontends.discord.render import SERVICE_UNREACHABLE
+from petbot.platform import LambdaTransport, ProcessClient, ToolRegistry
 from petbot.process import ChatProcess
 from petbot.services.core.chat import (
     BOT_NAME,
     ChainSettings,
     Conversation,
+    Deployed,
+    InProcess,
     Message,
     _conversation,
+    _core,
     _parse,
     context_for,
     replay,
@@ -68,10 +74,9 @@ async def _replay(
 ) -> tuple[list[str], str]:
     out = io.StringIO()
     replies = await replay(
-        process,  # type: ignore[arg-type]
+        InProcess(process, seconds=seconds),  # type: ignore[arg-type]
         conversation,
         out,
-        seconds=seconds,
         max_turns=max_turns,
         verbose=True,
     )
@@ -250,3 +255,69 @@ def test_a_blank_message_or_a_missing_file_is_a_clean_error(tmp_path: Path) -> N
 
 def test_message_text_is_stripped() -> None:
     assert Message(author="Ann", text="  hi \n").text == "hi"
+
+
+class _FakeLambda:
+    """A boto3 Lambda client stand-in that answers each invoke from ``replies`` and keeps
+    every payload it was sent."""
+
+    def __init__(self, *replies: SkillResult | str) -> None:
+        self.payloads: list[dict[str, Any]] = []
+        self._replies = list(replies)
+
+    def invoke(self, **kwargs: Any) -> Any:
+        self.payloads.append(json.loads(kwargs["Payload"]))
+        reply = self._replies.pop(0)
+        if isinstance(reply, str):
+            return {"FunctionError": reply, "Payload": io.BytesIO(b'{"errorMessage": "boom"}')}
+        return {"Payload": io.BytesIO(reply.model_dump_json().encode())}
+
+    def get_waiter(self, waiter_name: str) -> Any:
+        raise AssertionError("the function is Active")
+
+
+async def test_a_deployed_core_gets_the_dispatch_the_frontend_sends() -> None:
+    client = _FakeLambda(SkillResult.message("hi from dev"), SkillResult.message("again"))
+    core = Deployed(ProcessClient(LambdaTransport("petbot-dev-core", client)))
+    out = io.StringIO()
+    replies = await replay(
+        core,
+        _conversation_of(Message(author="Ann", text="hi"), Message(author="Ann", text="more")),
+        out,
+        max_turns=25,
+    )
+    assert replies == ["hi from dev", "again"]
+    first, second = client.payloads
+    assert first["input"]["text"] == "hi"
+    assert first["context"]["user"]["display_name"] == "Ann"
+    assert [t["text"] for t in second["input"]["history"]["turns"]] == ["hi", "hi from dev"]
+    assert out.getvalue().splitlines()[:2] == ["Ann: hi", f"{BOT_NAME}: hi from dev"]
+
+
+async def test_a_failed_dispatch_gets_the_frontends_reply_and_the_chain_goes_on(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = _FakeLambda("Unhandled", SkillResult.message("back"))
+    core = Deployed(ProcessClient(LambdaTransport("petbot-dev-core", client)))
+    replies = await replay(
+        core,
+        _conversation_of(Message(author="Ann", text="hi"), Message(author="Ann", text="again")),
+        io.StringIO(),
+        max_turns=25,
+    )
+    assert replies == [SERVICE_UNREACHABLE, "back"]
+    assert "dispatch failed" in caplog.text
+
+
+def test_lambda_sends_to_a_deployed_core(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    clients: list[str] = []
+    monkeypatch.setattr("boto3.client", lambda service, **kw: clients.append(service))
+    assert isinstance(_core(_parse(["--say", "hi", "--lambda", "petbot-dev-core"])), Deployed)
+    assert clients == ["lambda"]
+    for flag in (["--timeout", "60"], ["-v"]):
+        with pytest.raises(SystemExit):
+            _parse(["--say", "hi", "--lambda", "petbot-dev-core", *flag])
+        assert "a deployed core keeps its own" in capsys.readouterr().err
+    assert _parse(["--say", "hi"]).timeout == 120
