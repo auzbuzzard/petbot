@@ -17,6 +17,7 @@ from pydantic_ai.profiles.google import GoogleJsonSchemaTransformer
 from pydantic_ai.profiles.openai import OpenAIModelProfile, openai_model_profile
 
 from petbot.process.settings import (
+    BedrockMantleModel,
     BedrockModel,
     ChatSettings,
     LLMConfig,
@@ -107,6 +108,23 @@ def build_model_from_config(llm: LLMConfig) -> Model:
             return OpenAIChatModel(
                 model,
                 provider=OpenAIProvider(base_url=base_url, api_key=api_key),
+                profile=_openai_compatible_profile(model),
+            )
+        case BedrockMantleModel(model=model, base_url=base_url):
+            from pydantic_ai.models import create_async_http_client
+            from pydantic_ai.models.openai import OpenAIChatModel
+            from pydantic_ai.providers.openai import OpenAIProvider
+
+            from petbot.process.sigv4 import MANTLE_SERVICE, SigV4Auth, mantle_region
+
+            http_client = create_async_http_client()
+            http_client.auth = SigV4Auth(MANTLE_SERVICE, mantle_region(base_url))
+            # The OpenAI client insists on a key; SigV4Auth replaces the header it makes.
+            return OpenAIChatModel(
+                model,
+                provider=OpenAIProvider(
+                    base_url=base_url, api_key="sigv4", http_client=http_client
+                ),
                 profile=_openai_compatible_profile(model),
             )
         case BedrockModel(model=model):

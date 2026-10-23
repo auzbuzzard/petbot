@@ -151,3 +151,24 @@ jobs:
             exit 1
           fi
           terraform apply -no-color -lock-timeout=120s bootstrap.tfplan
+
+  # A push that changes the root of trust defers production's deploy until it is applied
+  # (deploy.yml's gate job): start that deploy now, from main, once the apply succeeded or
+  # the plan had nothing to apply. It still waits for the `production` approval. A
+  # rejected, failed or cancelled apply starts nothing, so that push never deploys: fix
+  # the root of trust (or re-run bootstrap) first. "Nothing to apply" is read from the
+  # plan's own output, not from the apply job being skipped, which a rejection could
+  # also look like.
+  deploy:
+    needs: [plan, apply]
+    if: >-
+      always() && github.event_name == 'push' && needs.plan.result == 'success'
+      && (needs.apply.result == 'success' || needs.plan.outputs.changes == 'false')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Start production's deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy.yml --repo "$GITHUB_REPOSITORY" --ref main -f environment=production

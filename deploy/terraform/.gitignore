@@ -11,3 +11,5 @@ crash.*.log
 backend.hcl
 *.tfvars
 !*.tfvars.example
+# Each stage's settings are reviewed code: parameter names and model settings, never a value.
+!stages/*.tfvars

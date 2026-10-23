@@ -41,6 +41,22 @@ that chain as the frontend reads it back. Each turn's budget is the core Lambda'
 file under `conversations/` for any case worth re-running; use placeholder names, never a
 real server's messages.
 
+### Against a deployed dev core
+
+Some answers need the deployed function: whether a site serves requests from AWS's
+addresses, whether the Lambda's IAM and packaging hold. Deploy the branch's core to dev
+(the engine alone: no Discord bot, no edge) and send it the same conversations:
+
+```bash
+gh workflow run deploy.yml --ref <branch> -f environment=dev
+python -m petbot.services.core.chat --lambda petbot-dev-core conversations/leetcode-daily.json
+```
+
+`--lambda` invokes the function as the Discord frontend does, with your AWS credentials;
+the turn runs in the Lambda on production's model, and its tool calls are in its log group
+(`/aws/lambda/petbot-dev-core`), not printed. Dev is one slot: the last deploy wins. See
+[ADR 0014](adr/0014-dev-core-environment.md) and `deploy/terraform/README.md`.
+
 ## Adding a skill
 
 The full recipe is in [`AGENTS.md`](../AGENTS.md). In short:

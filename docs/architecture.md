@@ -26,6 +26,9 @@ For the module map, the calling pattern, and the invariants, see
   kernel descends from.
 - [ADR 0005](adr/0005-serverless-deployment.md) — serverless compute (the core
   service's Lambda path).
+- [ADR 0014](adr/0014-dev-core-environment.md) — a dev core: any branch's engine,
+  deployed alone and talked to through the chat harness, on the production model with no
+  key (SigV4).
 
 ## The request path
 

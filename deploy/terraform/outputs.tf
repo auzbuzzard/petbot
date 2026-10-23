@@ -14,11 +14,11 @@ output "ecr_repository_url" {
 }
 
 output "edge_ecr_repository_url" {
-  description = "Push the edge image here; the Lightsail service pulls it from this repo."
-  value       = aws_ecr_repository.edge.repository_url
+  description = "Push the edge image here; the Lightsail service pulls it from this repo. Null without the edge."
+  value       = one(aws_ecr_repository.edge[*].repository_url)
 }
 
 output "edge_container_service_name" {
-  description = "Lightsail container service hosting the edge."
-  value       = aws_lightsail_container_service.edge.name
+  description = "Lightsail container service hosting the edge. Null without the edge."
+  value       = one(aws_lightsail_container_service.edge[*].name)
 }

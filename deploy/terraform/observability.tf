@@ -91,9 +91,9 @@ resource "aws_iam_role_policy" "core_observability" {
 
 # The same publishing rights for the edge's scoped IAM user (see edge.tf).
 resource "aws_iam_user_policy" "edge_observability" {
-  count = var.observability_enabled ? 1 : 0
+  count = var.observability_enabled && var.edge_enabled ? 1 : 0
   name  = "${local.edge_name}-observability"
-  user  = aws_iam_user.edge.name
+  user  = aws_iam_user.edge[0].name
 
   policy = jsonencode({
     Version = "2012-10-17"

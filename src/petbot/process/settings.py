@@ -78,9 +78,24 @@ class OpenAICompatibleModel(BaseModel):
     api_key: str
 
 
+class BedrockMantleModel(BaseModel):
+    """Bedrock's OpenAI-compatible ``bedrock-mantle`` endpoint, authenticated with the
+    runtime's own AWS credentials (SigV4) instead of an API key.
+
+    ``base_url`` is the endpoint, e.g. ``https://bedrock-mantle.us-east-1.api.aws/openai/v1``;
+    requests are signed for the Region in its host. The caller's IAM identity needs
+    ``bedrock-mantle:CreateInference``: no key exists to mint, store or rotate.
+    """
+
+    kind: Literal["bedrock_mantle"] = "bedrock_mantle"
+    model: str
+    base_url: str
+
+
 #: Exactly one provider config, with only its own fields. Tagged by ``kind``.
 LLMConfig = Annotated[
-    BedrockModel | OpenRouterModel | OpenAICompatibleModel, Field(discriminator="kind")
+    BedrockModel | OpenRouterModel | OpenAICompatibleModel | BedrockMantleModel,
+    Field(discriminator="kind"),
 ]
 
 

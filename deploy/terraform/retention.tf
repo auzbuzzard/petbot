@@ -38,7 +38,9 @@ resource "aws_ecr_lifecycle_policy" "this" {
 }
 
 resource "aws_ecr_lifecycle_policy" "edge" {
-  repository = aws_ecr_repository.edge.name
+  count = local.edge_count
+
+  repository = aws_ecr_repository.edge[0].name
   policy     = local.ecr_lifecycle_policy
 }
 

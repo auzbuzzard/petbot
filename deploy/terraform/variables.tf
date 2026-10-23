@@ -15,8 +15,8 @@ variable "aws_region" {
 
 variable "name_prefix" {
   type        = string
-  description = "Base name for the stack; resources derive <name_prefix>-core / -edge (see locals.tf)."
-  default     = "petbot"
+  description = "Base name for the stack; resources derive <name_prefix>-core / -edge (see locals.tf). petbot-prod or petbot-dev (deploy.yml sets it)."
+  default     = "petbot-prod"
 }
 
 variable "image_tag" {
@@ -73,21 +73,23 @@ variable "chat_llm_kind" {
   description = <<-EOT
     Chat provider discriminator:
       bedrock           - Converse API, IAM-auth, no key (Nova / Claude).
+      bedrock_mantle    - Bedrock's OpenAI-compatible "mantle" endpoint (Gemma 4) by base
+                          URL, SigV4-signed with the function's role: no key.
       openai_compatible - any OpenAI-compatible endpoint by base URL + key
-                          (Bedrock's Gemma 4 "mantle" endpoint, or Ollama/vLLM).
+                          (the mantle endpoint with a Bedrock API key, or Ollama/vLLM).
       openrouter        - OpenRouter (API key).
   EOT
   default     = "bedrock"
 
   validation {
-    condition     = contains(["bedrock", "openai_compatible", "openrouter"], var.chat_llm_kind)
-    error_message = "chat_llm_kind must be one of: bedrock, openai_compatible, openrouter."
+    condition     = contains(["bedrock", "bedrock_mantle", "openai_compatible", "openrouter"], var.chat_llm_kind)
+    error_message = "chat_llm_kind must be one of: bedrock, bedrock_mantle, openai_compatible, openrouter."
   }
 }
 
 variable "chat_llm_base_url" {
   type        = string
-  description = "Base URL for the openai_compatible provider, e.g. https://bedrock-mantle.<region>.api.aws/openai/v1. Required for that kind; ignored otherwise."
+  description = "Base URL for the bedrock_mantle and openai_compatible providers, e.g. https://bedrock-mantle.<region>.api.aws/openai/v1. Required for those kinds; ignored otherwise."
   default     = ""
 }
 
@@ -156,10 +158,40 @@ variable "booru_ssm_parameters" {
   type        = map(string)
   description = <<-EOT
     Optional booru auth, as a map of ENV-VAR-NAME => SSM-parameter-name, e.g.
-    { DERPIBOORU_API_KEY = "/petbot/interactions/derpibooru_api_key" }. Each
+    { DERPIBOORU_API_KEY = "/petbot-prod/core/derpibooru_api_key" }. Each
     referenced parameter must already exist as a SecureString.
   EOT
   default     = {}
+}
+
+variable "ssm_parameters" {
+  type        = map(string)
+  description = <<-EOT
+    SecureString parameters this stack owns, by name under /<name_prefix>/, each mapped to
+    the existing parameter its value is copied from when it is created: read through an
+    ephemeral resource and written write-only, so the value reaches neither the plan nor the
+    state (parameters.tf). "" once it exists: it then keeps its own value.
+  EOT
+  default     = {}
+
+  validation {
+    condition     = alltrue([for name in keys(var.ssm_parameters) : startswith(name, "/${var.name_prefix}/")])
+    error_message = "Every owned parameter must be under /<name_prefix>/."
+  }
+}
+
+# --- Retirement (read by .github/workflows/legacy.yml, not by resources) -----------
+
+variable "retired" {
+  type        = bool
+  description = "This stack is to be destroyed: its pipeline destroys it, deletes retired_parameters and its state."
+  default     = false
+}
+
+variable "retired_parameters" {
+  type        = list(string)
+  description = "Parameters under /<name_prefix>/ made outside Terraform, deleted after a retired stack is destroyed."
+  default     = []
 }
 
 # --- Retention / cost controls ------------------------------------------------
@@ -196,10 +228,26 @@ variable "budget_alert_emails" {
 
 # --- Edge (Lightsail container service) ---------------------------------------
 
+variable "edge_enabled" {
+  type        = bool
+  description = <<-EOT
+    Whether this stack runs the Discord edge. false deploys the core alone (a dev core,
+    exercised through the chat harness's --lambda): no Lightsail service, edge IAM user,
+    access key, edge ECR repo or claims table.
+  EOT
+  default     = true
+}
+
 variable "discord_token_ssm_parameter" {
   type        = string
-  description = "SSM SecureString holding the edge's Discord bot token; injected into the container's environment."
-  default     = "/petbot/edge/discord_token"
+  description = "SSM SecureString holding the edge's Discord bot token, read by the edge at start. Empty => /<name_prefix>/edge/discord_token."
+  default     = ""
+}
+
+variable "edge_paused" {
+  type        = bool
+  description = "Disable the edge's Lightsail service: its containers shut down and it leaves the Discord gateway, while every resource stays. Re-enabling is setting it back."
+  default     = false
 }
 
 variable "edge_power" {

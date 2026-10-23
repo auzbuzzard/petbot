@@ -2,7 +2,7 @@
 
 The deployment hands each process only the *names* of its secrets: ``SSM_SECRETS`` is a
 JSON object of environment-variable name to SSM SecureString parameter name, e.g.
-``{"CHAT_LLM__API_KEY": "/petbot/core/bedrock_api_key"}``. :func:`load_ssm_secrets` reads
+``{"CHAT_LLM__API_KEY": "/petbot-prod/core/bedrock_api_key"}``. :func:`load_ssm_secrets` reads
 those parameters (decrypted) and sets each variable, so the settings classes go on reading
 ``os.environ`` as before and a local run without ``SSM_SECRETS`` is unaffected. The values
 never pass through the function's configuration or Terraform state.
