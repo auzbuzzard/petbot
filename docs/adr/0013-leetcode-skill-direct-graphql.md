@@ -51,9 +51,10 @@ recipe (args model in `petbot.types`, a `CATALOG` entry, a `Skill` under
   one") is resolved by the agent calling the tool — daily first, then random-by-difficulty —
   not by branching logic baked into the skill. So the daily operation exposes the problem's
   difficulty as structured data, and random-by-difficulty exists as its own path.
-- **Arguments** are an optional `mode` (`daily` | `random`) and an optional `difficulty`
-  (`easy` | `medium` | `hard`, only meaningful for `random`). With no `mode`, a given
-  difficulty means `random`, so asking for "an easy one" never returns the daily.
+- **Arguments** are a required `mode` (`daily` | `random`) and an optional `difficulty`
+  (`easy` | `medium` | `hard`, only meaningful for `random`). `mode` is required because,
+  left optional, the production model omitted it for "any random problem" and got the
+  daily (3 of 3 live runs); required, it chose correctly in 12 of 12.
 - **A fallback provider is deferred, but the seam is not.** The skill is written as a
   ranked-provider chain like `web_search` (primary first, fall through on failure), so a
   hosted unofficial API can be slotted in **if** the direct call is later observed to fail
