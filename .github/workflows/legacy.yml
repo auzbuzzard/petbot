@@ -10,15 +10,19 @@ name: Legacy stack
 #   retired     = true           destroy the stack, then delete its retired_parameters
 #                                (made outside Terraform) and its state
 #
-# It runs as the legacy deploy role from the `production` environment, so a required
-# reviewer approves each run; the plan is in the log before anything changes. This
-# workflow and the legacy role go once the stack is destroyed.
+# Two jobs, each run as the legacy deploy role from the `production` environment, so each
+# waits for a required reviewer. Approving `plan` changes nothing: it plans and lists the
+# plan's resource changes in the run's summary. Read them, then approve `apply`, which plans
+# again and applies only if that plan is the one reviewed (the same resource changes); if
+# anything changed since, it fails and the workflow is re-run. Reject `apply` to change
+# nothing. This workflow and the legacy role go once the stack is destroyed.
 on:
   push:
     branches: [main]
     paths:
       - "deploy/terraform/stages/legacy.tfvars"
       - ".github/workflows/legacy.yml"
+      - ".github/scripts/legacy-plan.sh"
   workflow_dispatch:
 
 permissions:
@@ -29,17 +33,78 @@ concurrency:
   group: legacy
   cancel-in-progress: false
 
+env:
+  TF_DIR: deploy/terraform
+  TF_IN_AUTOMATION: "true"
+  TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+  TF_VAR_name_prefix: petbot
+  TF_CLI_ARGS_plan: -var-file=stages/legacy.tfvars
+  TF_CLI_ARGS_console: -var-file=stages/legacy.tfvars
+
 jobs:
-  legacy:
+  plan:
     runs-on: ubuntu-latest
     environment: production
     env:
-      TF_DIR: deploy/terraform
-      TF_IN_AUTOMATION: "true"
-      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
-      TF_VAR_name_prefix: petbot
-      TF_CLI_ARGS_plan: -var-file=stages/legacy.tfvars
-      TF_CLI_ARGS_console: -var-file=stages/legacy.tfvars
+      STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}
+    outputs:
+      digest: ${{ steps.plan.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Deploy role
+        env:
+          ROLE_ARN_SECRET: ${{ secrets.DEPLOY_ROLE_ARN }}
+        run: bash .github/scripts/deploy-role.sh petbot-github-deploy
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.11.4"
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=$STATE_BUCKET" \
+            -backend-config="key=petbot/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+
+      - name: Plan
+        id: plan
+        working-directory: ${{ env.TF_DIR }}
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/legacy-plan.sh"
+
+      # Addresses and actions only: the full plan is in the log above.
+      - name: Summarise the plan for review
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          resources=$(terraform show -json legacy.tfplan \
+            | jq -r '(.resource_changes // [])[]
+                | select(.change.actions != ["no-op"] or .previous_address)
+                | "- `\(.address)`: \(.change.actions | join(", "))\(if .previous_address then " (moved from `\(.previous_address)`)" else "" end)"')
+          {
+            echo "### Legacy stack plan ($([ "$RETIRED" = true ] && echo destroy || echo edge))"
+            echo
+            echo "Plan digest: \`$DIGEST\`. Approve the \`apply\` job only if these are the changes you expect."
+            echo
+            echo "${resources:-No changes.}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    needs: plan
+    runs-on: ubuntu-latest
+    # Required reviewer: the run waits here until approved, after the plan was posted.
+    environment: production
+    env:
       STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -70,44 +135,19 @@ jobs:
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
 
-      # The stack's function is pinned to an image digest that its plan reads back, so the
-      # plan uses the newest tag in its registry, which is what it runs.
-      - name: Read the stack's settings
+      - name: Plan again
         working-directory: ${{ env.TF_DIR }}
-        run: |
-          retired=$(echo 'var.retired' | terraform console)
-          tag=$(aws ecr describe-images --repository-name petbot-core \
-            --query 'sort_by(imageDetails, &imagePushedAt)[-1].imageTags[0]' --output text)
-          {
-            echo "RETIRED=$retired"
-            echo "TF_VAR_image_tag=$tag"
-            echo "TF_VAR_edge_image_tag=$tag"
-          } >> "$GITHUB_ENV"
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/legacy-plan.sh"
 
-      # Only the edge's service changes; the rest of the stack stays as it was deployed. The
-      # resources moved.tf maps are planned too, since Terraform won't record a move it
-      # excludes from a targeted plan; their configuration is the one they were created with.
-      - name: Plan (pause or resume the edge)
-        if: env.RETIRED == 'false'
+      - name: Apply (the reviewed plan)
         working-directory: ${{ env.TF_DIR }}
+        env:
+          REVIEWED_DIGEST: ${{ needs.plan.outputs.digest }}
         run: |
-          set -o pipefail
-          targets=$(sed -nE 's/^ *to += ([a-z_.]+)\[0\]$/-target=\1/p' moved.tf | tr '\n' ' ')
-          # shellcheck disable=SC2086 # one argument per target
-          terraform plan -input=false -lock-timeout=120s $targets -out=legacy.tfplan 2>&1 \
-            | sed -u -E 's/(AKIA|ASIA)[A-Z0-9]{16}/\1****************/g'
-
-      - name: Plan (destroy)
-        if: env.RETIRED == 'true'
-        working-directory: ${{ env.TF_DIR }}
-        run: |
-          set -o pipefail
-          terraform plan -input=false -lock-timeout=120s -destroy -out=legacy.tfplan 2>&1 \
-            | sed -u -E 's/(AKIA|ASIA)[A-Z0-9]{16}/\1****************/g'
-
-      - name: Apply
-        working-directory: ${{ env.TF_DIR }}
-        run: |
+          if [ "$DIGEST" != "$REVIEWED_DIGEST" ]; then
+            echo "::error::The plan changed since it was reviewed ($REVIEWED_DIGEST, now $DIGEST). Re-run the workflow and review the new plan."
+            exit 1
+          fi
           set -o pipefail
           terraform apply -input=false -lock-timeout=120s legacy.tfplan 2>&1 \
             | sed -u -E 's/(AKIA|ASIA)[A-Z0-9]{16}/\1****************/g'
