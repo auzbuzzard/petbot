@@ -135,6 +135,22 @@ permission the same change adds, and nobody re-runs a failed one by hand.
 same conversation through `ProcessClient` + `LambdaTransport`, the frontend's own path; a
 failed dispatch gets the frontend's fallback reply. In-process remains the default.
 
+### Testing pull requests on it
+
+Every pull request from this repository that changes the core (its code, configuration,
+conversations or live tests) deploys to dev, and `deploy.yml`'s `test` job runs
+`tests/live` against `petbot-dev-core`, as the dev deploy role; its result is the pull
+request's check. The suite covers the engine, not a feature: each skill through the slash
+path (deterministic tool use, asserting the facts the tool returns from AWS) and each file
+in `conversations/` through chat (asserting every message gets a reply; the transcripts go
+to the run's summary). Dev is one slot. The workflow's concurrency group holds it from a
+run's deploy to its tests, and the test job first checks the function runs the image its
+deploy built, so a run never tests another's code; GitHub keeps only the newest waiting
+run of a group, so a pull request whose waiting run was superseded shows a cancelled check
+and is re-run. Pull requests from forks and Dependabot get no OIDC token and skip the
+deploy with a notice. Making the check required before merge is a branch-protection
+setting, which GitHub keeps outside this code.
+
 ## Migrating production: `petbot` to `petbot-prod`
 
 A Lambda's, ECR repository's, IAM role's or user's, DynamoDB table's and Lightsail

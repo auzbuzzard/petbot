@@ -4,13 +4,25 @@ name: Deploy
 # then terraform apply — entirely from CI via GitHub OIDC (no static AWS keys).
 # The Lightsail edge pulls its image from ECR (private-registry access). See
 # deploy/terraform/README.md. A push to main deploys `production` (the prod stage), whose
-# deploy role trusts only jobs in that environment (which admits only main). A manual run
-# may pick `dev` instead: the dispatched branch's core, alone (no edge), into its own stack
-# with its own deploy role, to talk to through the chat harness before it merges (see
-# docs/adr/0014). Each stage's settings are code (deploy/terraform/stages/<stage>.tfvars).
-# The root of trust itself is applied by bootstrap.yml. Actions are pinned to commit SHAs:
-# this job holds AWS credentials.
+# deploy role trusts only jobs in that environment (which admits only main). A pull request
+# from this repository deploys to `dev` (or a manual run picks it): that commit's core,
+# alone (no edge), into its own stack with its own deploy role, and the `test` job then runs
+# the live suite (tests/live) against it, as the pull request's check (see docs/adr/0014).
+# Each stage's settings are code (deploy/terraform/stages/<stage>.tfvars). The root of trust
+# itself is applied by bootstrap.yml. Actions are pinned to commit SHAs: these jobs hold AWS
+# credentials.
 on:
+  pull_request:
+    # What the deployed core is built and configured from, and the tests that exercise it.
+    paths:
+      - "src/**"
+      - "conversations/**"
+      - "tests/live/**"
+      - "deploy/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/deploy.yml"
+      - ".github/scripts/**"
   workflow_dispatch:
     inputs:
       environment:
@@ -30,9 +42,12 @@ permissions:
   id-token: write
   contents: read
 
-# One deploy per environment at a time: two branches deployed to dev take turns.
+# One run per environment at a time, held from deploy to test, so no other deploy to the
+# same stage lands between a run's deploy and its tests. GitHub keeps only the newest
+# waiting run of a group: when several pull requests queue for dev, an older waiting one is
+# cancelled and its check shows that; re-run it.
 concurrency:
-  group: deploy-${{ inputs.environment || 'production' }}
+  group: deploy-${{ inputs.environment || (github.event_name == 'pull_request' && 'dev' || 'production') }}
   cancel-in-progress: false
 
 jobs:
@@ -63,9 +78,28 @@ jobs:
           fi
           echo "defer=$defer" >> "$GITHUB_OUTPUT"
 
+  # A pull request from a fork, or Dependabot's, gets no OIDC token or secrets, so it can't
+  # deploy or test on AWS; say so instead of failing.
+  untrusted:
+    if: >-
+      github.event_name == 'pull_request'
+      && (github.event.pull_request.head.repo.full_name != github.repository
+          || github.actor == 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "::notice::Live tests skipped. A pull request from a fork or Dependabot can't reach AWS; a maintainer's branch is tested on the dev core."
+
   deploy:
     needs: gate
-    if: needs.gate.outputs.defer != 'true'
+    if: >-
+      needs.gate.outputs.defer != 'true'
+      && (github.event_name != 'pull_request'
+          || (github.event.pull_request.head.repo.full_name == github.repository
+              && github.actor != 'dependabot[bot]'))
+    outputs:
+      stage: ${{ steps.stage.outputs.stage }}
+      # The core image this run built, which the test job checks is what dev runs.
+      worker_digest: ${{ steps.worker.outputs.digest }}
     # arm64 runner matches the worker Lambda's Graviton architecture, so that
     # image builds natively; the smaller edge image cross-builds for amd64 via
     # QEMU (cheaper to emulate than the heavy worker image).
@@ -73,10 +107,10 @@ jobs:
     # Each deploy role's trust names its environment. `production` admits only main and
     # needs a required reviewer's approval, so a merge alone ships nothing; a push always
     # deploys there. `dev` is created by the first run that references it, with no rules.
-    environment: ${{ inputs.environment || 'production' }}
+    environment: ${{ inputs.environment || (github.event_name == 'pull_request' && 'dev' || 'production') }}
     env:
       TF_DIR: deploy/terraform
-      DEPLOY_ENV: ${{ inputs.environment || 'production' }}
+      DEPLOY_ENV: ${{ inputs.environment || (github.event_name == 'pull_request' && 'dev' || 'production') }}
       # AWS_REGION is a repository variable (bootstrap.yml reads it too). The state bucket
       # carries the account ID, so it is a secret, which the public log masks; a variable of
       # the same name stands in while no secret is set, unmasked.
@@ -94,6 +128,7 @@ jobs:
       # var.environments names the same), its state and its settings file. Terraform reads
       # the settings for every command through TF_CLI_ARGS_<command>.
       - name: Stage
+        id: stage
         run: |
           case "$DEPLOY_ENV" in
             production) stage=prod ;;
@@ -107,6 +142,7 @@ jobs:
             echo "TF_CLI_ARGS_apply=-var-file=stages/$stage.tfvars"
             echo "TF_CLI_ARGS_console=-var-file=stages/$stage.tfvars"
           } >> "$GITHUB_ENV"
+          echo "stage=$stage" >> "$GITHUB_OUTPUT"
 
       - name: Deploy role
         env:
@@ -188,6 +224,7 @@ jobs:
             | docker login --username AWS --password-stdin "${ECR_REPO%%/*}"
 
       - name: Build & push core worker image (arm64)
+        id: worker
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -241,3 +278,73 @@ jobs:
         run: |
           terraform output -raw core_function_arn; echo
           if [ "$EDGE" = true ]; then terraform output -raw edge_container_service_name; echo; fi
+
+  # Every deploy to dev (each pull request from this repository, or a manual dev run) is
+  # tested live: tests/live runs against petbot-dev-core, dispatched as the Discord
+  # frontend dispatches, as the dev deploy role. Its result is this job's check on the pull
+  # request, and the transcripts go to the run's summary. The run holds the dev slot from
+  # deploy to here (the workflow's concurrency group), and the first step proves the
+  # function runs this run's image, so the tests can't run against another deploy.
+  test:
+    needs: deploy
+    if: needs.deploy.result == 'success' && needs.deploy.outputs.stage == 'dev'
+    runs-on: ubuntu-latest
+    environment: dev
+    env:
+      STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}
+      PETBOT_LIVE_FUNCTION: petbot-dev-core
+      PETBOT_LIVE_TRANSCRIPTS: live-transcripts.md
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Deploy role
+        env:
+          ROLE_ARN_SECRET: ${{ secrets.DEPLOY_ROLE_ARN }}
+        run: bash .github/scripts/deploy-role.sh petbot-github-deploy-dev
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: The dev core runs this run's image
+        env:
+          EXPECTED: ${{ needs.deploy.outputs.worker_digest }}
+        run: |
+          running=$(aws lambda get-function --function-name "$PETBOT_LIVE_FUNCTION" \
+            --query 'Code.ResolvedImageUri' --output text)
+          running="${running##*@}"
+          if [ -z "$EXPECTED" ] || [ "$running" != "$EXPECTED" ]; then
+            echo "::error::$PETBOT_LIVE_FUNCTION runs $running, not this run's image ($EXPECTED): another deploy replaced it. Re-run this workflow."
+            exit 1
+          fi
+          echo "$PETBOT_LIVE_FUNCTION runs this run's image ($running)."
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+
+      # The conversation tests reuse the Discord frontend's rendering and history code.
+      - name: Sync (all extras)
+        run: uv sync --locked --all-extras --python 3.12
+
+      - name: Live tests
+        run: |
+          set -o pipefail
+          uv run pytest tests/live -v -p no:cacheprovider 2>&1 | tee live.log
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Live tests on \`$PETBOT_LIVE_FUNCTION\`"
+            echo
+            echo '```text'
+            grep -E '(PASSED|FAILED|ERROR|SKIPPED)( |$)|^=+ .* =+$' live.log || echo "No test output."
+            echo '```'
+            echo
+            cat "$PETBOT_LIVE_TRANSCRIPTS" 2>/dev/null || true
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -258,18 +258,18 @@ edge pulls its image from ECR). A push to `main` (or a manual *Actions → Deplo
 
 ## Dev core (an unmerged branch, before it merges)
 
-Deploy any branch's core to dev (`stages/dev.tfvars`), then talk to it with the same
-conversations the in-process harness runs:
+Every pull request from this repository (changing the core's code, configuration or
+tests) deploys to dev (`stages/dev.tfvars`), and `deploy.yml`'s `test` job runs
+`tests/live` against `petbot-dev-core` as the pull request's check. The run holds the dev
+slot from deploy to test, and the test job first checks the function runs the image this
+run built. A run outside a pull request:
 
 ```sh
 gh workflow run deploy.yml --ref <branch> -f environment=dev
-python -m petbot.services.core.chat --lambda petbot-dev-core conversations/leetcode-daily.json
-python -m petbot.services.core.chat --lambda petbot-dev-core --say "what's today's leetcode daily?"
 ```
 
-The harness invokes the function the way the edge does (`LambdaTransport`), with
-your AWS credentials (`AWS_REGION` or a profile's region; the `petbot-operator` role
-may invoke it). The turn runs in the Lambda, on its network, configuration and time
+The tests invoke the function the way the edge does (`LambdaTransport`), as the dev deploy
+role. The turn runs in the Lambda, on its network, configuration and time
 budget, so it answers what in-process runs can't: whether a site answers AWS's
 addresses, whether the function's IAM and packaging work. Its tool calls are in its
 log group, `/aws/lambda/petbot-dev-core`.
@@ -311,11 +311,7 @@ applies. The old stack is operated by `.github/workflows/legacy.yml` from
      deploy run steps aside (its `gate` job sees bootstrap changed); `bootstrap.yml` starts
      this one once its apply is done, so it never runs before its deploy role exists.
 
-   Then talk to the new core, and deploy a branch to dev:
-
-   ```sh
-   python -m petbot.services.core.chat --lambda petbot-prod-core conversations/leetcode-daily.json
-   ```
+   A pull request from then on is tested on the dev core (its `test` job).
 
    From here until the cutover, `main` deploys to `petbot-prod`, not to the stack
    serving Discord: keep this window short.
