@@ -45,16 +45,18 @@ real server's messages.
 
 Some answers need the deployed function: whether a site serves requests from AWS's
 addresses, whether the Lambda's IAM and packaging hold. Deploy the branch's core to dev
-(the engine alone: no Discord bot, no edge) and send it the same conversations:
+(the engine alone: no Discord bot, no edge). CI does it for every pull request from this
+repository: `deploy.yml` deploys the pull request to `petbot-dev-core`, then its `test` job
+runs `tests/live` against it and that is the pull request's check:
 
-```bash
-gh workflow run deploy.yml --ref <branch> -f environment=dev
-python -m petbot.services.core.chat --lambda petbot-dev-core conversations/leetcode-daily.json
-```
+- every skill through the slash path, checked for the facts its tool returns;
+- every file in `conversations/` through chat, checked that each message gets a reply.
 
-`--lambda` invokes the function as the Discord frontend does, with your AWS credentials;
-the turn runs in the Lambda on production's model, and its tool calls are in its log group
-(`/aws/lambda/petbot-dev-core`), not printed. Dev is one slot: the last deploy wins. See
+The transcripts are in the run's summary; each turn's tool calls are in the function's log
+group (`/aws/lambda/petbot-dev-core`). A case worth keeping is a new conversation file or a
+new skill case in `tests/live`. Pull requests from forks and Dependabot get no AWS access and
+skip it. A run outside a pull request: `gh workflow run deploy.yml --ref <branch> -f
+environment=dev`. Dev is one slot: the last deploy wins. See
 [ADR 0014](adr/0014-dev-core-environment.md) and `deploy/terraform/README.md`.
 
 ## Adding a skill
