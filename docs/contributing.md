@@ -45,16 +45,18 @@ real server's messages.
 
 Some answers need the deployed function: whether a site serves requests from AWS's
 addresses, whether the Lambda's IAM and packaging hold. Deploy the branch's core to dev
-(the engine alone: no Discord bot, no edge) and send it the same conversations:
+(the engine alone: no Discord bot, no edge). The run's `talk` job then sends it a
+conversation and posts PetBot's replies to the run's summary:
 
 ```bash
 gh workflow run deploy.yml --ref <branch> -f environment=dev
-python -m petbot.services.core.chat --lambda petbot-dev-core conversations/leetcode-daily.json
+gh workflow run deploy.yml --ref <branch> -f environment=dev -f conversation=conversations/<file>.json
 ```
 
-`--lambda` invokes the function as the Discord frontend does, with your AWS credentials;
-the turn runs in the Lambda on production's model, and its tool calls are in its log group
-(`/aws/lambda/petbot-dev-core`), not printed. Dev is one slot: the last deploy wins. See
+`talk` runs the harness's `--lambda` in CI, as the dev deploy role: it invokes the function
+as the Discord frontend does, so nothing calls AWS from your machine. The turn runs in the
+Lambda on production's model, and its tool calls are in its log group
+(`/aws/lambda/petbot-dev-core`), not in the summary. Dev is one slot: the last deploy wins. See
 [ADR 0014](adr/0014-dev-core-environment.md) and `deploy/terraform/README.md`.
 
 ## Adding a skill

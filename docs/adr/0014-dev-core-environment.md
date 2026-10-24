@@ -134,6 +134,9 @@ permission the same change adds, and nobody re-runs a failed one by hand.
 `python -m petbot.services.core.chat --lambda petbot-dev-core <conversation>` sends the
 same conversation through `ProcessClient` + `LambdaTransport`, the frontend's own path; a
 failed dispatch gets the frontend's fallback reply. In-process remains the default.
+After a dev deploy, `deploy.yml`'s `talk` job runs exactly this in CI, as the dev deploy
+role, and posts the replies to the run's summary, so trying a branch on AWS calls AWS from
+no workstation (AGENTS.md invariant 8).
 
 ## Migrating production: `petbot` to `petbot-prod`
 

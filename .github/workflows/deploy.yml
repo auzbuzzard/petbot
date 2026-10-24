@@ -22,6 +22,10 @@ on:
         description: Replace the edge's AWS access key now, instead of on its schedule
         type: boolean
         default: false
+      conversation:
+        description: "dev only: the conversation file the talk job sends to the deployed core."
+        type: string
+        default: conversations/leetcode-daily.json
   push:
     branches: [main]
 
@@ -241,3 +245,59 @@ jobs:
         run: |
           terraform output -raw core_function_arn; echo
           if [ "$EDGE" = true ]; then terraform output -raw edge_container_service_name; echo; fi
+
+  # After a dev deploy: send a scripted conversation to the deployed core through the
+  # frontend's own Lambda transport (the chat harness's --lambda) and post PetBot's replies
+  # to the run's summary, so a branch is tried on AWS from CI, never from a workstation. It
+  # assumes the dev deploy role (which may invoke petbot-dev-*). A failed dispatch fails it.
+  talk:
+    needs: deploy
+    if: needs.deploy.result == 'success' && inputs.environment == 'dev'
+    runs-on: ubuntu-latest
+    environment: dev
+    env:
+      STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}
+      CONVERSATION: ${{ inputs.conversation }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Deploy role
+        env:
+          ROLE_ARN_SECRET: ${{ secrets.DEPLOY_ROLE_ARN }}
+        run: bash .github/scripts/deploy-role.sh petbot-github-deploy-dev
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+
+      # The harness reuses the Discord frontend's rendering and history code: the full install.
+      - name: Sync (all extras)
+        run: uv sync --locked --all-extras --python 3.12
+
+      - name: Talk to the dev core
+        run: |
+          set -o pipefail
+          status=0
+          uv run python -m petbot.services.core.chat --lambda petbot-dev-core "$CONVERSATION" \
+            2> errors.txt | tee replies.txt || status=$?
+          cat errors.txt >&2
+          {
+            echo "### PetBot on \`petbot-dev-core\`: \`$CONVERSATION\`"
+            echo
+            echo '```text'
+            cat replies.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if grep -q "dispatch failed" errors.txt; then
+            echo "::error::A message got the frontend's fallback reply: the dispatch to petbot-dev-core failed (traceback above)."
+            status=1
+          fi
+          exit "$status"

@@ -72,8 +72,9 @@ python -m petbot.services.core.chat conversations/leetcode-daily.json -v
 python -m petbot.services.core.chat --say "what's today's leetcode daily?"
 ```
 
-`--lambda petbot-dev-core` sends the same conversation to a branch deployed to the dev
-core instead ([ADR 0014](docs/adr/0014-dev-core-environment.md)).
+To try a branch on AWS, deploy it to the dev core (`gh workflow run deploy.yml --ref
+<branch> -f environment=dev`): the run's `talk` job sends it the conversation and posts
+the replies to its summary ([ADR 0014](docs/adr/0014-dev-core-environment.md)).
 
 ### Configuration
 
