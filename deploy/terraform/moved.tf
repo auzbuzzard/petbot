@@ -1,7 +1,8 @@
 # Map the edge's unindexed resource addresses onto instance 0 of the counted edge
 # (var.edge_enabled). A state that holds them unindexed (the legacy stack's) has them
 # moved in place, which lets legacy.yml pause and destroy that stack with this code; a
-# state without them has nothing to move. .github/scripts/legacy-plan.sh targets exactly these addresses.
+# state without them has nothing to move. .github/scripts/legacy-plan.sh targets these addresses, and the counted data source
+# data.aws_iam_policy_document.edge_secrets, which moves the same way.
 
 moved {
   from = aws_lightsail_container_service.edge
