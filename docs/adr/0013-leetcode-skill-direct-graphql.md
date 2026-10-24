@@ -81,7 +81,13 @@ Labelled by source class, because the result turns on where the request originat
 - **Inference / unverified**: the request was **not** exercised from the Lambda runtime's
   own datacenter IP. A plain GET from a cloud IP reached LeetCode's origin (an app-level
   400, not a Cloudflare challenge), which shows reachability but not that a POST passes
-  unchallenged from that range. The Lambda-origin case therefore remains unverified.
+  unchallenged from that range.
+- **Verified** (2026-10-24, from the Lambda): this branch, deployed to the dev core
+  (`petbot-dev-core`) and sent `conversations/leetcode-daily.json` through the harness's
+  `--lambda`, answered with that day's daily (#2409, Easy), which a direct query to
+  LeetCode confirmed and which had changed overnight, so it came from the tool's call made
+  from the Lambda, not from the model. The direct endpoint serves the deployed runtime; the
+  fallback seam stays unused.
 - **Single report**: one third-party writeup reported Cloudflare blocking cloud bots. It was
   not reproduced here, but it is the reason the fallback seam is kept.
 
@@ -93,9 +99,8 @@ Labelled by source class, because the result turns on where the request originat
   `leetcode-daily.json` fixture should pass against the live model.
 - Schema drift (the query is community-derived, not an official contract) is the standing
   risk, bounded by the mocked tests and the fallback seam.
-- The open Lambda-origin question is settled on the dev core ([ADR 0014](0014-dev-core-environment.md)):
-  deploy the branch there and run `python -m petbot.services.core.chat --lambda
-  petbot-dev-core conversations/leetcode-daily.json`, whose calls leave from an AWS IP.
+- The Lambda-origin question was settled on the dev core ([ADR 0014](0014-dev-core-environment.md))
+  (see Spike evidence); a branch that changes the skill is checked there the same way.
 - If the direct call is observed failing from the deployed runtime, the fix is to implement
   the deferred fallback provider behind the seam — not to re-architect the skill.
 - Account-scoped features stay out until there is a reason to take on authenticated,
