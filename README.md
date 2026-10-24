@@ -29,7 +29,7 @@ channels; inside a NSFW channel every rating is returned.
 ## Architecture
 
 ```
-Discord ⇄ [ frontend ]  --Input(JSON)-->  [ core service ]  chat(LLM) · math · booru · web · weather
+Discord ⇄ [ frontend ]  --Input(JSON)-->  [ core service ]  chat(LLM) · math · booru · web · weather · leetcode
             gateway        HTTP / Lambda      \--> [ music service ]  gateway + voice
 ```
 
@@ -56,7 +56,7 @@ for voice, the **FFmpeg** system binary.
 uv sync --all-extras                  # install petbot + every extra + dev tooling
 cp .env.example .env                  # then fill in your secrets/references
 
-# One shell: the local core compute service (chat + math/booru/web/weather tools) on :8000
+# One shell: the local core compute service (chat + math/booru/web/weather/leetcode tools) on :8000
 python -m petbot.services.core
 # Another: the Discord frontend (talks to the service over HTTP by default)
 python -m petbot.frontends.discord

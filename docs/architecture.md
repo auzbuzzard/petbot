@@ -33,7 +33,7 @@ For the module map, the calling pattern, and the invariants, see
 ## The request path
 
 ```
-Discord ⇄ [ frontend ]  --Input(JSON)-->  [ core service ]  chat(LLM) · math · booru · web · weather
+Discord ⇄ [ frontend ]  --Input(JSON)-->  [ core service ]  chat(LLM) · math · booru · web · weather · leetcode
             petbot.frontends.discord  transport  petbot.services.core
                                                   \--> [ music service ]  gateway + voice
                                                         petbot.services.music

@@ -42,7 +42,8 @@ discord = [
     "httpx>=0.28",
     "pydantic-settings>=2.14",
 ]
-# The core compute service: math + booru + web search/fetch + weather + the chat process.
+# The core compute service: math + booru + web search/fetch + weather + leetcode + the chat
+# process.
 compute-core = [
     "petbot[observability]",
     "httpx>=0.28",
@@ -95,6 +96,7 @@ e621 = "petbot.skills.booru:build_e621"
 web_search = "petbot.skills.web:build_search"
 web_fetch = "petbot.skills.web:build_fetch"
 weather = "petbot.skills.weather:build_weather"
+leetcode = "petbot.skills.leetcode:build_leetcode"
 
 [tool.setuptools.packages.find]
 where = ["src"]

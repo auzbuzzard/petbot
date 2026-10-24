@@ -2,7 +2,7 @@
 
 Composes the process core for everything that isn't voice: a
 :class:`~petbot.platform.registry.ToolRegistry` of the installed skills (math, booru, web
-search/fetch and weather, from their entry points), a
+search/fetch, weather and leetcode, from their entry points), a
 :class:`~petbot.process.ChatProcess` (its agent calls those tools in-process), and a
 :class:`~petbot.process.CommandProcess` voiced by a :class:`~petbot.process.Stylist`,
 behind one :class:`~petbot.process.RouterProcess`.

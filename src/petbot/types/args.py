@@ -13,12 +13,17 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from petbot.domain import Frozen
 
 #: The music actions the skill understands.
 MusicAction = Literal["play", "skip", "stop", "queue", "volume"]
+
+#: What the ``leetcode`` skill looks up: today's daily problem, or a random one.
+LeetCodeMode = Literal["daily", "random"]
+#: LeetCode's three problem difficulties.
+LeetCodeDifficulty = Literal["easy", "medium", "hard"]
 
 
 class MathArgs(Frozen):
@@ -63,6 +68,25 @@ class WeatherArgs(Frozen):
     location: str = Field(
         description="A place name, optionally with region or country (e.g. 'Paris, France')."
     )
+
+
+class LeetCodeArgs(Frozen):
+    """Arguments for the ``leetcode`` skill."""
+
+    # Required, not defaulted: given an optional mode, the production model omitted it for
+    # "any random problem" and got the daily.
+    mode: LeetCodeMode = Field(
+        description="'daily' for today's daily problem; 'random' for any other problem."
+    )
+    difficulty: LeetCodeDifficulty | None = Field(
+        default=None, description="For a random problem: only this difficulty."
+    )
+
+    @field_validator("mode", "difficulty", mode="before")
+    @classmethod
+    def _lowercase(cls, value: object) -> object:
+        # Results spell difficulties LeetCode's way ("Easy"), which a model echoes back.
+        return value.strip().lower() if isinstance(value, str) else value
 
 
 class MusicArgs(Frozen):

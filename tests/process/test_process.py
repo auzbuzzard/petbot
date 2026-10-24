@@ -18,6 +18,7 @@ from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
     TextPart,
+    ToolCallPart,
     UserPromptPart,
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -427,6 +428,20 @@ async def test_stylist_keeps_formatted_output_verbatim_under_a_voiced_line() -> 
     assert "do not restate" in seen[0] and "tester" in seen[0]
 
 
+async def test_stylist_keeps_a_multi_line_result_verbatim_under_a_voiced_line() -> None:
+    # A one-line restatement of a LeetCode problem would drop its topics unnoticed.
+    problem = (
+        "LeetCode's daily problem for 2026-10-22:\n#3942 Minimum Operations (Medium)\n"
+        "Topics: Array\n<https://leetcode.com/problems/minimum-operations/>"
+    )
+    seen: list[str] = []
+    result = await _capturing_stylist("today's daily, tester~", seen).stylize(
+        SkillResult.message(problem), _ctx()
+    )
+    assert result.text == f"today's daily, tester~\n{problem}"
+    assert "do not restate" in seen[0]
+
+
 async def test_stylist_restatement_keeps_numbers_and_links() -> None:
     original = "Found 3 posts; the top one is https://e621.net/posts/1"
     seen: list[str] = []
@@ -496,6 +511,28 @@ async def test_chat_surfaces_a_booru_tool_card() -> None:
     result = await chat.respond(TextInput(text="show me a pony"), _ctx())
     assert derpi.calls == 1
     assert result.embed is not None and result.embed.image_url == "https://img/x.png"
+
+
+async def test_chat_surfaces_the_card_of_the_last_tool_call() -> None:
+    # The agent searched derpi, passed on it, then searched e621: e621's card is the answer.
+    derpi = _FakeSkill(
+        "derpi", BooruArgs, SkillResult.message(embed=EmbedSpec(image_url="https://img/first"))
+    )
+    e621 = _FakeSkill(
+        "e621", BooruArgs, SkillResult.message(embed=EmbedSpec(image_url="https://img/last"))
+    )
+    steps = iter(["derpi", "e621"])
+
+    def fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        tool = next(steps, None)
+        if tool is None:
+            return ModelResponse(parts=[TextPart(content="here's the second one")])
+        return ModelResponse(parts=[ToolCallPart(tool_name=tool, args={"tags": "fox"})])
+
+    chat = ChatProcess(_registry(derpi, e621), model=FunctionModel(fn))
+    result = await chat.respond(TextInput(text="a fox, but not that one"), _ctx())
+    assert derpi.calls == 1 and e621.calls == 1
+    assert result.embed is not None and result.embed.image_url == "https://img/last"
 
 
 async def test_chat_tool_error_does_not_crash_the_agent() -> None:
@@ -796,7 +833,7 @@ async def test_agent_offers_every_catalog_tool_including_agent_only_ones() -> No
     await ChatProcess(_registry(), model=FunctionModel(fn)).respond(
         TextInput(text="hi", history=Recalled(turns=())), _ctx()
     )
-    assert offered == {"math", "derpi", "e621", "web_search", "web_fetch", "weather"}
+    assert offered == {"math", "derpi", "e621", "web_search", "web_fetch", "weather", "leetcode"}
 
 
 async def test_chat_answers_with_a_fallback_when_the_turn_runs_out_of_time() -> None:

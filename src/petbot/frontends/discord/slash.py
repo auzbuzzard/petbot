@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from inspect import Parameter, Signature
-from typing import Any
+from typing import Any, Literal, get_args, get_origin
 
 import discord
 from discord import app_commands
@@ -31,16 +31,20 @@ logger = logging.getLogger(__name__)
 _OPTION_TYPES: dict[type, type] = {str: str, int: int, bool: bool, float: float}
 
 
-def _option_type(annotation: object) -> type:
+def _option_type(annotation: object) -> object:
     """The type discord.py should see for one option. Unwraps ``X | None`` (an
-    optional option) to its real member; raises on a type Discord can't express."""
+    optional option) to its real member; a ``Literal`` of strings passes through, which
+    discord.py renders as a fixed set of choices; raises on a type Discord can't express."""
     base = annotation
-    args = getattr(annotation, "__args__", ())
-    if args:
-        base = next(arg for arg in args if arg is not type(None))
-    if base not in _OPTION_TYPES:
-        raise TypeError(f"slash options can't express {annotation!r}")
-    return _OPTION_TYPES[base]
+    if get_origin(annotation) is not Literal:
+        args = getattr(annotation, "__args__", ())
+        if args:
+            base = next(arg for arg in args if arg is not type(None))
+    if get_origin(base) is Literal and all(isinstance(v, str) for v in get_args(base)):
+        return base
+    if isinstance(base, type) and base in _OPTION_TYPES:
+        return _OPTION_TYPES[base]
+    raise TypeError(f"slash options can't express {annotation!r}")
 
 
 def _with_defer(

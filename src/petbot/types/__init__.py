@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from petbot.types.args import (
     BooruArgs,
+    LeetCodeArgs,
+    LeetCodeDifficulty,
+    LeetCodeMode,
     MathArgs,
     MusicAction,
     MusicArgs,
@@ -21,6 +24,9 @@ __all__ = [
     "CATALOG",
     "BooruArgs",
     "Command",
+    "LeetCodeArgs",
+    "LeetCodeDifficulty",
+    "LeetCodeMode",
     "MathArgs",
     "MusicAction",
     "MusicArgs",
