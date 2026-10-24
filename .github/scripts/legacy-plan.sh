@@ -8,8 +8,9 @@
 # $GITHUB_ENV, and the digest to $GITHUB_OUTPUT.
 set -euo pipefail
 
-# The edge's resources: exactly the `to` addresses of moved.tf, since Terraform records a
-# move only for a resource the targeted plan includes.
+# The edge's resources: the `to` addresses of moved.tf, since Terraform records a move only
+# for a resource the targeted plan includes, and the edge's one counted data source
+# (secrets.tf), which its state also holds unindexed and so moves the same way.
 targets=(
   aws_lightsail_container_service.edge
   aws_ecr_repository.edge
@@ -21,6 +22,7 @@ targets=(
   aws_iam_user_policy.edge_secrets
   aws_dynamodb_table.claims
   aws_ecr_lifecycle_policy.edge
+  data.aws_iam_policy_document.edge_secrets
 )
 
 retired=$(echo 'var.retired' | terraform console)
