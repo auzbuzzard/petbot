@@ -1,7 +1,8 @@
-# The legacy stack (name_prefix petbot) was applied before the edge was counted
-# (var.edge_enabled), so its state holds the edge's resources unindexed; these map them onto
-# instance 0, which lets legacy.yml pause and destroy it with this code. A stack created
-# with the counted edge has nothing to move.
+# Map the edge's unindexed resource addresses onto instance 0 of the counted edge
+# (var.edge_enabled). A state that holds them unindexed (the legacy stack's) has them
+# moved in place, which lets legacy.yml pause and destroy that stack with this code; a
+# state without them has nothing to move. .github/scripts/legacy-plan.sh targets these addresses, and the counted data source
+# data.aws_iam_policy_document.edge_secrets, which moves the same way.
 
 moved {
   from = aws_lightsail_container_service.edge
