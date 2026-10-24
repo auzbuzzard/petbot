@@ -15,7 +15,8 @@ tavily_api_key_ssm_parameter = "/petbot/core/tavily_api_key"
 
 discord_token_ssm_parameter = "/petbot/edge/discord_token"
 
-edge_paused = false
+# Paused: production's edge (stages/prod.tfvars) holds the Discord gateway.
+edge_paused = true
 
 retired = false
 retired_parameters = [

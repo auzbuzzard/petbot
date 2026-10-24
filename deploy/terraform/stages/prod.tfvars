@@ -8,9 +8,9 @@ chat_llm_model    = "google.gemma-4-31b"
 chat_llm_base_url = "https://bedrock-mantle.us-east-1.api.aws/openai/v1"
 chat_thinking     = "high"
 
-# Off while this core runs beside the legacy stack, whose edge still holds the gateway:
-# two connected edges would both answer every message (docs/adr/0014).
-edge_enabled = false
+# The Discord edge: production's holds the gateway. The legacy stack's edge stays paused
+# (stages/legacy.tfvars), since two connected edges would both answer every message.
+edge_enabled = true
 
 # The web_search tool's Tavily key.
 tavily_api_key_ssm_parameter = "/petbot-prod/core/tavily_api_key"
