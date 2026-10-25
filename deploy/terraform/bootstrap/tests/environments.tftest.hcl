@@ -44,6 +44,12 @@ override_resource {
   values          = { arn = "arn:aws:iam::123456789012:user/claude" }
 }
 
+# The retiring user is imported, which reads it; the test stands in for that read.
+override_resource {
+  target = aws_iam_user.retired
+  values = { arn = "arn:aws:iam::123456789012:user/petbot-bedrock-key" }
+}
+
 override_resource {
   target          = aws_iam_policy.workload_boundary
   override_during = plan
@@ -149,5 +155,14 @@ run "deploy_roles_are_pinned_to_their_workflow" {
       !strcontains(jsonencode(data.aws_iam_policy_document.github_trust["bootstrap-apply"].statement), "job_workflow_ref"),
     ])
     error_message = "Each deploy role trusts only its workflow file; the bootstrap pipeline roles are unchanged."
+  }
+}
+
+run "the_hand_made_user_is_adopted_for_deletion" {
+  command = plan
+
+  assert {
+    condition     = aws_iam_user.retired["petbot-bedrock-key"].force_destroy
+    error_message = "A retiring user is adopted with force_destroy, so removing it deletes its keys and credentials too."
   }
 }
