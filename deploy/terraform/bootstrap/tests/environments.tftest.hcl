@@ -166,3 +166,15 @@ run "the_hand_made_user_is_adopted_for_deletion" {
     error_message = "A retiring user is adopted with force_destroy, so removing it deletes its keys and credentials too."
   }
 }
+
+run "a_stack_with_an_edge_may_delete_its_edge_user" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for env in ["prod", "legacy"] :
+      strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions[env].statement), "iam:ListGroupsForUser")
+    ])
+    error_message = "Deleting the edge's IAM user needs iam:ListGroupsForUser: the provider removes its group memberships first."
+  }
+}
