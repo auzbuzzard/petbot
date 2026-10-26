@@ -97,7 +97,7 @@ uv run lint-imports                                   # package boundaries
 uv run pytest                                         # tests (fully offline)
 ```
 
-CI runs all of the above on every push and pull request. It needs **no
+CI runs all of the above on every pull request and every push to `main`. It needs **no
 secrets** — every test is offline (mocked APIs, pydantic-ai `TestModel`, no
 Discord login).
 

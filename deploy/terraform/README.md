@@ -224,8 +224,7 @@ edge pulls its image from ECR). A push to `main` (or a manual *Actions → Deplo
 
 ## Dev core (an unmerged branch, before it merges)
 
-Every pull request from this repository (changing the core's code, configuration or
-tests) deploys to dev (`stages/dev.tfvars`), and `deploy.yml`'s `test` job runs
+Every pull request from this repository deploys to dev (`stages/dev.tfvars`), and `deploy.yml`'s `test` job runs
 `tests/live` against `petbot-dev-core` as the pull request's check. The run holds the dev
 slot from deploy to test, and the test job first checks the function runs the image this
 run built. A run outside a pull request:

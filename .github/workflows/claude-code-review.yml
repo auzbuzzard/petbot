@@ -1,15 +1,18 @@
 name: Claude Code Review
 
+# On demand: a review runs when the `claude-review` label is added to a pull request.
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
+    types: [labeled]
 
 jobs:
   claude-review:
     # Skip Dependabot PRs: they're mechanical dependency bumps where AI review
     # adds little, and Dependabot runs can't read Actions secrets anyway (they
     # use a separate Dependabot secret store), so the review would fail at auth.
-    if: github.event.pull_request.user.login != 'dependabot[bot]'
+    if: >-
+      github.event.label.name == 'claude-review'
+      && github.event.pull_request.user.login != 'dependabot[bot]'
 
     runs-on: ubuntu-latest
     permissions:
