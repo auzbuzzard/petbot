@@ -5,24 +5,17 @@ name: Deploy
 # The Lightsail edge pulls its image from ECR (private-registry access). See
 # deploy/terraform/README.md. A push to main deploys `production` (the prod stage), whose
 # deploy role trusts only jobs in that environment (which admits only main). A pull request
-# from this repository deploys to `dev` (or a manual run picks it): that commit's core,
+# from this repository that changes the core deploys to `dev` (or a manual run picks it): that commit's core,
 # alone (no edge), into its own stack with its own deploy role, and the `test` job then runs
 # the live suite (tests/live) against it, as the pull request's check (see docs/adr/0014).
 # Each stage's settings are code (deploy/terraform/stages/<stage>.tfvars). The root of trust
 # itself is applied by bootstrap.yml. Actions are pinned to commit SHAs: these jobs hold AWS
 # credentials.
 on:
+  # Every pull request, so its `deploy` and `test` checks always report, as main's required
+  # checks must: a workflow skipped by a paths filter leaves them pending, blocking the
+  # merge, while a skipped job reports success. The gate job skips the deploy instead.
   pull_request:
-    # What the deployed core is built and configured from, and the tests that exercise it.
-    paths:
-      - "src/**"
-      - "conversations/**"
-      - "tests/live/**"
-      - "deploy/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - ".github/workflows/deploy.yml"
-      - ".github/scripts/**"
   workflow_dispatch:
     inputs:
       environment:
@@ -45,27 +38,33 @@ permissions:
 # One run per environment at a time, held from deploy to test, so no other deploy to the
 # same stage lands between a run's deploy and its tests. GitHub keeps only the newest
 # waiting run of a group: when several pull requests queue for dev, an older waiting one is
-# cancelled and its check shows that; re-run it.
+# cancelled and its check shows that; re-run it. A fork's or Dependabot's pull request never
+# deploys, so it runs in a group of its own and can't displace a waiting run.
 concurrency:
-  group: deploy-${{ inputs.environment || (github.event_name == 'pull_request' && 'dev' || 'production') }}
+  group: >-
+    deploy-${{ inputs.environment || (github.event_name != 'pull_request' && 'production')
+    || ((github.event.pull_request.head.repo.full_name != github.repository || github.actor == 'dependabot[bot]')
+    && format('untrusted-{0}', github.run_id) || 'dev') }}
   cancel-in-progress: false
 
 jobs:
-  # A push that changes the root of trust deploys only once bootstrap.yml has applied it:
-  # this stack's deploy role may not exist yet, or may lack a permission the change adds.
-  # bootstrap.yml starts this workflow when its apply is done (or had nothing to apply),
-  # so here such a push steps aside instead of racing it. The paths are bootstrap.yml's.
+  # Whether to deploy at all. A push that changes the root of trust deploys only once
+  # bootstrap.yml has applied it: this stack's deploy role may not exist yet, or may lack a
+  # permission the change adds. bootstrap.yml starts this workflow when its apply is done
+  # (or had nothing to apply), so here such a push steps aside instead of racing it (the
+  # paths are bootstrap.yml's). A pull request that changes nothing the core is built,
+  # configured or live-tested from has nothing to deploy to dev, so it skips too.
   gate:
     runs-on: ubuntu-latest
     outputs:
       defer: ${{ steps.paths.outputs.defer }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: github.event_name == 'push'
+        if: github.event_name != 'workflow_dispatch'
         with:
           fetch-depth: 0
 
-      - name: Does this push change bootstrap?
+      - name: Does this change need a deploy?
         id: paths
         env:
           BEFORE: ${{ github.event.before }}
@@ -75,6 +74,12 @@ jobs:
             && [ -n "$(git diff --name-only "$BEFORE" "$GITHUB_SHA" -- deploy/terraform/bootstrap .github/workflows/bootstrap.yml)" ]; then
             defer=true
             echo "::notice::This push changes bootstrap: production deploys when bootstrap.yml has applied it."
+          fi
+          # A pull request's checkout is its merge commit, whose first parent is the base.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] \
+            && [ -z "$(git diff --name-only HEAD^1 HEAD -- src conversations tests/live deploy pyproject.toml uv.lock .github/workflows/deploy.yml .github/scripts)" ]; then
+            defer=true
+            echo "::notice::Nothing the core is built, configured or live-tested from changed: no dev deploy."
           fi
           echo "defer=$defer" >> "$GITHUB_OUTPUT"
 

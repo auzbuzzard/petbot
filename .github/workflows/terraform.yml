@@ -6,10 +6,9 @@ on:
     paths:
       - "deploy/terraform/**"
       - ".github/workflows/terraform.yml"
+  # Every pull request, so `validate` always reports, as main's required checks must (a
+  # workflow skipped by a paths filter leaves its checks pending, blocking the merge).
   pull_request:
-    paths:
-      - "deploy/terraform/**"
-      - ".github/workflows/terraform.yml"
 
 permissions:
   contents: read
