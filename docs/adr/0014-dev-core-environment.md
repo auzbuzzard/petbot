@@ -137,8 +137,7 @@ failed dispatch gets the frontend's fallback reply. In-process remains the defau
 
 ### Testing pull requests on it
 
-Every pull request from this repository that changes the core (its code, configuration,
-conversations or live tests) deploys to dev, and `deploy.yml`'s `test` job runs
+Every pull request from this repository deploys to dev, and `deploy.yml`'s `test` job runs
 `tests/live` against `petbot-dev-core`, as the dev deploy role; its result is the pull
 request's check. The suite covers the engine, not a feature: each skill through the slash
 path (deterministic tool use, asserting the facts the tool returns from AWS) and each file

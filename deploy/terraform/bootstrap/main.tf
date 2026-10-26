@@ -206,6 +206,17 @@ locals {
     name => ["${env.name_prefix}-*"]
   }
 
+  # The IAM principals each root stack creates (main.tf, edge.tf): the only names its deploy
+  # role may create, or grant permissions to.
+  stack_role_names = {
+    for name, env in var.environments :
+    name => ["${env.name_prefix}-core-role"]
+  }
+  stack_user_names = {
+    for name, env in var.environments :
+    name => env.edge ? ["${env.name_prefix}-edge"] : []
+  }
+
   deploy_role_workflows = {
     for name, env in var.environments :
     "deploy-${name}" => "deploy.yml"
@@ -277,10 +288,12 @@ locals {
 data "aws_iam_policy_document" "workload_boundary" {
   for_each = var.environments
 
+  # Lambda writes a function's logs to /aws/lambda/<function name>:
+  # https://docs.aws.amazon.com/lambda/latest/dg/monitoring-cloudwatchlogs.html
   statement {
     sid       = "WriteLogs"
     actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
-    resources = ["*"]
+    resources = [for p in local.env_name_patterns[each.key] : "arn:aws:logs:${local.arn_region}:log-group:/aws/lambda/${p}"]
   }
 
   statement {
@@ -289,10 +302,14 @@ data "aws_iam_policy_document" "workload_boundary" {
     resources = ["*"]
   }
 
+  # What the root stack's bedrock policy grants (main.tf).
   statement {
-    sid       = "InvokeModels"
-    actions   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
-    resources = ["*"]
+    sid     = "InvokeModels"
+    actions = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+    resources = [
+      "arn:aws:bedrock:${var.aws_region}::foundation-model/*",
+      "arn:aws:bedrock:${local.arn_region}:inference-profile/*",
+    ]
   }
 
   dynamic "statement" {
@@ -361,10 +378,17 @@ data "aws_iam_policy_document" "deploy_permissions" {
 
   # The root stack's state only (deploy.yml: key=<name_prefix>/terraform.tfstate);
   # bootstrap's own state, in the same bucket, stays out of CI's reach.
+  # The S3 backend lists only its workspace prefix (workspace_key_prefix, "env:" by default):
+  # https://github.com/hashicorp/terraform/blob/v1.11.4/internal/backend/remote-state/s3/backend_state.go
   statement {
     sid       = "ListState"
     actions   = ["s3:ListBucket"]
     resources = [aws_s3_bucket.state.arn]
+    condition {
+      test     = "StringEquals"
+      variable = "s3:prefix"
+      values   = ["env:/"]
+    }
   }
 
   statement {
@@ -455,14 +479,13 @@ data "aws_iam_policy_document" "deploy_permissions" {
     resources = [for p in local.env_name_patterns[each.key] : "arn:aws:dynamodb:${local.arn_region}:table/${p}"]
   }
 
-  # Budgets are account-wide (any budget/* is in scope), so only an environment that sets
-  # one may manage them.
+  # Only an environment that sets a budget may manage one: its own (budget.tf).
   dynamic "statement" {
     for_each = each.value.budget ? [1] : []
     content {
       sid       = "ManageBudget"
       actions   = ["budgets:*"]
-      resources = ["arn:aws:budgets::${local.account_id}:budget/*"]
+      resources = ["arn:aws:budgets::${local.account_id}:budget/${each.value.name_prefix}-monthly"]
     }
   }
 
@@ -472,8 +495,20 @@ data "aws_iam_policy_document" "deploy_permissions" {
       "iam:CreateRole",
       "iam:PutRolePermissionsBoundary",
       "iam:AttachRolePolicy",
-      "iam:DetachRolePolicy",
       "iam:PutRolePolicy",
+    ]
+    resources = [for n in local.stack_role_names[each.key] : "arn:aws:iam::${local.account_id}:role/${n}"]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PermissionsBoundary"
+      values   = [aws_iam_policy.workload_boundary[each.key].arn]
+    }
+  }
+
+  statement {
+    sid = "RevokeStackRolePolicies"
+    actions = [
+      "iam:DetachRolePolicy",
       "iam:DeleteRolePolicy",
     ]
     resources = [for p in local.env_name_patterns[each.key] : "arn:aws:iam::${local.account_id}:role/${p}"]
@@ -524,8 +559,21 @@ data "aws_iam_policy_document" "deploy_permissions" {
         "iam:CreateUser",
         "iam:PutUserPermissionsBoundary",
         "iam:PutUserPolicy",
-        "iam:DeleteUserPolicy",
       ]
+      resources = [for n in local.stack_user_names[each.key] : "arn:aws:iam::${local.account_id}:user/${n}"]
+      condition {
+        test     = "StringEquals"
+        variable = "iam:PermissionsBoundary"
+        values   = [aws_iam_policy.workload_boundary[each.key].arn]
+      }
+    }
+  }
+
+  dynamic "statement" {
+    for_each = each.value.edge ? [1] : []
+    content {
+      sid       = "RevokeStackUserPolicies"
+      actions   = ["iam:DeleteUserPolicy"]
       resources = [for p in local.env_name_patterns[each.key] : "arn:aws:iam::${local.account_id}:user/${p}"]
       condition {
         test     = "StringEquals"
@@ -538,13 +586,21 @@ data "aws_iam_policy_document" "deploy_permissions" {
   dynamic "statement" {
     for_each = each.value.edge ? [1] : []
     content {
+      sid       = "CreateStackUserKeys"
+      actions   = ["iam:CreateAccessKey"]
+      resources = [for n in local.stack_user_names[each.key] : "arn:aws:iam::${local.account_id}:user/${n}"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = each.value.edge ? [1] : []
+    content {
       sid = "MaintainStackUsers"
       actions = [
         "iam:GetUser",
         "iam:DeleteUser",
         "iam:TagUser",
         "iam:UntagUser",
-        "iam:CreateAccessKey",
         "iam:DeleteAccessKey",
         "iam:ListAccessKeys",
         "iam:GetUserPolicy",
@@ -564,6 +620,30 @@ data "aws_iam_policy_document" "deploy_permissions" {
       actions   = ["lightsail:*"]
       resources = ["*"]
     }
+  }
+
+  # The stack attaches no resource-based policy but the edge repository's, which lets
+  # Lightsail pull the edge's image (edge.tf).
+  statement {
+    sid    = "DenyResourcePolicies"
+    effect = "Deny"
+    actions = [
+      "lambda:AddPermission",
+      "lambda:CreateFunctionUrlConfig",
+      "lambda:UpdateFunctionUrlConfig",
+      "lambda:PutResourcePolicy",
+      "dynamodb:PutResourcePolicy",
+      "logs:PutSubscriptionFilter",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid           = "DenyRepositoryPolicies"
+    effect        = "Deny"
+    actions       = ["ecr:SetRepositoryPolicy"]
+    resources     = each.value.edge ? null : ["*"]
+    not_resources = each.value.edge ? ["arn:aws:ecr:${local.arn_region}:repository/${each.value.name_prefix}-edge"] : null
   }
 
   # The access principals: CI's roles (<name_prefix>-github-*), and the operator's role

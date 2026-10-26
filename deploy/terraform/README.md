@@ -86,13 +86,16 @@ boundary, and no stage's prefix may contain another's:
 
 **A deploy role** is scoped by naming convention: it may manage resources named
 `<name_prefix>-*` of its environment (ECR repos, the Lambda and its log group,
-DynamoDB tables, IAM roles, plus IAM users and Lightsail where the stack runs the edge
-and AWS Budgets where it sets one), its own state, and its own SSM parameters
-(`/<name_prefix>/*`). Every role and user it creates must carry its
+DynamoDB tables, plus Lightsail where the stack runs the edge), its own state, its own
+SSM parameters (`/<name_prefix>/*`) and its own budget (`<name_prefix>-monthly`, where
+it sets one). It may create, and grant permissions to, only the IAM principals the
+stack defines, by exact name: the core's role (`<name_prefix>-core-role`) and, where the
+stack runs the edge, the edge's user (`<name_prefix>-edge`). Each must carry its
 **`<name_prefix>-workload-boundary`** permissions boundary, so no policy CI writes
 can grant a workload more than that ceiling (no IAM; data-plane access to the
-stack's own resources). Adding resources to the root stack therefore needs **no
-bootstrap change**; only a new AWS service does.
+stack's own resources). It may attach no resource-based policy except the edge
+repository's. Adding resources to the root stack therefore needs **no bootstrap
+change**, except a new AWS service, a new IAM principal or a new resource policy.
 
 Neither stage reaches the other: `petbot-prod-*` and `petbot-dev-*` match nothing of
 each other's, nor do their states and parameters. The dev role, reachable from any
@@ -224,8 +227,7 @@ edge pulls its image from ECR). A push to `main` (or a manual *Actions → Deplo
 
 ## Dev core (an unmerged branch, before it merges)
 
-Every pull request from this repository (changing the core's code, configuration or
-tests) deploys to dev (`stages/dev.tfvars`), and `deploy.yml`'s `test` job runs the
+Every pull request from this repository deploys to dev (`stages/dev.tfvars`), and `deploy.yml`'s `test` job runs the
 regression suite (`tests/regression`) against `petbot-dev-core` as the pull request's check,
 grading the tool calls the dev core reports (`report_trajectory`, dev only; see
 `docs/contributing.md`). The run holds the dev

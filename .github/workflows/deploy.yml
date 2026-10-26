@@ -14,15 +14,6 @@ name: Deploy
 # credentials.
 on:
   pull_request:
-    # What the deployed core is built and configured from, and the tests that exercise it.
-    paths:
-      - "src/**"
-      - "tests/regression/**"
-      - "deploy/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - ".github/workflows/deploy.yml"
-      - ".github/scripts/**"
   workflow_dispatch:
     inputs:
       environment:
@@ -42,9 +33,17 @@ permissions:
   contents: read
 
 # One run per environment at a time, held from deploy to test, so no other deploy to the
-# same stage lands between a run's deploy and its tests.
+# same stage lands between a run's deploy and its tests. A group keeps one waiting run and
+# cancels an older waiting one, so a fork's or Dependabot's pull request, which never
+# deploys, gets a group of its own:
+# https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions#concurrency
 concurrency:
-  group: deploy-${{ inputs.environment || (github.event_name == 'pull_request' && 'dev' || 'production') }}
+  group: >-
+    ${{ github.event_name == 'pull_request'
+        && (github.event.pull_request.head.repo.full_name != github.repository
+            || github.actor == 'dependabot[bot]')
+        && format('deploy-untrusted-{0}', github.run_id)
+        || format('deploy-{0}', inputs.environment || (github.event_name == 'pull_request' && 'dev' || 'production')) }}
   cancel-in-progress: false
 
 jobs:
@@ -137,6 +136,13 @@ jobs:
             echo "TF_CLI_ARGS_console=-var-file=stages/$stage.tfvars"
           } >> "$GITHUB_ENV"
           echo "stage=$stage" >> "$GITHUB_OUTPUT"
+
+      # Which claims this job's OIDC token carries, as true/false only: what the deploy
+      # roles' trust policies can match.
+      - name: OIDC token claims
+        if: env.DEPLOY_ENV == 'dev'
+        continue-on-error: true
+        run: bash .github/scripts/oidc-claims.sh deploy.yml
 
       - name: Deploy role
         env:

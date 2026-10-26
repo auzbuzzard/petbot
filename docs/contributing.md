@@ -15,6 +15,9 @@ uv run lint-imports                                   # package boundaries
 uv run pytest                                         # offline tests
 ```
 
+A Claude code review of a pull request runs on demand: add the `claude-review` label
+(`claude-code-review.yml`). Remove and re-add it to review again after new commits.
+
 ## Trying a change against the real model
 
 The offline tests can't tell whether a prompt reads well or a tool answers the question.
