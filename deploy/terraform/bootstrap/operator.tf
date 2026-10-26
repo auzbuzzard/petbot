@@ -84,12 +84,13 @@ data "aws_iam_policy_document" "operator_permissions" {
     resources = ["*"]
   }
 
+  # Not GetContainerServices or GetContainerServiceDeployments: they return the containers'
+  # environment variables, which carry the edge's AWS key.
+  # https://docs.aws.amazon.com/lightsail/2016-11-28/api-reference/API_GetContainerServiceDeployments.html
   statement {
     sid = "ReadEdge"
     actions = [
       "lightsail:GetContainerLog",
-      "lightsail:GetContainerServices",
-      "lightsail:GetContainerServiceDeployments",
       "lightsail:GetContainerServiceMetricData",
     ]
     resources = ["*"]

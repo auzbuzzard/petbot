@@ -125,3 +125,16 @@ run "a_stack_with_an_edge_may_delete_its_edge_user" {
     error_message = "Deleting the edge's IAM user needs iam:ListGroupsForUser: the provider removes its group memberships first."
   }
 }
+
+run "the_operator_cannot_read_container_environments" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      strcontains(jsonencode(data.aws_iam_policy_document.operator_permissions.statement), "lightsail:GetContainerLog"),
+      !strcontains(jsonencode(data.aws_iam_policy_document.operator_permissions.statement), "lightsail:GetContainerServices"),
+      !strcontains(jsonencode(data.aws_iam_policy_document.operator_permissions.statement), "lightsail:GetContainerServiceDeployments"),
+    ])
+    error_message = "The operator may read the edge's logs but not its container environment, which holds the edge's AWS key."
+  }
+}
