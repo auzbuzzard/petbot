@@ -33,7 +33,7 @@ from petbot.domain.ports import (
     VoiceProvider,
 )
 from petbot.domain.process import Process
-from petbot.domain.result import EmbedSpec, SkillResult
+from petbot.domain.result import EmbedSpec, SkillResult, ToolCall
 from petbot.domain.skill import Skill
 
 __all__ = [
@@ -56,6 +56,7 @@ __all__ = [
     "SkillResult",
     "StylePort",
     "TextInput",
+    "ToolCall",
     "TrackFinishedCallback",
     "Turn",
     "Unrecalled",

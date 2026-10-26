@@ -19,14 +19,18 @@ from petbot.domain import (
     SkillError,
     SkillResult,
     StylePort,
+    ToolCall,
 )
 from petbot.platform import ToolRegistry
 
 
 class CommandProcess(Process):
-    def __init__(self, registry: ToolRegistry, style: StylePort) -> None:
+    def __init__(
+        self, registry: ToolRegistry, style: StylePort, *, report_trajectory: bool = False
+    ) -> None:
         self._registry = registry
         self._style = style
+        self._report_trajectory = report_trajectory
 
     async def respond(self, inp: Input, ctx: SkillContext) -> SkillResult:
         if not isinstance(inp, CommandInput):
@@ -35,4 +39,10 @@ class CommandProcess(Process):
             result = await self._registry.dispatch(inp.name, inp.values, ctx)
         except SkillError as exc:
             result = SkillResult.message(exc.message)
-        return await self._style.stylize(result, ctx)
+        styled = await self._style.stylize(result, ctx)
+        if not self._report_trajectory:
+            return styled
+        call = ToolCall(
+            tool=inp.name, args=dict(inp.values), outcome="returned", output=result.text
+        )
+        return styled.model_copy(update={"trajectory": (call,)})

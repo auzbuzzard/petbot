@@ -142,6 +142,21 @@ variable "context_kind" {
   }
 }
 
+variable "report_trajectory" {
+  type        = bool
+  description = <<-EOT
+    Whether the core puts each answer's tool calls in the result it returns, for the
+    regression suite (tests/regression) to grade. Sets CORE_REPORT_TRAJECTORY in the
+    worker. Dev only: production's caller is the edge, which ignores them.
+  EOT
+  default     = false
+
+  validation {
+    condition     = !var.report_trajectory || var.lambda_environment != "prod"
+    error_message = "report_trajectory is for dev cores only, never lambda_environment = \"prod\"."
+  }
+}
+
 variable "tavily_api_key_ssm_parameter" {
   type        = string
   description = <<-EOT
