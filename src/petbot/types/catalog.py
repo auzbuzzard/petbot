@@ -39,13 +39,6 @@ from petbot.types.args import (
 
 @dataclass(frozen=True)
 class Command[ArgsT: BaseModel]:
-    """One command, as data — the source both the slash surface and the agent derive from.
-
-    Generic over its ``args_model`` so the argument type is carried with the entry and
-    every derivation (slash options, tool schema, dispatch validation) stays typed
-    against the *same* model.
-    """
-
     name: str
     description: str
     args_model: type[ArgsT]

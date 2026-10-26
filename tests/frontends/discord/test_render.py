@@ -1,5 +1,3 @@
-"""The Discord frontend: pure rendering, context mapping, and slash dispatch."""
-
 from __future__ import annotations
 
 from typing import Literal
@@ -37,8 +35,6 @@ from petbot.types import CATALOG
 
 
 class FakeChannel:
-    """Captures what the renderer would send, without a gateway."""
-
     def __init__(self, *, nsfw: bool = False, channel_id: int = 99) -> None:
         self.id = channel_id
         self._nsfw = nsfw
@@ -132,9 +128,8 @@ async def test_respond_chunks_long_text_embed_only_first() -> None:
 
 async def test_respond_threads_reply_on_first_chunk_only() -> None:
     channel = FakeChannel()
-    parent = object()  # stands in for the triggering discord.Message
+    parent = object()
     await respond(channel, SkillResult.message("x" * 4500), reference=parent)  # type: ignore[arg-type]
-    # First chunk replies to the parent without re-pinging; later chunks are plain.
     assert channel.kwargs[0] == {"reference": parent, "mention_author": False}
     assert channel.kwargs[1] == {"reference": None, "mention_author": None}
 
@@ -159,8 +154,6 @@ def test_build_context_carries_server_and_channel_names() -> None:
 
 
 class _RaisingProcess(Process):
-    """A process whose every call fails — stands in for an unreachable service."""
-
     async def respond(self, inp: object, ctx: SkillContext) -> SkillResult:
         raise RuntimeError("service unreachable")
 
@@ -169,11 +162,7 @@ async def test_mention_maps_transport_error_to_friendly_result() -> None:
     bot = PetBot(DiscordSettings(discord_token="x", service=HttpService(url="http://svc/dispatch")))
     bot.process = _RaisingProcess()
     result = await bot._respond("hello", FakeMessage(FakeChannel()), Recalled())  # type: ignore[arg-type]
-    # The transport failure became the one static, unstyled fallback — not a crash.
     assert result.text == SERVICE_UNREACHABLE
-
-
-# --- slash commands ----------------------------------------------------------
 
 
 class FakeResponse:
@@ -193,8 +182,6 @@ class FakeFollowup:
 
 
 class FakeInteraction:
-    """Captures defer + followups for a slash command, without a gateway."""
-
     def __init__(self, *, nsfw: bool = False, channel_id: int = 99) -> None:
         self.user = FakeAuthor()
         self.channel = FakeChannel(nsfw=nsfw, channel_id=channel_id)
@@ -227,8 +214,6 @@ async def test_respond_interaction_sends_card_as_followup() -> None:
 
 
 class _StubProcess(Process):
-    """Records each slash dispatch and returns a canned success."""
-
     def __init__(self) -> None:
         self.received: list[CommandInput] = []
 
@@ -291,7 +276,6 @@ def test_slash_literal_options_become_choices() -> None:
     params = _as_app_command(spec, _noop)._params
     assert params["mode"].required is True
     assert [c.value for c in params["mode"].choices] == ["daily", "random"]
-    # An optional Literal is still a choice, just not a required one.
     assert params["difficulty"].required is False
     assert [c.value for c in params["difficulty"].choices] == ["easy", "medium", "hard"]
 

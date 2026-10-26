@@ -33,7 +33,6 @@ def _hmac(key: bytes, msg: str) -> bytes:
 
 
 def _expected_signature(request: httpx.Request, secret: str, region: str, service: str) -> str:
-    """The SigV4 signature of ``request`` over the headers its Authorization header names."""
     auth = request.headers["Authorization"]
     signed_headers = auth.split("SignedHeaders=")[1].split(",")[0]
     amz_date = request.headers["X-Amz-Date"]

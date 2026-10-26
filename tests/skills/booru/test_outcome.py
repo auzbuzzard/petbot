@@ -1,6 +1,3 @@
-"""The booru outcome signal: a coarse, non-content status tagged on the active tool span,
-recorded without the tags or the result."""
-
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -18,8 +15,6 @@ from petbot.types import BooruArgs
 
 
 async def _outcome_of(run: Callable[[], Awaitable[object]]) -> object:
-    """Run ``run`` inside a tool span and return the ``petbot.booru.outcome`` it tagged.
-    Expected booru failures are swallowed — we only care about the recorded status."""
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))

@@ -35,10 +35,7 @@ def _content(turn: Turn) -> str:
 
 
 def drop_leading_assistant(messages: list[ModelMessage]) -> list[ModelMessage]:
-    """Drop leading assistant messages so the history starts with a user message —
-    providers reject an assistant-first run.
-
-    Applied to a freshly-mapped history and again to a *compacted* one, since compaction
+    """Applied to a freshly-mapped history and again to a *compacted* one, since compaction
     can slice the leading user message off the front.
     """
     first_user = next(
@@ -49,13 +46,6 @@ def drop_leading_assistant(messages: list[ModelMessage]) -> list[ModelMessage]:
 
 
 def to_model_messages(history: tuple[Turn, ...]) -> list[ModelMessage]:
-    """Turn the neutral ``history`` into pydantic-ai ``message_history``.
-
-    Empty turns are dropped; consecutive same-role turns are merged (a multi-user chain
-    produces them, and most backends reject a run of two of the same role); each is mapped
-    by a role match; and any leading assistant message is dropped (the history must start
-    with a user message).
-    """
     pairs = [(turn.role, content) for turn in history if (content := _content(turn))]
 
     messages: list[ModelMessage] = []

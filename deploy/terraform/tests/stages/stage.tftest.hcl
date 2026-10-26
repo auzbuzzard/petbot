@@ -25,10 +25,6 @@ override_data {
   values = { image_digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
 }
 
-# The whole stack plans with the file's settings, its preconditions included, except its
-# copied parameters (ssm_parameters): their source reads are ephemeral, which call AWS even
-# in a plan and which mocks don't support. Those names are checked by their variable's
-# validation when the stage deploys.
 run "plans" {
   command = plan
 

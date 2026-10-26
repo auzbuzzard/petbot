@@ -66,8 +66,6 @@ variable "timeout" {
   default     = 120
 }
 
-# --- Chat LLM (the worker's agent) --------------------------------------------
-
 variable "chat_llm_kind" {
   type        = string
   description = <<-EOT
@@ -187,8 +185,6 @@ variable "existing_ssm_parameters" {
   default     = []
 }
 
-# --- Retirement (read by .github/workflows/legacy.yml, not by resources) -----------
-
 variable "retired" {
   type        = bool
   description = "This stack is to be destroyed: its pipeline destroys it, deletes retired_parameters and its state."
@@ -200,8 +196,6 @@ variable "retired_parameters" {
   description = "Parameters under /<name_prefix>/ made outside Terraform, deleted after a retired stack is destroyed."
   default     = []
 }
-
-# --- Retention / cost controls ------------------------------------------------
 
 variable "log_retention_days" {
   type        = number
@@ -232,8 +226,6 @@ variable "budget_alert_emails" {
   description = "Emails notified at 80% and 100% of monthly_budget_usd; required to enable the budget."
   default     = []
 }
-
-# --- Edge (Lightsail container service) ---------------------------------------
 
 variable "edge_enabled" {
   type        = bool

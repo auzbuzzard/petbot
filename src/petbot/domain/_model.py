@@ -13,6 +13,4 @@ from pydantic import BaseModel, ConfigDict
 
 
 class Frozen(BaseModel):
-    """Immutable pydantic base: frozen, forbids unknown fields."""
-
     model_config = ConfigDict(frozen=True, extra="forbid")

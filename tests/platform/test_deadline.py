@@ -1,5 +1,3 @@
-"""The turn budget: a host sets it, the process doing the work reads what is left."""
-
 from __future__ import annotations
 
 import asyncio

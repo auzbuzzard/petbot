@@ -1,10 +1,7 @@
 """The booru skills' own configuration (the credentials they need).
 
 A skill package reads exactly the environment it needs, so it stays
-self-contained — no shared config import couples a skill to the platform. The
-compute service supplies these via the environment (``op run``, a ``.env``, or
-injected container/Lambda vars); missing optional creds simply mean
-unauthenticated, lower-rate-limit requests.
+self-contained — no shared config import couples a skill to the platform.
 """
 
 from __future__ import annotations
@@ -20,8 +17,6 @@ DEFAULT_USER_AGENT = f"PetBot/{version('petbot')} (https://github.com/auzbuzzard
 
 
 class BooruSettings(BaseSettings):
-    """Credentials and identification for the booru providers."""
-
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore", frozen=True
     )

@@ -54,9 +54,7 @@ class ObservabilitySettings(BaseSettings):
         frozen=True,
     )
 
-    #: Master switch. Off ⇒ :func:`configure_observability` is a no-op and the API stays no-op.
     enabled: bool = False
-    #: ``service.name`` on every span/metric (the X-Ray service node).
     service_name: str = "petbot"
     #: Head sampling ratio for root traces (1.0 = all); children follow the parent.
     sample_ratio: float = 1.0
@@ -176,6 +174,4 @@ def flush_observability() -> None:
 
 
 def hash_user_id(raw: str, salt: str) -> str:
-    """A short, salted, one-way hash of a user id — the only identifier we attach to
-    telemetry. Pseudonymous (correlate one user's turns) without storing the raw id."""
     return hashlib.sha256(f"{salt}:{raw}".encode()).hexdigest()[:16]

@@ -3,8 +3,6 @@
 # (otherwise Lambda auto-creates a never-expiring group that TF wouldn't own).
 
 locals {
-  # Shared lifecycle for both ECR repos (worker + edge): expire untagged images,
-  # and keep only the most recent tagged ones.
   ecr_lifecycle_policy = jsonencode({
     rules = [
       {
@@ -45,8 +43,6 @@ resource "aws_ecr_lifecycle_policy" "edge" {
 }
 
 resource "aws_cloudwatch_log_group" "lambda" {
-  # Lambda writes to /aws/lambda/<function-name>; creating it explicitly lets us
-  # set retention (and own its lifecycle) instead of the never-expire default.
   name              = "/aws/lambda/${local.core_name}"
   retention_in_days = var.log_retention_days
 }

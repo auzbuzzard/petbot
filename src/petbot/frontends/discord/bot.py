@@ -37,12 +37,8 @@ logger = logging.getLogger(__name__)
 
 
 class PetBot(commands.Bot):
-    """The Discord gateway client; @mention is the conversational entrypoint."""
-
     def __init__(self, settings: DiscordSettings) -> None:
         intents = discord.Intents.default()
-        # The conversational entrypoint needs the privileged message-content intent;
-        # slash commands would not, but chat does.
         intents.message_content = True
         super().__init__(
             command_prefix=commands.when_mentioned,
@@ -67,16 +63,11 @@ class PetBot(commands.Bot):
                 assert_never(service)
         if self.settings.claims_table:
             self.claims = DynamoClaims.from_table_name(self.settings.claims_table)
-        # Build the slash commands once the process client is wired; the closure
-        # captures it. Each command rides the shared CommandInput dispatch path.
         for command in build_commands(self.process):
             self.tree.add_command(command)
         await self._sync_commands()
 
     async def _sync_commands(self) -> None:
-        """Register the app commands with Discord. ``dev_guild_id`` syncs to that
-        guild (instant, for iteration); otherwise a global sync (which Discord can
-        take up to an hour to propagate the first time)."""
         if self.settings.dev_guild_id is not None:
             guild = discord.Object(id=self.settings.dev_guild_id)
             self.tree.copy_global_to(guild=guild)
@@ -89,8 +80,6 @@ class PetBot(commands.Bot):
             logger.info("Logged in as %s (discord.py %s).", self.user, discord.__version__)
 
     async def on_message(self, message: discord.Message) -> None:
-        # Conversational entry — see `is_conversational_trigger`: a DM (always), or a guild
-        # @mention / reply-to-self. Other bots and our own messages are ignored.
         if message.author.bot or self.user is None:
             return
         bot_user_id = self.user.id
@@ -117,10 +106,7 @@ class PetBot(commands.Bot):
     async def _claim(self, message: discord.Message) -> bool:
         """Whether this copy of the frontend handles ``message``.
 
-        Discord delivers every message to every gateway session on the bot's token (a
-        deployment rolling over, or any second copy), so each copy claims the message id
-        first and only the winner types, dispatches and answers: one compute call per
-        message. A failing claim store handles the message anyway; a rare duplicate beats
+        A failing claim store handles the message anyway; a rare duplicate beats
         a dropped message."""
         if self.claims is None:
             return True
@@ -171,7 +157,6 @@ class PetBot(commands.Bot):
 
 
 def run(settings: DiscordSettings) -> None:
-    """Start the Discord frontend (blocking)."""
     configure_logging(settings.log_level)
     # The edge end of the trace: its "dispatch" client span exports to the same backend so a
     # Discord turn is one trace edge->core. No-op unless OBS_ENABLED is set.

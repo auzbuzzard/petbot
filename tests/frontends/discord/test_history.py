@@ -41,8 +41,6 @@ class _ForbiddenResp:
 
 
 class ForbiddenChannel:
-    """A channel whose fetch is denied — stands in for a missing 'Read Message History'."""
-
     async def fetch_message(self, message_id: int) -> object:
         raise discord.Forbidden(_ForbiddenResp(), "missing access")  # type: ignore[arg-type]
 
@@ -89,12 +87,8 @@ class FakeMessage:
         self.embeds = list(embeds)
         self.reference = reference
         self.channel = channel or FakeChannel()
-        # `guild is None` marks a DM; `mentions` are the users the message pings.
         self.guild = guild
         self.mentions = list(mentions)
-
-
-# --- generic async combinators ------------------------------------------------
 
 
 async def test_aiter_until_none_unfolds_feeding_each_result_back() -> None:
@@ -124,11 +118,8 @@ async def test_atake_yields_at_most_n_and_pulls_no_more() -> None:
             i += 1
 
     assert [x async for x in atake(2, naturals())] == [0, 1]
-    assert pulled == 2  # exactly n items pulled, never an extra
+    assert pulled == 2
     assert [x async for x in atake(0, naturals())] == []
-
-
-# --- the pure mapping ---------------------------------------------------------
 
 
 def test_strip_self_mention_strips_only_this_bot() -> None:
@@ -137,7 +128,7 @@ def test_strip_self_mention_strips_only_this_bot() -> None:
 
 
 def test_to_turns_orders_oldest_first_and_maps_roles() -> None:
-    raw = [  # walk yields newest-first
+    raw = [
         DiscordTurn(display_name="Alice", is_self=False, text="<@1> and another?"),
         DiscordTurn(display_name="PetBot", is_self=True, text="here you go!"),
     ]
@@ -149,7 +140,7 @@ def test_to_turns_orders_oldest_first_and_maps_roles() -> None:
 
 def test_to_turns_drops_turns_that_become_empty() -> None:
     raw = [
-        DiscordTurn(display_name="Alice", is_self=False, text="<@1>"),  # only a mention
+        DiscordTurn(display_name="Alice", is_self=False, text="<@1>"),
         DiscordTurn(display_name="PetBot", is_self=True, text="   "),
     ]
     assert to_turns(raw, bot_user_id=1) == ()
@@ -162,9 +153,6 @@ def test_describe_card_uses_title_and_image() -> None:
     assert describe_card(discord.Embed()) == ""
 
 
-# --- the trigger predicate ----------------------------------------------------
-
-
 def test_replying_to_self_reads_only_the_inlined_copy() -> None:
     bot_reply = FakeMessage(author=FakeAuthor(1, "PetBot"), content="hi")
     msg = FakeMessage(
@@ -173,23 +161,20 @@ def test_replying_to_self_reads_only_the_inlined_copy() -> None:
         reference=FakeRef(100, resolved=bot_reply),
     )
     assert replying_to_self(msg, 1) is True  # type: ignore[arg-type]
-    assert replying_to_self(msg, 99) is False  # type: ignore[arg-type]  # not the bot
-    # Not a reply, or no inlined copy -> False (no fetch, so the trigger can't fail).
+    assert replying_to_self(msg, 99) is False  # type: ignore[arg-type]
     assert replying_to_self(FakeMessage(author=FakeAuthor(2, "Alice")), 1) is False  # type: ignore[arg-type]
     plain_reply = FakeMessage(author=FakeAuthor(2, "Alice"), reference=FakeRef(100))
     assert replying_to_self(plain_reply, 1) is False  # type: ignore[arg-type]
 
 
 def test_dm_always_triggers_without_a_mention() -> None:
-    # A DM (guild is None) is addressed to the bot even with no @mention — the fix for a
-    # DM that was silently dropped for lacking a mention.
     dm = FakeMessage(author=FakeAuthor(2, "Alice"), content="hey", guild=None)
     assert is_conversational_trigger(dm, 1) is True  # type: ignore[arg-type]
 
 
 def test_guild_message_triggers_only_on_mention_or_reply_to_self() -> None:
     plain = FakeMessage(author=FakeAuthor(2, "Alice"), content="just chatting")
-    assert is_conversational_trigger(plain, 1) is False  # type: ignore[arg-type]  # no ping, no reply
+    assert is_conversational_trigger(plain, 1) is False  # type: ignore[arg-type]
 
     mentioned = FakeMessage(
         author=FakeAuthor(2, "Alice"), content="<@1> hi", mentions=(FakeAuthor(1, "PetBot"),)
@@ -199,16 +184,13 @@ def test_guild_message_triggers_only_on_mention_or_reply_to_self() -> None:
     other_ping = FakeMessage(
         author=FakeAuthor(2, "Alice"), content="<@3> hi", mentions=(FakeAuthor(3, "Bob"),)
     )
-    assert is_conversational_trigger(other_ping, 1) is False  # type: ignore[arg-type]  # not us
+    assert is_conversational_trigger(other_ping, 1) is False  # type: ignore[arg-type]
 
     bot_reply = FakeMessage(author=FakeAuthor(1, "PetBot"), content="hi")
     reply_to_self = FakeMessage(
         author=FakeAuthor(2, "Alice"), content="thanks", reference=FakeRef(100, resolved=bot_reply)
     )
-    assert is_conversational_trigger(reply_to_self, 1) is True  # type: ignore[arg-type]  # follow-up
-
-
-# --- resolving one hop --------------------------------------------------------
+    assert is_conversational_trigger(reply_to_self, 1) is True  # type: ignore[arg-type]
 
 
 async def test_resolve_parent_fetches_when_unresolved() -> None:
@@ -227,25 +209,18 @@ async def test_resolve_parent_is_none_without_a_reference() -> None:
 
 async def test_resolve_parent_is_none_when_unfetchable() -> None:
     msg = FakeMessage(author=FakeAuthor(2, "Alice"), content="hi", reference=FakeRef(999))
-    msg.channel = FakeChannel({})  # 999 missing -> NotFound -> None, not raised
+    msg.channel = FakeChannel({})
     assert await resolve_parent(msg) is None  # type: ignore[arg-type]
 
 
 async def test_resolve_parent_raises_on_forbidden() -> None:
-    # A missing 'Read Message History' permission is NOT swallowed — it propagates to the
-    # reconstruction boundary (ADR 0009: errors are raised, handled once).
     msg = FakeMessage(author=FakeAuthor(2, "Alice"), content="hi", reference=FakeRef(500))
     msg.channel = ForbiddenChannel()  # type: ignore[assignment]
     with pytest.raises(discord.Forbidden):
         await resolve_parent(msg)  # type: ignore[arg-type]
 
 
-# --- the bounded walk, end to end ---------------------------------------------
-
-
 def _chained(*messages: FakeMessage) -> FakeChannel:
-    """Wire a newest-first run of messages into one channel, each replying to the next, and
-    return that channel. ``messages[0]`` is the trigger; each gets ``reference`` + fetch id."""
     channel = FakeChannel()
     for i, msg in enumerate(messages):
         msg.channel = channel
@@ -278,17 +253,15 @@ async def test_reconstruct_respects_max_turns() -> None:
 
 
 async def test_reconstruct_stops_on_a_deleted_ancestor() -> None:
-    # The immediate parent is read; ITS parent (999) is gone -> the walk stops, not raises.
     trigger = FakeMessage(author=FakeAuthor(2, "Alice"), content="<@1> yo", reference=FakeRef(100))
     parent = FakeMessage(author=FakeAuthor(1, "PetBot"), content="hi", reference=FakeRef(999))
-    channel = FakeChannel({100: parent})  # 999 missing -> NotFound -> None
+    channel = FakeChannel({100: parent})
     trigger.channel = parent.channel = channel
     turns = await reconstruct(trigger, bot_user_id=1, max_turns=25)  # type: ignore[arg-type]
     assert turns == (Turn(role=Role.ASSISTANT, author="PetBot", text="hi"),)
 
 
 async def test_reconstruct_propagates_a_forbidden_fetch() -> None:
-    # The walk doesn't silently stop on a permission error — it propagates to the boundary.
     trigger = FakeMessage(author=FakeAuthor(2, "Alice"), content="<@1> yo", reference=FakeRef(500))
     trigger.channel = ForbiddenChannel()  # type: ignore[assignment]
     with pytest.raises(discord.Forbidden):

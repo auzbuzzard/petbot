@@ -20,8 +20,6 @@ _tracer = trace.get_tracer("petbot.platform.client")
 
 
 class ProcessClient(Process):
-    """Dispatches a neutral input to a process over a :class:`Transport`."""
-
     def __init__(self, transport: Transport) -> None:
         self._transport = transport
 

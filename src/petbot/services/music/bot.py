@@ -1,19 +1,12 @@
 """The music compute service: a Discord gateway that also runs the music command process.
 
-Music is its own service because voice can't go serverless — it needs a persistent
-gateway and a UDP voice socket. So this process holds a gateway (for voice state +
+So this process holds a gateway (for voice state +
 playback) *and* an HTTP dispatch endpoint the frontend calls. An inbound dispatch is run
 by a :class:`~petbot.process.RouterProcess` hosting a single
 :class:`~petbot.process.CommandProcess` over a one-skill
 :class:`~petbot.platform.ToolRegistry` (the :class:`~petbot.skills.music.MusicSkill`,
 whose :class:`~petbot.domain.ports.VoiceProvider` resolves a live voice port from this
 gateway's cache). There is no conversational process here (``chat=None``).
-
-Scaffold: styling is a no-op (:class:`~petbot.process.PassthroughStyle`) — a production
-voice service would inject a cheap :class:`~petbot.process.Stylist`. The queue
-auto-advance (:class:`~petbot.skills.music.MusicSkill`'s ``on_finished``) is where a
-future :class:`~petbot.domain.Notifier` would push a "now playing next" message back to
-the conversation. Smoke-tested manually against a dev guild, not in CI.
 """
 
 from __future__ import annotations
@@ -35,12 +28,10 @@ logger = logging.getLogger(__name__)
 
 
 class MusicService(discord.Client):
-    """Gateway client that serves dispatched music commands over HTTP."""
-
     def __init__(self, settings: MusicSettings) -> None:
         intents = discord.Intents.default()
         intents.voice_states = True
-        intents.members = True  # needed to resolve the invoking member for voice
+        intents.members = True
         super().__init__(intents=intents)
         self.settings = settings
         registry = ToolRegistry([MusicSkill(DiscordVoiceProvider(self))])
@@ -73,7 +64,6 @@ class MusicService(discord.Client):
 
 
 def run(settings: MusicSettings) -> None:
-    """Start the music service (blocking)."""
     configure_logging(settings.log_level)
     configure_observability(ObservabilitySettings())
     logger.info("Starting PetBot music service.")

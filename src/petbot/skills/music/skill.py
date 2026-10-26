@@ -1,12 +1,7 @@
 """The music skill: neutral queue + skip-vote logic over a :class:`VoicePort`.
 
 The queue and skip-vote bookkeeping live here, in the platform-neutral core; the
-actual audio transport is delegated to a :class:`VoicePort`. Because a live voice
-port can't cross the wire, the skill resolves it per request from an injected
-:class:`VoiceProvider` keyed by ``conversation_id`` (the music service, which holds
-its own gateway, supplies the provider) — rather than reading it off the context.
-The skill therefore declares ``requires={Capability.VOICE}`` and is only hosted by
-a service that can provide voice.
+actual audio transport is delegated to a :class:`VoicePort`.
 
 The queue **auto-advances**: each track starts with an ``on_finished`` callback
 that plays the next queued track when the current one ends on its own. A
@@ -42,8 +37,6 @@ SKIP_THRESHOLD = 3
 
 @dataclass(frozen=True, slots=True)
 class Track:
-    """A queued audio source."""
-
     source_url: str
     requested_by_id: str
     requested_by_name: str
@@ -51,8 +44,6 @@ class Track:
 
 @dataclass
 class ConversationMusic:
-    """Per-conversation playback state (queue, current track, votes, volume)."""
-
     queue: deque[Track] = field(default_factory=deque)
     current: Track | None = None
     skip_votes: set[str] = field(default_factory=set)
@@ -63,8 +54,6 @@ class ConversationMusic:
 
 
 class MusicSkill(Skill[MusicArgs]):
-    """Play and manage audio in a voice conversation."""
-
     name = "music"
     description = "Play audio in a voice channel: play, skip, stop, queue, volume."
     args_model = MusicArgs
@@ -100,7 +89,6 @@ class MusicSkill(Skill[MusicArgs]):
         raise SkillError(f"Unknown music action: {args.action!r}.")
 
     async def _start(self, state: ConversationMusic, voice: VoicePort, track: Track) -> None:
-        """Make ``track`` the current track and begin playing it."""
         state.current = track
         state.skip_votes.clear()
         state.play_token += 1

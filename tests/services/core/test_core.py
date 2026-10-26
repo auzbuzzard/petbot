@@ -1,5 +1,3 @@
-"""The core service: the installed-tool registry and the Lambda handler plumbing."""
-
 from __future__ import annotations
 
 import pytest
@@ -22,17 +20,13 @@ from petbot.services.core import handler as handler_module
 def test_installed_tools_are_the_stateless_skills() -> None:
     names = ToolRegistry.from_installed_skills().names
     assert {"math", "derpi", "e621"} <= names
-    assert "music" not in names  # music is its own service
-    assert "chat" not in names  # chat is the process, not a tool
+    assert "music" not in names
+    assert "chat" not in names
 
 
 def test_handler_returns_bare_skill_result_across_warm_invocations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # The handler returns the SkillResult verbatim (no HTTP envelope) so the frontend's
-    # LambdaTransport can parse the invoke Payload directly. Also a regression for the
-    # persistent-loop fix: a second warm call must not hit a closed event loop. Math runs
-    # through a passthrough-styled command process — no LLM, no network.
     process = RouterProcess(
         chat=None,
         command=CommandProcess(ToolRegistry.from_installed_skills(), PassthroughStyle()),
@@ -84,12 +78,12 @@ def test_handler_gives_the_turn_the_invocation_time_minus_a_reserve(
 
     class _AlmostOutOfTime:
         def get_remaining_time_in_millis(self) -> int:
-            return 1_000  # less than the reserve
+            return 1_000
 
     handler_module.handler(event, _LambdaContext())
-    handler_module.handler(event)  # no Lambda context: unbounded
+    handler_module.handler(event)
     handler_module.handler(event, _AlmostOutOfTime())
     reserve = RESERVE_SECONDS
     assert seen[0] is not None and 60 - reserve - 1 < seen[0] <= 60 - reserve
     assert seen[1] is None
-    assert seen[2] == 0.0  # clamped: a zero budget, never a negative one
+    assert seen[2] == 0.0

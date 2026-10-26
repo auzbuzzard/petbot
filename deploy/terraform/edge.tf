@@ -1,23 +1,11 @@
 # --- The always-on edge: a Lightsail container service ------------------------
 #
 # The edge holds the Discord gateway (an outbound WebSocket) and dispatches each
-# @mention to the core worker Lambda. Lightsail container service is the host:
-# flat-rate, public IPv4 + data bundled, immutable container push (no box to
-# patch). It serves no HTTP — it only dials out to Discord and to the worker — so
-# the deployment configures NO public endpoint. Lightsail supports this: the
-# container still runs, reachable only on the private `<name>.service.local`
-# domain (which the edge never needs), and no health-check port is required.
-#
-# Image delivery is ECR-pull: the edge image lives in its own ECR repo (the same
-# registry the worker uses), and the service pulls it via an "image puller" IAM
-# role (the declarative equivalent of what the Lightsail console wires up). The
-# image must be linux/amd64 (Lightsail container services are amd64-only; an
-# arm64 image fails with "exec format error") — see Dockerfile.edge. Measured edge
-# footprint ~76 MB RSS, so `nano` (512 MB) is ample; bump var.edge_power to
-# `micro` if it ever OOMs.
-#
-# Every edge resource exists only when var.edge_enabled: a stack without it (a dev core,
-# talked to through the chat harness) has no Lightsail service, edge identity or claims.
+# @mention to the core worker Lambda. It serves no HTTP — it only dials out to Discord
+# and to the worker — so the deployment configures NO public endpoint. Lightsail
+# supports this: the container still runs, reachable only on the private
+# `<name>.service.local` domain (which the edge never needs), and no health-check port
+# is required.
 
 resource "aws_lightsail_container_service" "edge" {
   count = local.edge_count
@@ -39,7 +27,6 @@ resource "aws_lightsail_container_service" "edge" {
   }
 }
 
-# The edge's own ECR repository.
 resource "aws_ecr_repository" "edge" {
   count = local.edge_count
 
@@ -84,36 +71,22 @@ resource "aws_lightsail_container_service_deployment_version" "edge" {
     container_name = "edge"
     image          = "${aws_ecr_repository.edge[0].repository_url}:${var.edge_image_tag}"
 
-    # Observability env (OBS_*/OTEL_*) is empty unless var.observability_enabled
-    # (see observability.tf); merged so the edge exports its dispatch spans too.
     environment = merge({
       LOG_LEVEL              = var.log_level
       ENV                    = var.lambda_environment
       SERVICE__KIND          = "lambda"
       SERVICE__FUNCTION_NAME = aws_lambda_function.this.function_name
       AWS_REGION             = var.aws_region
-      # Reply-chain fetch depth for conversation-history reconstruction (a Discord-API
-      # cost bound, not a model-context bound).
-      HISTORY_MAX_TURNS = tostring(var.history_max_turns)
-      # Scoped identity for boto3's default credential chain (Lightsail container
-      # services have no IAM instance roles, so a static key is the mechanism).
-      AWS_ACCESS_KEY_ID     = aws_iam_access_key.edge[0].id
-      AWS_SECRET_ACCESS_KEY = aws_iam_access_key.edge[0].secret
-      # The Discord token (and the telemetry salt) by SSM name; the edge reads the values
-      # from SSM at start (secrets.tf).
-      SSM_SECRETS = jsonencode(local.edge_secret_parameters)
-      # Claimed message ids, so of every connected copy exactly one answers (claims.tf).
-      CLAIMS_TABLE = aws_dynamodb_table.claims[0].name
+      HISTORY_MAX_TURNS      = tostring(var.history_max_turns)
+      AWS_ACCESS_KEY_ID      = aws_iam_access_key.edge[0].id
+      AWS_SECRET_ACCESS_KEY  = aws_iam_access_key.edge[0].secret
+      SSM_SECRETS            = jsonencode(local.edge_secret_parameters)
+      CLAIMS_TABLE           = aws_dynamodb_table.claims[0].name
     }, local.observability_edge_env)
   }
 
   depends_on = [aws_ecr_repository_policy.edge, aws_iam_user_policy.edge_secrets, aws_ssm_parameter.owned]
 }
-
-# --- The edge's scoped AWS identity -------------------------------------------
-# Least privilege: invoke exactly the core worker Lambda and read its state (so the
-# transport can wait for an Inactive/Pending function to become Active), and claim
-# messages in the claims table (claims.tf), nothing else.
 
 resource "aws_iam_user" "edge" {
   count = local.edge_count
@@ -122,9 +95,8 @@ resource "aws_iam_user" "edge" {
   permissions_boundary = local.workload_boundary_arn
 }
 
-# Lightsail has no IAM roles, so the edge holds a static key; it is replaced every
-# var.edge_key_rotation_days, on the first deploy after that. The new key exists before
-# the new container deployment carries it, and the old key is deleted only after.
+# The new key exists before the new container deployment carries it, and the old key is
+# deleted only after.
 resource "time_rotating" "edge_key" {
   count = local.edge_count
 

@@ -26,8 +26,6 @@ from petbot.types import CATALOG, Command
 
 logger = logging.getLogger(__name__)
 
-#: The option value types Discord can express. A skill arg of any other type would
-#: need an explicit mapping here, so we fail loud rather than ship a broken command.
 _OPTION_TYPES: dict[type, type] = {str: str, int: int, bool: bool, float: float}
 
 
@@ -119,9 +117,6 @@ def _as_app_command(
 
 
 def build_commands(process: Process) -> list[app_commands.Command[Any, ..., None]]:
-    """One slash command per slash-exposed catalog entry, all dispatching through
-    ``process``. Call once the process client is wired (in ``setup_hook``); the closure
-    captures it."""
     commands: list[app_commands.Command[Any, ..., None]] = []
     for spec in (s for s in CATALOG if s.slash):
         handle = _with_defer(_make_handler(process, spec))

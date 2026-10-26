@@ -24,15 +24,12 @@ from petbot.platform import ToolRegistry
 
 
 class CommandProcess(Process):
-    """Dispatch a resolved command to its tool and voice the result."""
-
     def __init__(self, registry: ToolRegistry, style: StylePort) -> None:
         self._registry = registry
         self._style = style
 
     async def respond(self, inp: Input, ctx: SkillContext) -> SkillResult:
         if not isinstance(inp, CommandInput):
-            # The router only sends resolved commands here; guard for type-safety.
             raise TypeError(f"CommandProcess received {type(inp).__name__}")
         try:
             result = await self._registry.dispatch(inp.name, inp.values, ctx)

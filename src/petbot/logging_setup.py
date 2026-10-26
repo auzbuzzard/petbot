@@ -10,9 +10,6 @@ profiles shipped as package data:
 * ``json`` — structured JSON-lines through a :class:`QueueHandler`, so the I/O
   happens on a background :class:`QueueListener` thread and never blocks the
   asyncio event loop (the prod profile).
-
-Nothing here reads the environment: the level and profile are passed in by the
-caller, which got them from its settings (the only reader of the environment).
 """
 
 from __future__ import annotations
@@ -28,7 +25,6 @@ from typing import Any, Final, override
 
 __all__ = ["JSONFormatter", "NonErrorFilter", "configure_logging"]
 
-#: Profile name -> packaged ``dictConfig`` JSON file (under ``logging_configs/``).
 _CONFIG_FILES: Final[dict[str, str]] = {
     "plain": "plain.json",
     "json": "structured.json",
@@ -70,8 +66,6 @@ _atexit_registered = False
 
 
 class JSONFormatter(logging.Formatter):
-    """Render a :class:`logging.LogRecord` as a single JSON-lines object."""
-
     def __init__(self, *, fmt_keys: dict[str, str] | None = None) -> None:
         super().__init__()
         self.fmt_keys = fmt_keys if fmt_keys is not None else {}
@@ -160,7 +154,6 @@ def _resolve_level(level: str | int) -> str | int:
 
 
 def _start_queue_listener() -> QueueListener | None:
-    """Start the listener behind ``queue_handler`` (if the profile defines one)."""
     global _active_listener
     handler = logging.getHandlerByName("queue_handler")
     if not isinstance(handler, QueueHandler):

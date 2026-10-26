@@ -1,5 +1,3 @@
-"""The command catalog: typed entries the slash surface and the agent both derive from."""
-
 from __future__ import annotations
 
 import pytest
@@ -19,7 +17,6 @@ from petbot.types.args import (
 def test_catalog_holds_the_command_skills_only() -> None:
     names = {c.name for c in CATALOG}
     assert names == {"math", "derpi", "e621", "web_search", "web_fetch", "weather", "leetcode"}
-    # music (a separate service) and chat (the process itself) are absent by design.
     assert "music" not in names and "chat" not in names
 
 

@@ -16,12 +16,7 @@ from enum import StrEnum
 
 
 class Phase(StrEnum):
-    """Where a dispatched turn is."""
-
-    #: The process isn't running yet (e.g. an ``Inactive`` Lambda re-pulling its image);
-    #: the turn hasn't started.
     WAKING = "waking"
-    #: The process is running the turn.
     THINKING = "thinking"
 
 
@@ -31,7 +26,6 @@ _observer: ContextVar[Callable[[Phase], None] | None] = ContextVar(
 
 
 def report(phase: Phase) -> None:
-    """Tell the current turn's observer, if any, that the turn is now in ``phase``."""
     observer = _observer.get()
     if observer is not None:
         observer(phase)

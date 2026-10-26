@@ -22,7 +22,6 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-#: The environment variable carrying the name map.
 SSM_SECRETS = "SSM_SECRETS"
 
 #: GetParameters accepts at most this many names per call.
@@ -41,11 +40,6 @@ def _parameter_map(raw: str) -> dict[str, str]:
 def load_ssm_secrets(
     environ: MutableMapping[str, str] | None = None, *, client: Any = None
 ) -> list[str]:
-    """Set each variable ``SSM_SECRETS`` names from its SSM parameter; return the names set.
-
-    ``environ`` defaults to ``os.environ``; ``client`` to a boto3 SSM client (boto3 is
-    imported only when there is something to read).
-    """
     env: MutableMapping[str, str] = os.environ if environ is None else environ
     raw = env.get(SSM_SECRETS, "").strip()
     if not raw:

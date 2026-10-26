@@ -37,27 +37,19 @@ def _prompt(*names: str) -> str:
 
 
 def _load_agent_prompt() -> str:
-    """The conversational agent's prompt: shared persona + its tool-use and
-    no-invented-reason rules. Overridable via ``CHAT_SYSTEM_PROMPT``."""
     return _prompt("persona.md", "agent.md")
 
 
 def _load_stylizer_prompt() -> str:
-    """The slash-path stylizer's prompt: the same persona + a faithful-rewrite
-    instruction. Overridable via ``CHAT_STYLIZER_PROMPT``."""
     return _prompt("persona.md", "stylizer.md")
 
 
 class BedrockModel(BaseModel):
-    """An Amazon Bedrock model."""
-
     kind: Literal["bedrock"] = "bedrock"
     model: str
 
 
 class OpenRouterModel(BaseModel):
-    """An OpenRouter (OpenAI-compatible) model."""
-
     kind: Literal["openrouter"] = "openrouter"
     model: str
     api_key: str
@@ -92,7 +84,6 @@ class BedrockMantleModel(BaseModel):
     base_url: str
 
 
-#: Exactly one provider config, with only its own fields. Tagged by ``kind``.
 LLMConfig = Annotated[
     BedrockModel | OpenRouterModel | OpenAICompatibleModel | BedrockMantleModel,
     Field(discriminator="kind"),
@@ -100,14 +91,10 @@ LLMConfig = Annotated[
 
 
 class SlidingWindowContext(BaseModel):
-    """Compact an over-long history by dropping its oldest half. No LLM, no cost."""
-
     kind: Literal["sliding_window"] = "sliding_window"
 
 
 class SummarizeContext(BaseModel):
-    """Compact an over-long history by summarising its oldest half with a small LLM."""
-
     kind: Literal["summarize"] = "summarize"
 
 
@@ -118,8 +105,6 @@ ContextConfig = Annotated[SlidingWindowContext | SummarizeContext, Field(discrim
 
 
 class ChatSettings(BaseSettings):
-    """Which LLM(s) the chat skill talks to, and how to reach them."""
-
     model_config = SettingsConfigDict(
         env_prefix="chat_",
         env_file=".env",
@@ -129,27 +114,12 @@ class ChatSettings(BaseSettings):
         frozen=True,
     )
 
-    #: The tool-calling agent's LLM (required; see ``CHAT_LLM__*``).
     llm: LLMConfig
-    #: Optional cheaper model for the slash-path stylizer (``CHAT_STYLIZER__*``);
-    #: unset ⇒ reuse :attr:`llm`. Resolved by :meth:`stylizer_llm`.
     stylizer: LLMConfig | None = None
-    #: The agent's persona + rules (``prompts/persona.md`` + ``agent.md``); override
-    #: via ``CHAT_SYSTEM_PROMPT``.
     system_prompt: str = Field(default_factory=_load_agent_prompt)
-    #: The stylizer's persona + rewrite rule (``persona.md`` + ``stylizer.md``);
-    #: override via ``CHAT_STYLIZER_PROMPT``.
     stylizer_prompt: str = Field(default_factory=_load_stylizer_prompt)
-    #: How to compact an over-long conversation when the model rejects it for length
-    #: (``CHAT_CONTEXT__KIND``); defaults to the zero-cost sliding window.
     context: ContextConfig = Field(default_factory=SlidingWindowContext)
-    #: Whether the tool-calling agent reasons before it answers (``CHAT_THINKING``): unset
-    #: leaves the model's default, else ``true``/``false`` or an effort level. The reasoning
-    #: is never shown or replayed; it only improves the answer. Gemma 4 on Bedrock mantle
-    #: thinks only at ``high``; lower levels are accepted and change nothing. The agent role
-    #: only: the stylizer and summarizer never think.
     thinking: ThinkingLevel | None = None
 
     def stylizer_llm(self) -> LLMConfig:
-        """The stylizer's model config: its own if set, else the agent's (one tier)."""
         return self.stylizer or self.llm

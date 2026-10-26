@@ -1,6 +1,4 @@
-"""AWS Lambda handler for the core service (the ``transport=lambda`` target).
-
-The frontend invokes this Lambda with a dispatch JSON payload (boto3 ``invoke``); the
+"""The frontend invokes this Lambda with a dispatch JSON payload (boto3 ``invoke``); the
 handler runs it through the service's :class:`~petbot.domain.process.Process` and returns
 the :class:`~petbot.domain.result.SkillResult` as the response payload — verbatim, no HTTP
 envelope, because the frontend's ``LambdaTransport`` reads the raw invoke ``Payload``
@@ -28,9 +26,8 @@ from petbot.platform import budget, serve
 from petbot.platform.secrets import load_ssm_secrets
 from petbot.services.core import RESERVE_SECONDS, build_process
 
-# Cold start, once per execution environment. The Lambda runtime installs no app logging, so
-# without this the root logger stays at WARNING and INFO records never reach CloudWatch. The
-# Lambda always targets CloudWatch, so structured JSON; the dev HTTP entrypoint stays plain.
+# Cold start, once per execution environment. The Lambda always targets CloudWatch, so
+# structured JSON; the dev HTTP entrypoint stays plain.
 # The secrets are read from SSM next, before any settings (telemetry's included) are read;
 # then the telemetry providers are installed, before build_process reads them.
 configure_logging(os.environ.get("LOG_LEVEL", "INFO"), "json")
@@ -58,9 +55,7 @@ def _get_loop() -> asyncio.AbstractEventLoop:
 def handler(event: dict[str, Any], context: object = None) -> dict[str, Any]:
     """Lambda entrypoint: run the dispatched call, return the bare ``SkillResult``.
 
-    The event is the ``{"input", "context"}`` dispatch payload from the frontend's boto3
-    ``invoke`` (an API Gateway-style ``{"body": ...}`` wrapper is also accepted). The
-    return value becomes the invoke response ``Payload`` verbatim — the ``SkillResult``
+    The return value becomes the invoke response ``Payload`` verbatim — the ``SkillResult``
     itself, which the frontend parses directly.
     """
     body = event["body"] if isinstance(event, dict) and "body" in event else json.dumps(event)

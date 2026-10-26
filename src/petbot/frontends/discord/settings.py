@@ -17,26 +17,19 @@ from petbot.frontends.discord.thinking import THINKING_AFTER_SECONDS
 
 
 class HttpService(BaseModel):
-    """Reach the compute service over HTTP."""
-
     kind: Literal["http"] = "http"
     url: str
 
 
 class LambdaService(BaseModel):
-    """Reach the compute service by invoking a Lambda."""
-
     kind: Literal["lambda"] = "lambda"
     function_name: str
 
 
-#: Exactly one transport, with only its own fields. Tagged by ``kind``.
 ServiceTarget = Annotated[HttpService | LambdaService, Field(discriminator="kind")]
 
 
 class DiscordSettings(BaseSettings):
-    """Configuration for the always-on Discord frontend."""
-
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -54,7 +47,6 @@ class DiscordSettings(BaseSettings):
     #: Seconds into a conversational turn at which the typing indicator pauses once, as a
     #: person's would, before it resumes. Env ``THINKING_AFTER_SECONDS``.
     thinking_after_seconds: float = Field(default=THINKING_AFTER_SECONDS, gt=0)
-    #: The compute service to dispatch to (required; see ``SERVICE__*``).
     service: ServiceTarget
     #: DynamoDB table of claimed message ids (``CLAIMS_TABLE``), so that of every copy of
     #: the frontend on the gateway exactly one handles each message. Unset ⇒ no claiming.

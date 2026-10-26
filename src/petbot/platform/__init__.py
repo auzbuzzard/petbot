@@ -1,14 +1,3 @@
-"""PetBot platform: the compute plumbing — registry, transports, serve, client.
-
-:class:`ToolRegistry` holds the tools a process can call; :func:`serve` is the remote
-boundary that runs a :class:`~petbot.domain.process.Process` behind a transport;
-:class:`ProcessClient` is the frontend's handle to a process; :class:`HttpTransport` /
-:class:`LambdaTransport` carry a :class:`Dispatch` to it; :func:`report` / :func:`observe`
-pass a turn's :class:`Phase` from the transport to the caller waiting on it; :func:`budget` /
-:func:`remaining` carry a turn's time budget from its host to the process doing the work.
-Platform-agnostic: it knows no skill, no frontend, and no concrete process impl.
-"""
-
 from __future__ import annotations
 
 from petbot.platform.client import ProcessClient

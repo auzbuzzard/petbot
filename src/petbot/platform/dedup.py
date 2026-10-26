@@ -1,12 +1,5 @@
 """At-most-once handling of a platform event, however many frontend copies receive it.
 
-The Discord frontend is a gateway client, and Discord delivers every event to every session
-connected with the bot's token. Two sessions exist whenever a Lightsail deployment rolls
-over (the new container connects before the old one stops) or a second copy runs anywhere
-with the same token. Before doing anything with an event, the frontend claims its id in a
-:class:`ClaimStore`; only the copy that wins goes on to type, dispatch and answer, so the
-compute side is invoked once per message.
-
 A claim is a conditional create in DynamoDB (:class:`DynamoClaims`): atomic, so exactly one
 of two concurrent copies wins, and expired by the table's TTL. The winner records which copy
 it is; a loser adds itself to the item and bumps a counter, so the table shows whether a
@@ -27,16 +20,10 @@ logger = logging.getLogger(__name__)
 
 
 class ClaimStore(Protocol):
-    """Records which events have already been taken."""
-
-    async def claim(self, event_id: str) -> bool:
-        """Take ``event_id``: ``True`` for the first caller, ``False`` for every later one."""
-        ...
+    async def claim(self, event_id: str) -> bool: ...
 
 
 class _DynamoClient(Protocol):
-    """The slice of a boto3 DynamoDB client this store uses."""
-
     def put_item(self, **kwargs: Any) -> Any: ...
 
     def update_item(self, **kwargs: Any) -> Any: ...
@@ -63,7 +50,6 @@ class DynamoClaims(ClaimStore):
 
     @classmethod
     def from_table_name(cls, table: str) -> DynamoClaims:
-        """Build a store with a default ``boto3`` DynamoDB client (lazy import)."""
         import boto3
 
         return cls(table, boto3.client("dynamodb"))

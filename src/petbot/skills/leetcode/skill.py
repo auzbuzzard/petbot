@@ -1,14 +1,8 @@
 """The ``leetcode`` skill: today's daily problem, or a random free one.
 
-LeetCode publishes no API; the GraphQL endpoint its own site uses answers unauthenticated
-reads, and that is what daily-problem bots call (ADR 0013). Providers are ranked like the
-web search's: the first that answers wins, so a hosted mirror can be added behind
-:class:`LeetCodeProvider` if the endpoint stops answering the deployed runtime.
-
-A random pick is uniform over the algorithms problem set (the problem list without its
-database and shell problems): one problem at a random index, drawn again if it is
-members-only, which a free account can't open. The endpoint ignores the list's own premium
-filter, so that check happens here.
+Providers are ranked like the web search's: the first that answers wins, so a hosted mirror
+can be added behind :class:`LeetCodeProvider` if the endpoint stops answering the deployed
+runtime.
 """
 
 from __future__ import annotations
@@ -29,11 +23,9 @@ logger = logging.getLogger(__name__)
 
 GRAPHQL_URL = "https://leetcode.com/graphql/"
 PROBLEM_URL = "https://leetcode.com/problems/{slug}/"
-#: The problem set a random pick is drawn from.
 CATEGORY = "algorithms"
 #: Draws before a random pick gives up on landing on a free problem.
 MAX_DRAWS = 4
-#: Seconds a problem count is reused; it only grows when LeetCode adds a problem.
 TOTAL_TTL = 3600.0
 
 _QUESTION_FIELDS = (
@@ -53,14 +45,10 @@ LIST_QUERY = (
 
 @dataclass(frozen=True)
 class Problem:
-    """One LeetCode problem, as the skill reports it."""
-
     number: str
     title: str
     slug: str
-    #: As LeetCode spells it: ``Easy``, ``Medium`` or ``Hard``.
     difficulty: str
-    #: Accepted submissions as a percentage of all, if LeetCode reports it.
     acceptance: float | None
     topics: tuple[str, ...]
     paid_only: bool
@@ -72,8 +60,6 @@ class Problem:
 
 @dataclass(frozen=True)
 class Daily:
-    """The daily problem and the day (``YYYY-MM-DD``) LeetCode dates it."""
-
     date: str
     problem: Problem
 
@@ -99,7 +85,6 @@ def _text(raw: dict[str, Any], key: str) -> str:
 
 
 def parse_problem(raw: object) -> Problem:
-    """A :class:`Problem` from one GraphQL question object; ``ValueError`` if it isn't one."""
     if not isinstance(raw, dict):
         raise ValueError("problem is not an object")
     acceptance = raw.get("acRate")
@@ -120,8 +105,6 @@ def parse_problem(raw: object) -> Problem:
 
 
 class GraphQLProvider(LeetCodeProvider):
-    """LeetCode's own GraphQL endpoint, read without an account."""
-
     name = "leetcode-graphql"
 
     def __init__(
@@ -129,7 +112,6 @@ class GraphQLProvider(LeetCodeProvider):
     ) -> None:
         self._client = client
         self._clock = clock
-        #: Problem count per difficulty, with when it was read.
         self._totals: dict[LeetCodeDifficulty | None, tuple[int, float]] = {}
 
     async def _query(self, operation: str, query: str, variables: dict[str, Any]) -> Any:
@@ -213,15 +195,11 @@ def format_daily(daily: Daily) -> str:
 
 
 def format_random(problem: Problem, difficulty: LeetCodeDifficulty | None) -> str:
-    """What the reader gets for a random pick."""
     kind = f"{difficulty.capitalize()} " if difficulty else ""
     return "\n".join([f"A random {kind}LeetCode problem:", *_describe(problem)])
 
 
 class LeetCodeSkill(Skill[LeetCodeArgs]):
-    """Today's LeetCode daily problem, or a random free one, from the first provider that
-    answers."""
-
     name = "leetcode"
     description = "Look up a LeetCode problem."
     args_model = LeetCodeArgs

@@ -26,8 +26,6 @@ jobs:
           enable-cache: true
 
       - name: Sync (all extras)
-        # --locked fails if uv.lock is stale; uv itself fetches/pins Python 3.12.
-        # One package, so --all-extras installs everything (edge, worker, lambda, dev).
         run: uv sync --locked --all-extras --python 3.12
 
       - name: Ruff (lint + format check)

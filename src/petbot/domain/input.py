@@ -47,9 +47,6 @@ class Turn(Frozen):
 
 
 class Recalled(Frozen):
-    """The prior turns PetBot recalled for this reply — the reply chain, oldest-first;
-    empty for a fresh ``@mention`` or a thread with nothing before it."""
-
     kind: Literal["recalled"] = "recalled"
     turns: tuple[Turn, ...] = ()
 
@@ -95,5 +92,4 @@ class CommandInput(Frozen):
     values: dict[str, object] = Field(default_factory=dict)
 
 
-#: The pipeline input: exactly one variant, re-hydrated from a payload by ``kind``.
 Input = Annotated[TextInput | CommandInput, Field(discriminator="kind")]

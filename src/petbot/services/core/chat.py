@@ -86,7 +86,6 @@ from petbot.services.core import RESERVE_SECONDS, build_process
 
 logger = logging.getLogger(__name__)
 
-#: PetBot's name on his own messages.
 BOT_NAME = "PetBot"
 #: PetBot's user id in the reconstructed chain; no message here mentions him by id.
 _BOT_USER_ID = 0
@@ -100,8 +99,6 @@ _Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class Message(Frozen):
-    """One message in a conversation."""
-
     author: str
     text: _Text
     #: Sent to PetBot (a mention or a reply to him); false is people talking to each other.
@@ -111,8 +108,6 @@ class Message(Frozen):
 
 
 class Conversation(Frozen):
-    """Where a conversation happens, and what is said in it, in order."""
-
     server: str | None = "Test server"
     channel: str | None = "general"
     nsfw: bool = False
@@ -128,7 +123,6 @@ class ChainSettings(BaseSettings):
 
 
 def context_for(conversation: Conversation, author: str) -> SkillContext:
-    """The request context a message from ``author`` arrives with."""
     return SkillContext(
         platform=Platform.DISCORD,
         user=User(platform=Platform.DISCORD, id=f"local:{author}", display_name=author),
@@ -140,7 +134,6 @@ def context_for(conversation: Conversation, author: str) -> SkillContext:
 
 
 def _wire(inp: TextInput, ctx: SkillContext) -> str:
-    """The dispatch body, as the transports encode it."""
     return json.dumps(
         {"input": inp.model_dump(mode="json"), "context": ctx.model_dump(mode="json")}
     )
@@ -178,8 +171,6 @@ def print_tool_calls(messages: Sequence[ModelMessage], out: TextIO, *, verbose: 
 
 
 class Core(ABC):
-    """Where the harness sends each message."""
-
     @abstractmethod
     async def reply(
         self, inp: TextInput, ctx: SkillContext

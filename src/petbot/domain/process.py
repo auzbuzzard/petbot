@@ -19,8 +19,4 @@ from petbot.domain.result import SkillResult
 
 @runtime_checkable
 class Process(Protocol):
-    """Turns a neutral :class:`~petbot.domain.input.Input` into a ``SkillResult``."""
-
-    async def respond(self, inp: Input, ctx: SkillContext) -> SkillResult:
-        """Process ``inp`` against the request ``ctx`` and return a neutral result."""
-        ...
+    async def respond(self, inp: Input, ctx: SkillContext) -> SkillResult: ...

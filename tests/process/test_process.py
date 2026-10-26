@@ -1,6 +1,3 @@
-"""The process core: the chat agent, the command process, the router, and the stylist —
-all without a live LLM (``TestModel``) or live skills (fakes in a real ToolRegistry)."""
-
 from __future__ import annotations
 
 import asyncio
@@ -75,8 +72,6 @@ def _ctx() -> SkillContext:
 
 
 class _FakeSkill(Skill[BaseModel]):
-    """A tool that records its calls and returns a canned result."""
-
     def __init__(self, name: str, args_model: type[BaseModel], result: SkillResult) -> None:
         self.name = name
         self.description = name
@@ -90,8 +85,6 @@ class _FakeSkill(Skill[BaseModel]):
 
 
 class _RaisingSkill(Skill[BaseModel]):
-    """A tool whose expected failure is raised, not returned."""
-
     def __init__(self, name: str, args_model: type[BaseModel]) -> None:
         self.name = name
         self.description = name
@@ -103,9 +96,6 @@ class _RaisingSkill(Skill[BaseModel]):
 
 def _registry(*skills: Skill[Any]) -> ToolRegistry:
     return ToolRegistry(skills)
-
-
-# --- settings + model builder (provider-agnostic, offline) --------------------
 
 
 def test_llm_config_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -153,7 +143,7 @@ def test_system_prompt_carries_the_aurora_persona_and_helpfulness(
     prompt = _settings().system_prompt
     assert "Aurora" in prompt and "hyena" in prompt and "he/him" in prompt
     assert "yeenocent" in prompt
-    assert "ferocious" not in prompt  # a quoted catchphrase gets said in every reply
+    assert "ferocious" not in prompt
     assert "Lead with the answer" in prompt
     assert "a sentence or two" not in prompt  # no length cap that starves real answers
 
@@ -190,14 +180,6 @@ def test_build_model_from_config_builds_each_role() -> None:
     assert isinstance(build_model_from_config(cfg), OpenAIChatModel)
 
 
-# --- Gemma schema parity: dev (OpenRouter) and prod (mantle) drive Gemma identically -------
-# Gemma emits tool calls in its own format and only accepts the Gemini subset of JSON Schema.
-# pydantic-ai picks the schema handling from the *provider*, so the same Gemma model would get
-# Gemma-aware schemas on OpenRouter but raw OpenAI schemas on a generic endpoint (Bedrock
-# mantle) — Gemma then can't see the tools and narrates a free-text call that leaks to the user.
-# We pin the profile by model identity so both paths send Gemma the same, parseable schemas.
-
-
 def test_gemma_pins_gemini_schema_transformer_on_mantle() -> None:
     from petbot.process.model import _GeminiToolSchema
 
@@ -212,8 +194,6 @@ def test_gemma_pins_gemini_schema_transformer_on_mantle() -> None:
 
 
 def test_gemma_schema_handling_is_identical_dev_and_prod() -> None:
-    # OpenRouter (dev scaffold) and mantle (prod) must end up with the *same* transformer for
-    # the same model — no silent per-provider divergence.
     dev = build_model_from_config(OpenRouterModel(model="google/gemma-3-27b-it:free", api_key="k"))
     prod = build_model_from_config(
         OpenAICompatibleModel(model="google.gemma-4-26b-a4b", base_url="https://x/v1", api_key="k")
@@ -222,8 +202,6 @@ def test_gemma_schema_handling_is_identical_dev_and_prod() -> None:
 
 
 def test_non_gemma_openai_compatible_keeps_provider_default() -> None:
-    # A non-Gemma OpenAI-compatible endpoint (e.g. a self-hosted GPT-ish model) must not get
-    # the Gemini transformer forced on it.
     from petbot.process.model import _GeminiToolSchema
 
     model = build_model_from_config(
@@ -288,8 +266,6 @@ async def test_no_chat_thinking_leaves_reasoning_unset() -> None:
 
 @respx.mock
 async def test_reasoning_is_neither_shown_nor_replayed_in_a_tool_loop() -> None:
-    # Turn 1 reasons and calls a tool; turn 2 answers. The reasoning must not reach the
-    # user, and must not go back to the model on the tool loop's second request.
     tool_call = {
         "role": "assistant",
         "content": None,
@@ -334,8 +310,6 @@ def test_gemma_does_not_advertise_strict_tool_definitions() -> None:
 
 
 def test_non_gemma_openai_compatible_keeps_strict_default() -> None:
-    # The strict opt-out rides with the Gemini transformer; a model we don't special-case keeps
-    # whatever the provider's own profile says.
     model = build_model_from_config(
         OpenAICompatibleModel(model="some-llama-3", base_url="https://x/v1", api_key="k")
     )
@@ -345,10 +319,6 @@ def test_non_gemma_openai_compatible_keeps_strict_default() -> None:
 
 @respx.mock
 async def test_gemma_tool_payload_carries_no_strict_flag() -> None:
-    # The regression that took prod down: every tool with an optional argument (BooruArgs has
-    # four) went out as `strict: true` with `required: ["tags"]`, and mantle answered 400
-    # `invalid_function_parameters` — failing *every* chat turn, tool-calling or not. Assert the
-    # wire payload, since the flag is only visible once pydantic-ai renders the tool.
     base_url = "https://bedrock-mantle.us-east-1.api.aws/openai/v1"
     route = respx.post(f"{base_url}/chat/completions").mock(
         return_value=httpx.Response(
@@ -380,14 +350,11 @@ async def test_gemma_tool_payload_carries_no_strict_flag() -> None:
     assert booru, "the booru tools should be offered to the model"
     for function in booru:
         assert function.get("strict") is not True
-        # The schema itself stays Gemini-shaped: optionals nullable, not in `required`.
         assert function["parameters"]["properties"]["sort"]["nullable"] is True
         assert function["parameters"]["required"] == ["tags"]
 
 
 def test_gemini_tool_schema_makes_args_gemma_parseable() -> None:
-    # The transformer must actually fix a real *Args schema: drop `title`, inline `$defs`, and
-    # collapse `str | None` (an anyOf-with-null) to a plain nullable field Gemma accepts.
     from petbot.process.model import _GeminiToolSchema
 
     raw = BooruArgs.model_json_schema()
@@ -398,9 +365,6 @@ def test_gemini_tool_schema_makes_args_gemma_parseable() -> None:
     assert "$defs" not in transformed and "$ref" not in str(transformed)
 
 
-# --- the stylist (the persona voice) ------------------------------------------
-
-
 async def test_stylist_rewrites_result_text_in_character() -> None:
     stylist = Stylist(model=TestModel(custom_output_text="meep~ those tags came up empty"))
     result = await stylist.stylize(SkillResult.message("No results found for those tags."), _ctx())
@@ -408,8 +372,6 @@ async def test_stylist_rewrites_result_text_in_character() -> None:
 
 
 def _capturing_stylist(reply: str, seen: list[str]) -> Stylist:
-    """A stylist whose model records the prompt it was given and answers ``reply``."""
-
     def fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         seen.extend(text for _, text in _texts(messages))
         return ModelResponse(parts=[TextPart(content=reply)])
@@ -418,8 +380,6 @@ def _capturing_stylist(reply: str, seen: list[str]) -> Stylist:
 
 
 async def test_stylist_keeps_formatted_output_verbatim_under_a_voiced_line() -> None:
-    # The regression: /math 6 * 7 came back as "Here's what I found, [Name]!" with no 42.
-    # A code block is shown as-is; the model only writes the line that introduces it.
     transcript = "```py\n>>>\t6 * 7\n<<<\t42\n```"
     seen: list[str] = []
     stylist = _capturing_stylist("here you go, tester~", seen)
@@ -456,7 +416,7 @@ async def test_stylist_restatement_that_drops_a_fact_falls_back_to_the_original(
     result = await _capturing_stylist("meep~ found some posts!", seen).stylize(
         SkillResult.message(original), _ctx()
     )
-    assert result.text == original  # a correct answer beats an in-character wrong one
+    assert result.text == original
 
 
 async def test_stylist_tells_the_model_the_users_name() -> None:
@@ -491,9 +451,6 @@ async def test_stylist_greets_over_a_found_image() -> None:
     assert result.embed is not None and result.embed.image_url == "https://img/x.png"
 
 
-# --- the chat process (the agent + its tools) ---------------------------------
-
-
 async def test_chat_calls_math_tool_and_returns_text() -> None:
     math = _FakeSkill("math", MathArgs, SkillResult.message("```\n42\n```"))
     chat = ChatProcess(_registry(math), model=TestModel(call_tools=["math"]))
@@ -514,7 +471,6 @@ async def test_chat_surfaces_a_booru_tool_card() -> None:
 
 
 async def test_chat_surfaces_the_card_of_the_last_tool_call() -> None:
-    # The agent searched derpi, passed on it, then searched e621: e621's card is the answer.
     derpi = _FakeSkill(
         "derpi", BooruArgs, SkillResult.message(embed=EmbedSpec(image_url="https://img/first"))
     )
@@ -539,10 +495,7 @@ async def test_chat_tool_error_does_not_crash_the_agent() -> None:
     registry = _registry(_RaisingSkill("e621", BooruArgs))
     chat = ChatProcess(registry, model=TestModel(call_tools=["e621"]))
     result = await chat.respond(TextInput(text="find a fox"), _ctx())
-    assert result.text  # the failure is reported to the model, not raised
-
-
-# --- the command process (dispatch + uniform styling) -------------------------
+    assert result.text
 
 
 async def test_command_process_runs_and_styles() -> None:
@@ -553,22 +506,15 @@ async def test_command_process_runs_and_styles() -> None:
 
 
 class _MarkStyle(StylePort):
-    """A fake StylePort that wraps the text, so the styling step is observable."""
-
     async def stylize(self, result: SkillResult, ctx: SkillContext) -> SkillResult:
         return result.model_copy(update={"text": f"~{result.text}~"})
 
 
 async def test_command_process_voices_a_raised_skill_error() -> None:
-    # D18: a skill raises; the command process catches it at the output boundary and
-    # voices the message through the same StylePort as a success.
     registry = _registry(_RaisingSkill("e621", BooruArgs))
     process = CommandProcess(registry, _MarkStyle())
     result = await process.respond(CommandInput(name="e621", values={"tags": "x"}), _ctx())
     assert result.text == "~the booru is down~"
-
-
-# --- the router (the one exhaustive match) ------------------------------------
 
 
 class _Recorder(Process):
@@ -591,11 +537,7 @@ async def test_router_without_chat_rejects_conversational_input() -> None:
         await router.respond(TextInput(text="hi"), _ctx())
 
 
-# --- history mapping (neutral Turn -> pydantic-ai message_history) -------------
-
-
 def _texts(messages: list[ModelMessage]) -> list[tuple[str, str]]:
-    """``(kind, text)`` for each string part, for compact assertions."""
     out: list[tuple[str, str]] = []
     for message in messages:
         for part in message.parts:
@@ -606,8 +548,6 @@ def _texts(messages: list[ModelMessage]) -> list[tuple[str, str]]:
 
 
 def test_to_model_messages_inlines_user_author_not_assistant() -> None:
-    # The user turn is prefixed with its author (multi-user attribution); the bot turn
-    # isn't — the model owns its own replies.
     msgs = to_model_messages(
         (
             Turn(role=Role.USER, author="Alice", text="show me a pony"),
@@ -631,15 +571,13 @@ def test_to_model_messages_drops_empty_turns() -> None:
     msgs = to_model_messages(
         (
             Turn(role=Role.USER, author="Alice", text="real"),
-            Turn(role=Role.ASSISTANT, author="PetBot", text="   "),  # empty -> dropped
+            Turn(role=Role.ASSISTANT, author="PetBot", text="   "),
         )
     )
     assert _texts(msgs) == [("request", "Alice: real")]
 
 
 def test_to_model_messages_drops_leading_assistant_turns() -> None:
-    # History must begin with a user message (providers reject an assistant-first run), so
-    # a leading bot turn is dropped.
     msgs = to_model_messages(
         (
             Turn(role=Role.ASSISTANT, author="PetBot", text="earlier reply"),
@@ -656,18 +594,13 @@ def test_to_model_messages_lone_assistant_history_is_empty() -> None:
 
 
 def test_drop_leading_assistant_keeps_from_first_user() -> None:
-    # The shared guard the mapper and post-compaction path both apply: a compacted slice
-    # that begins with a bot message is trimmed to the first user message.
     messages: list[ModelMessage] = [
         ModelResponse(parts=[TextPart(content="earlier bot reply")]),
         ModelRequest(parts=[UserPromptPart(content="user")]),
         ModelResponse(parts=[TextPart(content="bot")]),
     ]
     assert drop_leading_assistant(messages) == messages[1:]
-    assert drop_leading_assistant(messages[2:]) == []  # all-assistant -> nothing
-
-
-# --- reactive context compaction ----------------------------------------------
+    assert drop_leading_assistant(messages[2:]) == []
 
 
 def _overflow() -> ModelHTTPError:
@@ -708,14 +641,11 @@ async def test_summarizer_replaces_oldest_half_with_a_summary() -> None:
     summarizer = Summarizer(model=TestModel(custom_output_text="earlier: ponies"))
     history = _history(4)
     compacted = await summarizer.compact(history)
-    assert len(compacted) == 3  # one summary note + the recent half (2)
+    assert len(compacted) == 3
     assert compacted[1:] == history[2:]
     note = compacted[0]
     assert isinstance(note, ModelRequest)
     assert "earlier: ponies" in _texts([note])[0][1]
-
-
-# --- the chat process retries on a provider length rejection ------------------
 
 
 async def test_chat_compacts_and_retries_on_context_overflow() -> None:
@@ -733,7 +663,7 @@ async def test_chat_compacts_and_retries_on_context_overflow() -> None:
         for i in range(6)
     )
     result = await chat.respond(TextInput(text="now", history=Recalled(turns=history)), _ctx())
-    assert calls["n"] == 2  # first attempt overflowed; the compacted retry succeeded
+    assert calls["n"] == 2
     assert result.text == "recovered"
 
 
@@ -757,8 +687,6 @@ async def test_chat_passes_prior_turns_as_message_history() -> None:
 
 
 async def test_chat_unrecalled_history_tells_the_agent_it_lost_the_thread() -> None:
-    # A reply whose context couldn't be read: no message_history, and the agent's run
-    # instructions gain the lost-thread note so it doesn't answer blind.
     seen: dict[str, object] = {}
 
     def fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
@@ -771,9 +699,9 @@ async def test_chat_unrecalled_history_tells_the_agent_it_lost_the_thread() -> N
 
     chat = ChatProcess(_registry(), model=FunctionModel(fn))
     result = await chat.respond(TextInput(text="and the other one?", history=Unrecalled()), _ctx())
-    assert result.text  # still answers
+    assert result.text
     assert isinstance(seen["instructions"], str) and "lost the thread" in seen["instructions"]
-    assert seen["history"] == ["and the other one?"]  # only the current turn — no prior context
+    assert seen["history"] == ["and the other one?"]
 
 
 async def test_chat_grounds_each_run_in_the_clock_speaker_and_channel_rating() -> None:

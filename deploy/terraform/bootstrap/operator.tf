@@ -72,8 +72,6 @@ data "aws_iam_policy_document" "operator_permissions" {
     )
   }
 
-  # Listing resources and fetching Logs Insights results have no resource form; listing
-  # shows names and configuration, not data.
   statement {
     sid = "ListResources"
     actions = [
@@ -86,7 +84,6 @@ data "aws_iam_policy_document" "operator_permissions" {
     resources = ["*"]
   }
 
-  # Lightsail resources have GUID ARNs, so there is no name to scope to (as for CI).
   statement {
     sid = "ReadEdge"
     actions = [
@@ -160,8 +157,6 @@ data "aws_iam_policy_document" "operator_permissions" {
     ])
   }
 
-  # Account-level reads with no resource form: metrics, traces, the API audit trail,
-  # policy simulation of a draft document, and the budget.
   statement {
     sid = "ReadAccountTelemetry"
     actions = [

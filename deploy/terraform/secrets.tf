@@ -1,16 +1,11 @@
-# Runtime secrets are SSM SecureString parameters created out-of-band (see README).
 # Terraform passes each process only their *names*, as SSM_SECRETS (a JSON object of
 # ENV-VAR-NAME => parameter name), and the process reads the values when it starts
 # (petbot.platform.secrets). No secret value reaches the function's configuration or
 # Terraform state, and the process's IAM identity may read exactly these parameters.
 
 locals {
-  # Both key-based providers carry the chat API key (an OpenRouter key, or a
-  # Bedrock API key for the openai_compatible "mantle" endpoint). Plain bedrock
-  # (Converse + IAM) and bedrock_mantle (SigV4 with the function's role) need no key.
   chat_needs_api_key = contains(["openrouter", "openai_compatible"], var.chat_llm_kind)
 
-  # The salt for the telemetry user-id hash, read by both processes when telemetry is on.
   telemetry_secret_parameters = (
     var.observability_enabled && trimspace(var.telemetry_id_salt_ssm_parameter) != ""
     ? { OBS_ID_SALT = var.telemetry_id_salt_ssm_parameter }
@@ -31,15 +26,10 @@ locals {
 
   base_env = merge(
     {
-      ENV       = var.lambda_environment
-      LOG_LEVEL = var.log_level
-      # The chat agent's provider config, as the nested env the worker's
-      # ChatSettings reads (CHAT_LLM__KIND / CHAT_LLM__MODEL[ / __BASE_URL]); the key
-      # (CHAT_LLM__API_KEY) arrives through SSM_SECRETS.
-      CHAT_LLM__KIND  = var.chat_llm_kind
-      CHAT_LLM__MODEL = var.chat_llm_model
-      # How an over-long conversation is compacted when the model rejects it for
-      # length (reactive). Default sliding_window; summarize uses the stylizer tier.
+      ENV                = var.lambda_environment
+      LOG_LEVEL          = var.log_level
+      CHAT_LLM__KIND     = var.chat_llm_kind
+      CHAT_LLM__MODEL    = var.chat_llm_model
       CHAT_CONTEXT__KIND = var.context_kind
     },
     var.chat_llm_base_url != "" ? { CHAT_LLM__BASE_URL = var.chat_llm_base_url } : {},
@@ -53,7 +43,6 @@ locals {
   )
 }
 
-# Read access to exactly the named parameters, decrypted through SSM only.
 data "aws_iam_policy_document" "core_secrets" {
   count = length(local.core_secret_parameters) > 0 ? 1 : 0
 

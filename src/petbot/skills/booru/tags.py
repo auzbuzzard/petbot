@@ -8,9 +8,7 @@ has its own wire spelling for these, but the *concepts* are shared.
 `Sort`/`Rating`/`FileType` with their **full native** value set, and the member's
 `.value` is the on-the-wire token. The neutral :class:`SearchRequest` references
 the abstract bases, so the engine stays generic while each provider keeps 100% of
-its vocabulary. ``NumericFilter`` models a numeric constraint (eq/ne/bounds); the
-syntax helpers turn it into each site's dialect (``score:>=100`` on e621,
-``score.gte:100`` on Derpibooru).
+its vocabulary.
 """
 
 from __future__ import annotations
@@ -44,12 +42,7 @@ class FileType(SystemTag):
 class NumericFilter:
     """A numeric constraint on a field (score, favourites, …).
 
-    Models every comparison both sites support portably: equality (``eq``),
-    inequality (``ne`` — tag negation on both sites), and the four ordered bounds
-    ``at_least`` (``>=``), ``greater_than`` (``>``), ``at_most`` (``<=``),
-    ``less_than`` (``<``). A "between" is just ``at_least`` + ``at_most``. (e621's
-    ``a..b`` range and ``1,2,3`` value-list aren't portable — Derpibooru has no
-    equivalent — so they stay in raw tags.) All sides optional.
+    A "between" is just ``at_least`` + ``at_most``. All sides optional.
     """
 
     eq: int | None = None
@@ -74,7 +67,6 @@ class NumericFilter:
 
 
 def operator_filter(field: str, f: NumericFilter | None) -> list[str]:
-    """e621 dialect: ``score:100``, ``-score:5``, ``score:>=10``, ``score:<20``."""
     if not f:
         return []
     out: list[str] = []
@@ -94,7 +86,6 @@ def operator_filter(field: str, f: NumericFilter | None) -> list[str]:
 
 
 def dotted_filter(field: str, f: NumericFilter | None) -> list[str]:
-    """Derpibooru dialect: ``score:100``, ``-score:5``, ``score.gte:10``, ``score.lt:20``."""
     if not f:
         return []
     out: list[str] = []

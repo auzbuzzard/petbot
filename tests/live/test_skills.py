@@ -1,10 +1,7 @@
 """Every skill, through the deployed core's slash path.
 
-A slash command names its tool, so the result doesn't depend on the model choosing one: each
-case checks the tool worked from the deployed function (its network, permissions and any
-key), and the persona's line over it came from the deployed model. An expected failure (an
-unreachable upstream, an empty search) arrives as voiced text without the expected facts, so
-it fails here too.
+An expected failure (an unreachable upstream, an empty search) arrives as voiced text without
+the expected facts, so it fails here too.
 """
 
 from __future__ import annotations
@@ -18,7 +15,6 @@ from petbot.domain import CommandInput, SkillContext
 from petbot.frontends.discord.render import SERVICE_UNREACHABLE
 from petbot.platform import ProcessClient
 
-#: (tool, its values, text the result must contain)
 TEXT_CASES: list[tuple[str, dict[str, Any], list[str]]] = [
     ("math", {"expression": "6 * 7"}, ["42"]),
     ("leetcode", {"mode": "daily"}, ["LeetCode's daily problem for", "leetcode.com/problems/"]),
@@ -28,7 +24,6 @@ TEXT_CASES: list[tuple[str, dict[str, Any], list[str]]] = [
     ("web_fetch", {"url": "https://example.com/"}, ["Example Domain"]),
 ]
 
-#: Image searches, in a channel that isn't age-gated: a safe-rated card comes back.
 CARD_CASES: list[tuple[str, dict[str, Any]]] = [
     ("derpi", {"tags": "pony"}),
     ("e621", {"tags": "fox"}),

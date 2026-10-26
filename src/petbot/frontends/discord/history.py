@@ -28,7 +28,6 @@ from petbot.domain import Role, Turn
 
 
 def strip_self_mention(content: str, bot_user_id: int) -> str:
-    """Remove only this bot's mention (``<@id>`` / ``<@!id>``), leaving others intact."""
     return re.sub(rf"<@!?{bot_user_id}>", "", content)
 
 
@@ -64,13 +63,8 @@ async def atake[T](n: int, it: AsyncIterator[T]) -> AsyncIterator[T]:
             return
 
 
-# --- reading the reply chain --------------------------------------------------------------
-
-
 @dataclass(frozen=True, slots=True)
 class DiscordTurn:
-    """One ancestor message, read off Discord, before neutral mapping."""
-
     display_name: str
     is_self: bool
     text: str
@@ -85,13 +79,11 @@ class DiscordTurn:
 
 
 def describe_card(embed: discord.Embed) -> str:
-    """A faithful one-line description of an embed (title + image URL), or ``""``."""
     parts = [part for part in (embed.title, embed.image.url) if part]
     return f"[image] {' — '.join(parts)}" if parts else ""
 
 
 def _message_text(message: discord.Message) -> str:
-    """A message's text: its content, else a description of its first usable embed."""
     if message.content:
         return message.content
     for embed in message.embeds:
@@ -150,10 +142,6 @@ async def resolve_parent(message: discord.Message) -> discord.Message | None:
 
 
 def to_turns(raw: list[DiscordTurn], *, bot_user_id: int) -> tuple[Turn, ...]:
-    """Map gathered Discord turns (newest-first) to neutral turns (oldest-first).
-
-    A turn PetBot authored is an assistant turn; everything else is a user turn, with the
-    bot's own mention stripped. Empty turns are dropped."""
     turns: list[Turn] = []
     for entry in reversed(raw):
         if entry.is_self:
@@ -168,9 +156,6 @@ def to_turns(raw: list[DiscordTurn], *, bot_user_id: int) -> tuple[Turn, ...]:
 async def reconstruct(
     message: discord.Message, *, bot_user_id: int, max_turns: int
 ) -> tuple[Turn, ...]:
-    """Walk the reply chain from ``message`` (bounded by ``max_turns``) and map it to neutral
-    history, oldest-first: ``take(max_turns, unfold(resolve_parent, message))``, then
-    :func:`to_turns`. Raises on an unreadable hop — handled at the reconstruction boundary."""
     chain = atake(max_turns, aiter_until_none(resolve_parent, message))
     raw = [DiscordTurn.of(parent, bot_user_id) async for parent in chain]
     return to_turns(raw, bot_user_id=bot_user_id)

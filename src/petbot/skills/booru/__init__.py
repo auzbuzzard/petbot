@@ -1,11 +1,3 @@
-"""The booru skill package: the ``derpi`` and ``e621`` search skills.
-
-The entry-point factories (:func:`build_derpi`, :func:`build_e621`) read the
-service's :class:`~petbot.skills.booru.settings.BooruSettings` and inject a shared
-``httpx.AsyncClient`` — the per-skill ``build(settings)`` wiring the registry uses
-in place of zero-arg construction.
-"""
-
 from __future__ import annotations
 
 import httpx
@@ -27,13 +19,11 @@ def _shared_client() -> httpx.AsyncClient:
 
 
 def build_derpi() -> DerpiSkill:
-    """Build the Derpibooru skill from the environment."""
     settings = BooruSettings()
     return DerpiSkill(client=_shared_client(), api_key=settings.derpibooru_api_key)
 
 
 def build_e621() -> E621Skill:
-    """Build the e621 skill from the environment."""
     settings = BooruSettings()
     return E621Skill(
         client=_shared_client(),
