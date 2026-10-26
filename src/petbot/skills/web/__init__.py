@@ -26,14 +26,11 @@ _client: httpx.AsyncClient | None = None
 def _shared_client() -> httpx.AsyncClient:
     global _client
     if _client is None:
-        # Short per-step timeouts: a run may chain search -> fallback -> fetch inside the
-        # Lambda's 60s budget, alongside several model calls.
         _client = httpx.AsyncClient(timeout=10.0)
     return _client
 
 
 def build_search() -> WebSearchSkill:
-    """Build the search skill from the environment."""
     settings = WebSettings()
     providers: list[SearchProvider] = []
     if settings.tavily_api_key is not None:
@@ -43,5 +40,4 @@ def build_search() -> WebSearchSkill:
 
 
 def build_fetch() -> WebFetchSkill:
-    """Build the page-fetch skill from the environment."""
     return WebFetchSkill(_shared_client(), WebSettings().user_agent)

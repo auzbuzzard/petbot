@@ -4,9 +4,7 @@ name: Bootstrap
 # boundary, the operator's access and the state bucket. A change merged to main is
 # planned with a read-only role and its resource changes posted to the run's summary; the
 # apply job waits for a required reviewer to approve the `bootstrap` environment, plans
-# again, and applies only if that plan is the one reviewed (same resource changes). Each
-# job assumes its role from its environment, and both environments admit only main, so no
-# branch, pull request or other workflow can reach these roles. See
+# again, and applies only if that plan is the one reviewed (same resource changes). See
 # deploy/terraform/README.md "Bootstrap".
 #
 # The run's log and summary are public like the repository. The full plan is in the log

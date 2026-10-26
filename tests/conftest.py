@@ -31,7 +31,6 @@ trace.set_tracer_provider(_PROVIDER)  # once per process; the global the platfor
 
 @pytest.fixture
 def span_exporter() -> Iterator[InMemorySpanExporter]:
-    """The shared in-memory span exporter, cleared around each test that reads spans."""
     _SPAN_EXPORTER.clear()
     yield _SPAN_EXPORTER
     _SPAN_EXPORTER.clear()

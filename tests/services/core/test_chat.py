@@ -1,5 +1,3 @@
-"""The local chat harness: replays a conversation through the core, with no Discord."""
-
 from __future__ import annotations
 
 import asyncio
@@ -44,9 +42,6 @@ _CONVERSATIONS = Path(__file__).parents[3] / "conversations"
 
 
 class _Recorder:
-    """A process that answers from ``replies`` in order (numbered replies when it runs out),
-    raising any exception it is given, and keeps every input it saw."""
-
     def __init__(self, *replies: SkillResult | Exception) -> None:
         self.seen: list[tuple[TextInput, SkillContext]] = []
         self._replies = list(replies)
@@ -125,13 +120,13 @@ async def test_history_is_capped_at_the_frontends_reply_chain_depth() -> None:
 
 
 async def test_a_reply_split_across_messages_restarts_the_chain_at_its_last() -> None:
-    long = "\n".join(f"line {i} " + "x" * 90 for i in range(40))  # over Discord's 2000
+    long = "\n".join(f"line {i} " + "x" * 90 for i in range(40))
     process = _Recorder(SkillResult.message(long))
     replies, _ = await _replay(
         process,
         _conversation_of(Message(author="Ann", text="essay?"), Message(author="Ann", text="ok")),
     )
-    ((role, author, text),) = process.history(1)  # the last message of the reply, alone
+    ((role, author, text),) = process.history(1)
     assert (role, author) == (Role.ASSISTANT, BOT_NAME)
     assert replies[0].endswith(text) and len(text) < len(long)
 
@@ -258,9 +253,6 @@ def test_message_text_is_stripped() -> None:
 
 
 class _FakeLambda:
-    """A boto3 Lambda client stand-in that answers each invoke from ``replies`` and keeps
-    every payload it was sent."""
-
     def __init__(self, *replies: SkillResult | str) -> None:
         self.payloads: list[dict[str, Any]] = []
         self._replies = list(replies)

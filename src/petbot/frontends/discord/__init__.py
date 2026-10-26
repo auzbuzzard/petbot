@@ -1,5 +1,3 @@
-"""PetBot Discord frontend: the always-on gateway that dispatches to a compute service."""
-
 from __future__ import annotations
 
 from petbot.frontends.discord.bot import PetBot, run

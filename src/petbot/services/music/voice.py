@@ -17,7 +17,6 @@ from petbot.domain import TrackFinishedCallback, VoicePort
 
 logger = logging.getLogger(__name__)
 
-# Reconnect options keep streamed sources alive across transient network blips.
 _FFMPEG_BEFORE_OPTIONS = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
 _YTDL_OPTIONS = {
     "format": "bestaudio/best",
@@ -38,8 +37,6 @@ def _extract_stream_url(query: str) -> str:
 
 
 class DiscordVoicePort(VoicePort):
-    """Plays audio in the invoking member's voice channel."""
-
     def __init__(self, *, guild: discord.Guild, member: discord.Member) -> None:
         self._guild = guild
         self._member = member

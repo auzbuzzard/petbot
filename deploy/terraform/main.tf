@@ -1,5 +1,3 @@
-# --- Container image registry -------------------------------------------------
-
 resource "aws_ecr_repository" "this" {
   name                 = local.core_name
   image_tag_mutability = "MUTABLE"
@@ -17,8 +15,6 @@ data "aws_ecr_image" "this" {
   repository_name = aws_ecr_repository.this.name
   image_tag       = var.image_tag
 }
-
-# --- Execution role -----------------------------------------------------------
 
 data "aws_caller_identity" "current" {}
 
@@ -39,15 +35,11 @@ resource "aws_iam_role" "lambda" {
   permissions_boundary = local.workload_boundary_arn
 }
 
-# CloudWatch Logs. (Reading the function's own secrets from SSM: secrets.tf.)
 resource "aws_iam_role_policy_attachment" "logs" {
   role       = aws_iam_role.lambda.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# Bedrock chat: the agent invokes a foundation model / inference profile in this
-# region. Only attached when the chat provider is bedrock (openrouter authes with
-# an API key in the environment instead, so it needs no AWS permission).
 resource "aws_iam_role_policy" "bedrock" {
   count = var.chat_llm_kind == "bedrock" ? 1 : 0
   name  = "${local.core_name}-bedrock"
@@ -84,8 +76,6 @@ resource "aws_iam_role_policy" "bedrock_mantle" {
   })
 }
 
-# --- Function -----------------------------------------------------------------
-
 resource "aws_lambda_function" "this" {
   function_name = local.core_name
   role          = aws_iam_role.lambda.arn
@@ -96,7 +86,6 @@ resource "aws_lambda_function" "this" {
   timeout       = var.timeout
 
   environment {
-    # Observability env is empty unless var.observability_enabled (see observability.tf).
     variables = merge(local.lambda_env, local.observability_core_env)
   }
 
@@ -106,7 +95,6 @@ resource "aws_lambda_function" "this" {
   depends_on = [aws_cloudwatch_log_group.lambda, aws_iam_role_policy.core_secrets, aws_ssm_parameter.owned]
 
   lifecycle {
-    # Fail at plan with a clear message when a key-based provider has no key parameter.
     precondition {
       condition     = !local.chat_needs_api_key || trimspace(var.chat_llm_api_key_ssm_parameter) != ""
       error_message = "chat_llm_kind=${var.chat_llm_kind} requires chat_llm_api_key_ssm_parameter (the SSM SecureString holding the key)."

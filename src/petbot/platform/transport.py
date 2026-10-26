@@ -32,12 +32,9 @@ from petbot.platform.progress import Phase, report
 logger = logging.getLogger(__name__)
 
 #: Invoke error codes meaning "the function exists but isn't ``Active`` yet" — the request
-#: never ran, so re-invoking is safe. A container-image function idle for ~2 weeks goes
-#: ``Inactive``; the next invoke is *rejected* and starts re-pulling the image (``Pending``,
-#: ~20 s), and a deploy leaves it ``Pending`` briefly too.
+#: never ran, so re-invoking is safe.
 _NOT_READY = frozenset({"ResourceConflictException", "ResourceNotReadyException"})
 
-#: How often to poll the function's state while waiting for it to become ``Active``.
 _READY_POLL_SECONDS = 2
 
 #: Lambda's maximum function timeout. The SDK's read timeout sits above it so the client
@@ -59,8 +56,6 @@ def _wire(dispatch: Dispatch) -> dict[str, Any]:
 
 
 class HttpTransport(Transport):
-    """Dispatches by POSTing the dispatch JSON to a process HTTP endpoint."""
-
     def __init__(self, url: str, client: httpx.AsyncClient) -> None:
         self._url = url
         self._client = client
@@ -72,8 +67,6 @@ class HttpTransport(Transport):
 
 
 class _LambdaClient(Protocol):
-    """The slice of a boto3 Lambda client this transport uses."""
-
     def invoke(self, **kwargs: Any) -> Any: ...
 
     def get_waiter(self, waiter_name: str) -> Any: ...

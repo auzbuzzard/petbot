@@ -31,7 +31,6 @@ jobs:
       - name: Format check
         run: terraform -chdir=deploy/terraform fmt -check -recursive
 
-      # `-backend=false` so validation needs no AWS credentials or remote state.
       - name: Validate (root stack)
         run: |
           terraform -chdir=deploy/terraform init -backend=false

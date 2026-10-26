@@ -1,5 +1,3 @@
-"""The tool registry, the serve boundary, the ProcessClient, and the HTTP + Lambda transports."""
-
 from __future__ import annotations
 
 import io
@@ -51,9 +49,6 @@ class _EchoSkill(Skill[MathArgs]):
         return SkillResult.message(f"got {args.expression}")
 
 
-# --- ToolRegistry -------------------------------------------------------------
-
-
 async def test_registry_dispatch_validates_and_runs() -> None:
     registry = ToolRegistry([_EchoSkill()])
     result = await registry.dispatch("math", {"expression": "6 * 7"}, _ctx())
@@ -75,9 +70,6 @@ async def test_registry_bad_args_raise_invalid_input() -> None:
 def test_duplicate_skill_name_rejected() -> None:
     with pytest.raises(ValueError, match="Duplicate"):
         ToolRegistry([_EchoSkill(), _EchoSkill()])
-
-
-# --- serve + transport --------------------------------------------------------
 
 
 class _EchoProcess(Process):
@@ -110,7 +102,7 @@ async def test_serve_maps_malformed_payload_to_result() -> None:
 
 async def test_serve_catches_unexpected_exception() -> None:
     out = await serve(_BoomProcess(), _body(CommandInput(name="math", values={})))
-    assert SkillResult.model_validate_json(out).text  # a generic crash result, not a raise
+    assert SkillResult.model_validate_json(out).text
 
 
 async def test_process_client_http_round_trip() -> None:
@@ -127,9 +119,6 @@ async def test_process_client_http_round_trip() -> None:
             CommandInput(name="math", values={"expression": "6 * 7"}), _ctx()
         )
     assert result.text == "ran math"
-
-
-# --- LambdaTransport ----------------------------------------------------------
 
 
 def _not_ready(code: str) -> ClientError:
@@ -150,9 +139,6 @@ class _FakeWaiter:
 
 
 class _FakeLambda:
-    """A boto3 Lambda client stand-in: rejects invokes until its waiter has seen the
-    function Active, then serves the dispatch."""
-
     def __init__(
         self,
         *,
@@ -198,15 +184,12 @@ async def _send(client: _FakeLambda, **kwargs: Any) -> SkillResult:
 
 @pytest.mark.parametrize("code", ["ResourceConflictException", "ResourceNotReadyException"])
 async def test_lambda_transport_waits_out_a_function_that_is_not_active(code: str) -> None:
-    # A container-image function idle for ~2 weeks goes Inactive: the next invoke is rejected
-    # while Lambda re-pulls the image. That rejection must not become the user's answer.
     client = _FakeLambda(active=False, not_ready_code=code)
     result = await _send(client, ready_timeout=10)
     assert result.text == "ran"
-    assert client.calls == 2  # the rejected invoke, then one after the wait
+    assert client.calls == 2
     assert client.waiter_names == ["function_active"]
     assert client.waits[0]["FunctionName"] == "petbot-core"
-    # The waiter's budget is the ready timeout: 2 s polls, 5 of them.
     assert client.waits[0]["WaiterConfig"] == {"Delay": 2, "MaxAttempts": 5}
 
 
@@ -237,7 +220,7 @@ def test_lambda_client_never_re_sends_an_invocation(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
     config = LambdaTransport.from_function_name("petbot-core")._client.meta.config  # type: ignore[attr-defined]
     assert config.retries["total_max_attempts"] == 1
-    assert config.read_timeout > 900  # Lambda's maximum function timeout
+    assert config.read_timeout > 900
 
 
 async def test_lambda_transport_reports_waking_then_thinking_to_the_turn() -> None:
@@ -257,12 +240,7 @@ async def test_lambda_transport_reports_nothing_for_a_ready_function() -> None:
     assert phases == []
 
 
-# --- DynamoClaims -------------------------------------------------------------
-
-
 class _FakeDynamo:
-    """A DynamoDB client stand-in with real conditional-put semantics on ``id``."""
-
     def __init__(self, *, put_error: Exception | None = None) -> None:
         self.items: dict[str, dict[str, Any]] = {}
         self.updates: list[dict[str, Any]] = []
@@ -299,7 +277,6 @@ async def test_first_claim_wins_and_records_its_holder() -> None:
 
 
 async def test_a_later_claim_loses_and_records_the_duplicate_delivery() -> None:
-    # The losing copy leaves a trace: which host also received the message.
     client = _FakeDynamo()
     await DynamoClaims("t", client, holder="edge-new").claim("discord:message:1")
     assert await DynamoClaims("t", client, holder="edge-old").claim("discord:message:1") is False

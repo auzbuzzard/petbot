@@ -43,7 +43,7 @@ class SearchRequest:
     tags: tuple[str, ...]
     safe_only: bool = True
     sort: Sort | None = None
-    descending: bool = True  # applies where a site has a separate direction axis
+    descending: bool = True
     rating: Rating | None = None
     file_type: FileType | None = None
     score: NumericFilter | None = None
@@ -54,8 +54,6 @@ class SearchRequest:
 
 @dataclass(frozen=True, slots=True)
 class Post:
-    """A single normalized search result — exactly what the renderer needs."""
-
     post_id: int
     image_url: str
     color: int

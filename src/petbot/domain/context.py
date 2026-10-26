@@ -26,8 +26,6 @@ class Platform(StrEnum):
 
 
 class User(Frozen):
-    """The invoking user, platform-qualified. ``id`` stays ``str`` for neutrality."""
-
     platform: Platform
     id: str
     display_name: str

@@ -12,8 +12,6 @@ from petbot.domain._model import Frozen
 
 
 class EmbedSpec(Frozen):
-    """A platform-neutral description of a rich card."""
-
     title: str | None = None
     description: str | None = None
     url: str | None = None
@@ -44,5 +42,4 @@ class SkillResult(Frozen):
         embed: EmbedSpec | None = None,
         files: tuple[str, ...] = (),
     ) -> SkillResult:
-        """Build a result (optional text, an optional card, optional files)."""
         return cls(text=text, embed=embed, files=files)

@@ -34,17 +34,15 @@ async def test_run_outcome_is_logged_metadata_only(caplog: pytest.LogCaptureFixt
         await chat.respond(TextInput(text=_SECRET), _ctx())
 
     rec = next(r for r in caplog.records if r.getMessage() == "agent run")
-    fields = rec.__dict__  # the extra={...} keys land here (dict[str, Any])
+    fields = rec.__dict__
     assert fields["tool_count"] == 0 and fields["tools"] == []
     assert isinstance(fields["input_tokens"], int) and isinstance(fields["output_tokens"], int)
-    assert fields["user"] == hash_user_id("42", "s")  # salted hash, not the raw id
-    # Metadata only: neither the prompt text nor the raw user id is anywhere in the record.
+    assert fields["user"] == hash_user_id("42", "s")
     assert _SECRET not in str(fields)
     assert fields["user"] != "42"
 
 
 async def test_run_outcome_records_reply_context(caplog: pytest.LogCaptureFixture) -> None:
-    # The new observable failure mode: a reply whose prior context couldn't be read.
     chat = ChatProcess(ToolRegistry([]), model=TestModel(call_tools=[]), id_salt="s")
     with caplog.at_level(logging.INFO, logger="petbot.process.chat"):
         await chat.respond(TextInput(text="hi", history=Recalled(turns=())), _ctx())

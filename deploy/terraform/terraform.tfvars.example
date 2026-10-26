@@ -1,22 +1,13 @@
 # Copy to terraform.tfvars and adjust. No secrets live here — secret *values*
 # are stored as SSM SecureString parameters (see README), referenced by name.
 
-# us-east-1 is AWS's cheapest US region and where ACM/CloudFront (future custom
-# domain) must live. us-east-2 / us-west-2 cost the same; pick one if you prefer.
 aws_region = "us-east-1"
 image_tag  = "latest" # core worker image; prefer a unique tag per deploy, e.g. the git SHA
 
-# ENV drives the logging profile (prod => structured JSON).
 lambda_environment = "prod"
 log_level          = "INFO"
 
 # --- Chat LLM (the core worker's agent) ---
-# bedrock: Converse API + IAM (no key), e.g. Nova / Claude.
-# bedrock_mantle: Bedrock's Gemma 4 "mantle" endpoint, SigV4-signed with the
-#   function's role (no key).
-# openai_compatible: any OpenAI-compatible endpoint + key — incl. the mantle
-#   endpoint with a Bedrock API key, or a self-hosted Ollama/vLLM.
-# openrouter: OpenRouter + key.
 chat_llm_kind  = "bedrock_mantle"
 chat_llm_model = "" # REQUIRED — e.g. google.gemma-4-31b
 # Required for bedrock_mantle + openai_compatible (the endpoint URL):
@@ -45,15 +36,7 @@ edge_scale                  = 1
 # When true: the app exports OTLP straight to AWS's collector-less endpoints — traces to the
 # X-Ray OTLP endpoint, metrics to the CloudWatch (monitoring) OTLP endpoint — each POST
 # SigV4-signed by the runtime's own credentials. No collector is deployed; the worker image
-# carries nothing observability-specific. The always-on run-outcome CloudWatch *log* needs none
-# of this. In CI these map
-# to the OBSERVABILITY_ENABLED / OBSERVABILITY_SAMPLE_RATIO / TELEMETRY_ID_SALT_SSM_PARAMETER
-# GitHub Variables.
-#
-# Traces prerequisite — CloudWatch Transaction Search (metrics need none): the stack creates the
-# X-Ray -> aws/spans CloudWatch Logs resource policy when enabled; then toggle the trace-segment
-# destination once per account + Region (no Terraform resource for that part yet):
-#   aws xray update-trace-segment-destination --destination CloudWatchLogs --region <region>
+# carries nothing observability-specific.
 # observability_enabled            = true
 # observability_sample_ratio       = 1.0
 # telemetry_id_salt_ssm_parameter  = "/petbot-prod/core/telemetry_id_salt"

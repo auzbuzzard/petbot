@@ -35,8 +35,6 @@ class _Channel:
 
 
 class _Message:
-    """An @mention of the bot in a guild, replying to nothing."""
-
     def __init__(self) -> None:
         self.id = 4242
         self.author = _User(2, "Alice")
@@ -75,12 +73,10 @@ async def test_quick_mention_answers_without_a_placeholder() -> None:
     message = _Message()
     await _bot(process, thinking_after=1).on_message(message)  # type: ignore[arg-type]
     assert message.channel.events == ["typing", "send:the answer"]
-    # The turn carried the stripped text and the (empty) recalled reply chain.
     assert process.inputs == [TextInput(text="hi", history=Recalled())]
 
 
 async def test_slow_mention_only_types_then_answers() -> None:
-    # Past the checkpoint the turn still posts nothing but its answer: no placeholder.
     message = _Message()
     await _bot(_SlowProcess(0.05), thinking_after=0.01).on_message(message)  # type: ignore[arg-type]
     assert [e for e in message.channel.events if e != "typing"] == ["send:the answer"]
@@ -98,8 +94,6 @@ def test_thinking_threshold_must_be_positive(value: float) -> None:
 
 
 class _AtomicClaims:
-    """An in-memory claim store shared by two bot copies: the first claim of an id wins."""
-
     def __init__(self, *, error: Exception | None = None) -> None:
         self.claimed: list[str] = []
         self._error = error
@@ -120,19 +114,18 @@ async def test_two_copies_on_the_gateway_answer_a_message_once() -> None:
     process = _SlowProcess(0.01)
     old, new = _bot(process, thinking_after=1), _bot(process, thinking_after=1)
     old.claims = new.claims = claims
-    seen_by_old, seen_by_new = _Message(), _Message()  # same id: one Discord message
+    seen_by_old, seen_by_new = _Message(), _Message()
     await asyncio.gather(
         old.on_message(seen_by_old),  # type: ignore[arg-type]
         new.on_message(seen_by_new),  # type: ignore[arg-type]
     )
     assert claims.claimed == ["discord:message:4242"]
-    assert len(process.inputs) == 1  # the core is invoked once
+    assert len(process.inputs) == 1
     events = [seen_by_old.channel.events, seen_by_new.channel.events]
-    assert sorted(events) == [[], ["typing", "send:the answer"]]  # the loser does nothing
+    assert sorted(events) == [[], ["typing", "send:the answer"]]
 
 
 async def test_a_failing_claim_store_still_answers() -> None:
-    # A rare duplicate beats a dropped message.
     process = _SlowProcess(0)
     bot = _bot(process, thinking_after=1)
     bot.claims = _AtomicClaims(error=OSError("dynamodb down"))

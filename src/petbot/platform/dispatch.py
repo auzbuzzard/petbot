@@ -22,19 +22,9 @@ from petbot.domain import Input, SkillContext, SkillResult
 
 @dataclass(frozen=True, slots=True)
 class Dispatch:
-    """A unit of work for a compute process: a neutral input + request context."""
-
     input: Input
     context: SkillContext
 
 
 class Transport(Protocol):
-    """Moves a :class:`Dispatch` to the process that handles it, returning its result.
-
-    The only verb. Implementations own their wire encoding (if any): a remote
-    transport serialises the dispatch; the process decodes and runs it.
-    """
-
-    async def send(self, dispatch: Dispatch) -> SkillResult:
-        """Dispatch ``dispatch`` and return the process's :class:`SkillResult`."""
-        ...
+    async def send(self, dispatch: Dispatch) -> SkillResult: ...

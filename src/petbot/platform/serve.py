@@ -33,7 +33,6 @@ logger = logging.getLogger(__name__)
 # under a "serve" span, so the agent/tool spans re-parent into the one edge->core trace.
 _tracer = trace.get_tracer("petbot.platform.serve")
 
-#: Validates the wire ``input`` into the right `Input` member by its ``kind`` tag.
 _INPUT: TypeAdapter[Input] = TypeAdapter(Input)
 
 _MALFORMED = "That request was malformed."
@@ -41,7 +40,6 @@ _CRASHED = "Something went wrong handling that request."
 
 
 async def serve(process: Process, body: str | bytes) -> str:
-    """Decode ``body``, run it through ``process``, and encode the result as JSON."""
     try:
         raw: dict[str, Any] = json.loads(body)
         inp = _INPUT.validate_python(raw["input"])

@@ -63,12 +63,6 @@ def build_context(message: discord.Message) -> SkillContext:
 
 
 def build_interaction_context(interaction: discord.Interaction) -> SkillContext:
-    """Map a slash-command ``interaction`` onto a :class:`SkillContext`.
-
-    The interaction twin of :func:`build_context`: same neutral mapping (NSFW flag,
-    channel as the conversation id, place names) so a slash command reaches a skill on the
-    exact path an @mention does.
-    """
     user = User(
         platform=Platform.DISCORD,
         id=str(interaction.user.id),

@@ -10,5 +10,4 @@ __all__ = ["WeatherSkill", "build_weather"]
 
 
 def build_weather() -> WeatherSkill:
-    """Build the weather skill with its own HTTP client."""
     return WeatherSkill(client=httpx.AsyncClient(timeout=10.0))

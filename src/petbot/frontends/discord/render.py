@@ -23,7 +23,6 @@ SERVICE_UNREACHABLE = "uwu I couldn't reach my brain right now — please try ag
 
 
 def to_embed(spec: EmbedSpec) -> discord.Embed:
-    """Convert a neutral :class:`EmbedSpec` into a ``discord.Embed``."""
     embed = discord.Embed(
         title=spec.title,
         description=spec.description,
@@ -47,19 +46,13 @@ _CODED_MARKUP = re.compile(r"`(<t:-?\d+(?::[tTdDfFR])?>|<?https?://[^\s`<>]+>?)`
 
 
 def unwrap_markup(text: str) -> str:
-    """Strip inline-code backticks from around a Discord timestamp or a lone link, so a
-    timestamp renders in each reader's timezone and a link is clickable. The model sometimes
-    formats them as code."""
     return _CODED_MARKUP.sub(r"\1", text)
 
 
 def plan(result: SkillResult) -> list[tuple[str | None, discord.Embed | None]]:
-    """The ordered messages a result becomes: the text is chunked and the embed rides
-    only the first chunk. A voiced failure is just text, rendered the same way."""
     embed = to_embed(result.embed) if result.embed is not None else None
     chunks = chunk_text(unwrap_markup(result.text or ""), limit=DISCORD_MAX_TEXT)
     if not chunks:
-        # No text: the embed alone, or nothing if the result is truly empty.
         return [(None, embed)] if embed is not None else []
     return [(chunk, embed if index == 0 else None) for index, chunk in enumerate(chunks)]
 
@@ -70,9 +63,6 @@ async def _send(
     embed: discord.Embed | None,
     **extra: object,
 ) -> None:
-    # Pass `embed` only when present so the call matches discord.py's non-optional
-    # `embed` overload (a None embed must never reach the gateway). `extra` carries the
-    # reply-threading kwargs, on the first chunk only.
     if embed is None:
         await sender(content=content, **extra)
     elif content is None:
@@ -103,10 +93,5 @@ async def respond(
 
 
 async def respond_interaction(interaction: discord.Interaction, result: SkillResult) -> None:
-    """Send ``result`` as the followup to an already-deferred slash ``interaction``.
-
-    The slash output port: the same :func:`plan` shaping as :func:`respond`, emitted
-    as ``followup.send`` (the caller has already deferred the interaction response).
-    """
     for content, embed in plan(result):
         await _send(interaction.followup.send, content, embed)

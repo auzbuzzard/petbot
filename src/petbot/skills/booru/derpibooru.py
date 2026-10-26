@@ -2,8 +2,7 @@
 
 Tags are comma-separated and may contain spaces within a tag (the site's own
 convention; we don't coerce). Rating is a *tag* on Derpibooru, derived from the
-image's tag names on the way out. The "everything" filter is always used so the
-``safe`` system tag is the only content gate. Errors come back as a 400
+image's tag names on the way out. Errors come back as a 400
 ``{"error": "..."}``.
 """
 
@@ -20,7 +19,7 @@ _NAME = "Derpibooru"
 _ROOT = "https://derpibooru.org/"
 _ENDPOINT = "https://derpibooru.org/api/v1/json/search/images"
 _ICON = "https://derpicdn.net/img/2017/10/22/1567638/thumb_small.jpeg"
-_FILTER_EVERYTHING = "56027"  # show all ratings; the `safe` tag is the only gate
+_FILTER_EVERYTHING = "56027"
 _MAX_PER_PAGE = 50
 
 
@@ -120,7 +119,6 @@ class DerpibooruProvider(BooruProvider):
         self._api_key = api_key
 
     def parse_tags(self, raw: str) -> tuple[str, ...]:
-        # Derpibooru separates tags by commas; spaces are allowed within a tag.
         return tuple(t.strip() for t in raw.split(",") if t.strip())
 
     def build_request(self, client: httpx.AsyncClient, search: SearchRequest) -> httpx.Request:
@@ -145,7 +143,7 @@ class DerpibooruProvider(BooruProvider):
         url = img.view_url or img.representations.large
         if not url:
             return None
-        if url.startswith("//"):  # `representations` come back protocol-relative
+        if url.startswith("//"):
             url = f"https:{url}"
         rating = _rating(img.tags)
         return Post(

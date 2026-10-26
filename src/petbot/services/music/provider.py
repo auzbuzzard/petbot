@@ -24,8 +24,6 @@ def _channel_id(conversation_id: str) -> int | None:
 
 
 class DiscordVoiceProvider(VoiceProvider):
-    """Binds a voice port to the invoking member, using the gateway's cache."""
-
     def __init__(self, bot: discord.Client) -> None:
         self._bot = bot
 

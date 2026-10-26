@@ -6,10 +6,7 @@
 #   petbot-github-bootstrap-apply  writes; trusted from the `bootstrap` environment, whose
 #                                  required reviewer approves each run after reading the plan
 #
-# Both environments admit only main. The apply role can edit every resource here,
-# itself included, so it is as powerful as this stack: the reviewer's approval is the
-# control that guards it, which is why the deploy role (no approval) can never assume or
-# edit it. Their trust policies are main.tf's github_trust.
+# Their trust policies are main.tf's github_trust.
 
 variable "bootstrap_plan_environment" {
   type        = string
@@ -28,8 +25,6 @@ variable "retiring_users" {
   default     = ["petbot-bedrock-key"]
 }
 
-# Each retiring user, adopted with force_destroy, so removing it from var.retiring_users
-# deletes it through this pipeline with its keys, service-specific credentials and policies.
 resource "aws_iam_user" "retired" {
   for_each = toset(var.retiring_users)
 
@@ -68,7 +63,6 @@ locals {
     [for name in var.retiring_users : "arn:aws:iam::${local.account_id}:user/${name}"],
   )
 
-  # Each pipeline role and its policy; the trust is github_trust["bootstrap-<key>"].
   bootstrap_role_policies = {
     plan  = data.aws_iam_policy_document.bootstrap_read.json
     apply = data.aws_iam_policy_document.bootstrap_apply.json

@@ -16,8 +16,6 @@ from petbot.domain import CommandInput, Input, Process, SkillContext, SkillResul
 
 
 class RouterProcess(Process):
-    """Routes a neutral input to the process that handles its kind."""
-
     def __init__(self, *, chat: Process | None, command: Process) -> None:
         self._chat = chat
         self._command = command

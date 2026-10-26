@@ -308,7 +308,7 @@ def test_to_markdown_keeps_the_article_not_the_navigation() -> None:
     assert title == "Striped hyena"
     assert "Near Threatened" in text and "native to North and East Africa" in text
     assert "Navigation link" not in text and "Footer link" not in text
-    assert "](" not in text and "schema.org" not in text  # no link markup, no JSON-LD
+    assert "](" not in text and "schema.org" not in text
 
 
 def test_to_markdown_falls_back_to_visible_text_without_main_content() -> None:
@@ -370,7 +370,6 @@ async def test_fetch_rejects_a_non_http_url() -> None:
 
 
 async def test_fetch_refuses_local_addresses() -> None:
-    # The Lambda runtime API listens on localhost; the SSRF guard must refuse it.
     with pytest.raises(UpstreamUnavailable):
         await _fetch("http://127.0.0.1:9001/2018-06-01/runtime/invocation/next")
 

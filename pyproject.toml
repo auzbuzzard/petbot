@@ -11,9 +11,6 @@ requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "auzbuzzard" }]
-# Base install is the shared kernel only. The runtime dependencies of each
-# deployable live in an extra below, so a process installs just what it runs
-# (the edge never pulls pydantic-ai; a worker never pulls discord.py).
 # opentelemetry-api is the one always-present telemetry dep: it is a no-op until a
 # process wires the SDK (the `observability` extra) in its entrypoint, so library
 # code can instrument unconditionally.
@@ -23,11 +20,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# OpenTelemetry SDK + OTLP exporter, wired once per entrypoint by
-# `petbot.observability.configure_observability`. The AWS extension supplies the
-# X-Ray id generator + propagator so an edge->core trace joins in X-Ray; botocore
-# SigV4-signs the collector-less export to AWS's OTLP endpoints. Pulled by every
-# deployable that emits telemetry (the frontend and the compute core).
 observability = [
     "opentelemetry-sdk>=1.42",
     "opentelemetry-exporter-otlp-proto-http>=1.42",
@@ -42,26 +34,19 @@ discord = [
     "httpx>=0.28",
     "pydantic-settings>=2.14",
 ]
-# The core compute service: math + booru + web search/fetch + weather + leetcode + the chat
-# process.
 compute-core = [
     "petbot[observability]",
     "httpx>=0.28",
     "pydantic-settings>=2.14",
     "numexpr>=2.14",
     "numpy>=2.4",
-    # Capped below the next major: 2.x changed `openai_model_profile` to return a
-    # non-dataclass, breaking the `dataclasses.replace` in process/model.py. A rebuilt
-    # image must not pull a new major out from under the pinned lock.
     "pydantic-ai-slim[bedrock,openai]>=1.107,<2",
-    # Main-content extraction for the fetch skill: a page's article, not its navigation.
     "trafilatura>=2.0",
     # Keyless web-search fallback (metasearch over public result pages).
     "ddgs>=9.16",
     # The worker reads its secrets from SSM at start (petbot.platform.secrets).
     "boto3>=1.43",
 ]
-# The music compute service: its own gateway plus voice playback.
 compute-music = [
     "petbot[observability]",
     "discord.py[voice]>=2.7,<2.8",
@@ -70,7 +55,6 @@ compute-music = [
 ]
 # Dispatch to a Lambda compute service (boto3) — used by the frontend in production.
 lambda = ["boto3>=1.43"]
-# Everything, for development and CI (so type-check and tests see all code).
 dev = [
     "petbot[discord,compute-core,compute-music,lambda]",
     "ruff>=0.15",
@@ -88,7 +72,6 @@ petbot-discord = "petbot.frontends.discord.__main__:main"
 petbot-core = "petbot.services.core.__main__:main"
 petbot-music = "petbot.services.music.__main__:main"
 
-# Skills are discovered at runtime from this entry-point group.
 [project.entry-points."petbot.skills"]
 math = "petbot.skills.math:MathSkill"
 derpi = "petbot.skills.booru:build_derpi"

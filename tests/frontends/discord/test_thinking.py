@@ -42,8 +42,6 @@ class _InstantSelector(selectors.DefaultSelector):
 
 
 class _VirtualTimeLoop(asyncio.SelectorEventLoop):
-    """An event loop whose clock is :class:`_InstantSelector`'s."""
-
     def __init__(self) -> None:
         self._clock = _InstantSelector()
         super().__init__(self._clock)
@@ -166,7 +164,7 @@ def test_checkpoints_during_a_pause_share_it() -> None:
 def test_typing_failures_never_sink_the_turn(error: Exception) -> None:
     message = _FakeMessage(_FakeChannel(typing_error=error))
     assert _run(think(message, _answer(20), after=12)) == "answer"  # type: ignore[arg-type]
-    assert message.channel.triggers == pytest.approx([0, 5, 10])  # it kept trying
+    assert message.channel.triggers == pytest.approx([0, 5, 10])
 
 
 def test_a_failed_turn_raises_and_stops_typing() -> None:
@@ -184,4 +182,4 @@ def test_a_failed_turn_raises_and_stops_typing() -> None:
         return count, len(message.channel.triggers)
 
     before, after = _run(scenario())
-    assert before == after == 1  # the typing loop is gone
+    assert before == after == 1

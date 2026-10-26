@@ -1,5 +1,3 @@
-"""Reading a process's secrets from SSM at start (boto3 stubbed, no AWS)."""
-
 from __future__ import annotations
 
 import json
@@ -20,7 +18,6 @@ def _ssm() -> tuple[Any, Stubber]:
 
 
 def _found(*names: str) -> dict[str, Any]:
-    # SSM leaves InvalidParameters out when every name is found.
     return {"Parameters": [{"Name": n, "Value": f"value of {n}"} for n in names]}
 
 

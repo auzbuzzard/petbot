@@ -35,7 +35,6 @@ _OUTCOMES = _meter.create_counter(
 
 
 def _record_outcome(provider: str, outcome: BooruOutcome) -> None:
-    """Tag the active tool span with the coarse outcome and bump the counter."""
     trace.get_current_span().set_attribute("petbot.booru.outcome", outcome.value)
     _OUTCOMES.add(1, {"provider": provider, "status": outcome.value})
 
@@ -95,8 +94,6 @@ async def _run(
 
 
 class DerpiSkill(Skill[BooruArgs]):
-    """Search Derpibooru for an image matching the given tags."""
-
     name = "derpi"
     description = "Search Derpibooru for an image matching the given tags."
     args_model = BooruArgs
@@ -110,8 +107,6 @@ class DerpiSkill(Skill[BooruArgs]):
 
 
 class E621Skill(Skill[BooruArgs]):
-    """Search e621 for an image matching the given tags."""
-
     name = "e621"
     description = "Search e621 for an image matching the given tags."
     args_model = BooruArgs

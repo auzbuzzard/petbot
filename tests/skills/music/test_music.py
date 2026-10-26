@@ -1,5 +1,3 @@
-"""The music skill's neutral queue + skip-vote logic, over a fake VoicePort."""
-
 from __future__ import annotations
 
 import pytest
@@ -18,8 +16,6 @@ from petbot.types import MusicArgs
 
 
 class FakeVoicePort:
-    """Records playback calls; ``on_finished`` is captured, never auto-fired."""
-
     def __init__(self) -> None:
         self.played: list[str] = []
         self.stopped = False
@@ -75,7 +71,6 @@ async def test_play_then_enqueue_then_autoadvance() -> None:
     second = await skill.run(MusicArgs(action="play", query="song-b"), _ctx())
     assert "Enqueued" in (second.text or "")
 
-    # The current track ends on its own -> the queued track auto-advances.
     assert port.last_on_finished is not None
     await port.last_on_finished()
     assert port.played == ["song-a", "song-b"]

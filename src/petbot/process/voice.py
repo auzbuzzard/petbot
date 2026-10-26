@@ -26,7 +26,6 @@ from petbot.process.settings import ChatSettings
 
 logger = logging.getLogger(__name__)
 
-#: Discord's display-name limit; also bounds what a user-chosen name can inject.
 _MAX_NAME = 32
 
 #: A fenced code block: formatted output (a math transcript) shown verbatim, never restated.
@@ -45,9 +44,6 @@ _FACT = re.compile(r"https?://\S+|\d+(?:[.,]\d+)*")
 
 
 def addressee(ctx: SkillContext) -> str | None:
-    """The requesting user's display name, made safe to put in a prompt: control characters
-    and newlines dropped, whitespace collapsed, capped at Discord's 32 characters. ``None`` if
-    nothing printable is left."""
     printable = "".join(
         " " if ch.isspace() else ch
         for ch in ctx.user.display_name
@@ -58,7 +54,6 @@ def addressee(ctx: SkillContext) -> str | None:
 
 
 def speaker_line(ctx: SkillContext) -> str:
-    """The sentence that tells a model who it is talking to (see :func:`addressee`)."""
     name = addressee(ctx)
     return f"You are talking with {name}." if name else "You don't know the user's name."
 
@@ -87,21 +82,16 @@ def _describe(result: SkillResult, ctx: SkillContext) -> str | None:
 
 
 def _keeps_facts(original: str, restated: str) -> bool:
-    """Whether every link and number in ``original`` survives into ``restated``."""
     return all(fact in restated for fact in _FACT.findall(original))
 
 
 class Stylist(StylePort):
-    """Rewrites a result's text in PetBot's voice with a small, tool-less LLM call."""
-
     def __init__(
         self,
         *,
         model: Model | str | None = None,
         settings: ChatSettings | None = None,
     ) -> None:
-        """``model`` may be injected directly (a ``TestModel``); otherwise it is built
-        lazily from the stylizer config (:meth:`ChatSettings.stylizer_llm`)."""
         self._settings = settings or ChatSettings()
         self._model = model
         self._agent: Agent[None, str] = Agent(
@@ -131,7 +121,5 @@ class Stylist(StylePort):
 
 
 class PassthroughStyle(StylePort):
-    """A no-op ``StylePort``: the result is already voiced (the chat agent voiced it)."""
-
     async def stylize(self, result: SkillResult, ctx: SkillContext) -> SkillResult:
         return result

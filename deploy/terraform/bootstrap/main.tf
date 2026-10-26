@@ -59,8 +59,7 @@ variable "environments" {
   type = map(object({
     # The root stack's var.name_prefix there; its deploy role manages <name_prefix>-*
     # resources and the state under <name_prefix>/.
-    name_prefix = string
-    # GitHub environment whose jobs may assume its deploy role (deploy.yml's `environment:`).
+    name_prefix        = string
     github_environment = string
     # Whether its stack runs the Discord edge (the root stack's var.edge_enabled): the
     # edge's IAM user and Lightsail service are only in scope where it does.
@@ -73,10 +72,7 @@ variable "environments" {
     # Parameters outside its prefix that its stack copies into its own (the root stack's
     # var.ssm_parameters): its deploy role may read exactly these.
     adopt_parameters = optional(list(string), [])
-    # The stack from before environments, under the bare prefix: its role keeps the name
-    # petbot-github-deploy, and its prefix may contain the others'. It exists only until
-    # that stack is destroyed (docs/adr/0014, "Migrating production").
-    legacy = optional(bool, false)
+    legacy           = optional(bool, false)
   }))
   description = "Each deploy environment, by name: prod deploys from main; dev deploys any branch's core, with no edge; legacy is the pre-migration production stack."
   default = {
@@ -154,7 +150,6 @@ resource "aws_s3_bucket_public_access_block" "state" {
   restrict_public_buckets = true
 }
 
-# TLS only: refuse any request to the state over plain HTTP.
 data "aws_iam_policy_document" "state_bucket" {
   statement {
     sid       = "DenyInsecureTransport"
@@ -179,7 +174,6 @@ resource "aws_s3_bucket_policy" "state" {
   bucket = aws_s3_bucket.state.id
   policy = data.aws_iam_policy_document.state_bucket.json
 
-  # S3 rejects a bucket policy while the public-access block is still being applied.
   depends_on = [aws_s3_bucket_public_access_block.state]
 }
 
@@ -194,18 +188,12 @@ output "state_bucket" {
 data "aws_caller_identity" "current" {}
 
 resource "aws_iam_openid_connect_provider" "github" {
-  url            = "https://token.actions.githubusercontent.com"
-  client_id_list = ["sts.amazonaws.com"]
-  # AWS validates GitHub's OIDC cert against its trust store now, but the
-  # argument is still required; this is GitHub's documented thumbprint.
+  url             = "https://token.actions.githubusercontent.com"
+  client_id_list  = ["sts.amazonaws.com"]
   thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
 }
 
-# The GitHub environment each CI role is assumed from. Each role trusts exactly its
-# environment's `sub`: the claim names the environment whenever a job references one, so a
-# job in no environment, a pull request, or any other workflow (including the AI review
-# bots, which hold id-token: write) cannot assume it. The branch rules of `production` and
-# the bootstrap environments admit only main.
+# The GitHub environment each CI role is assumed from.
 locals {
   github_role_environments = merge(
     { for name, env in var.environments : "deploy-${name}" => env.github_environment },
@@ -215,25 +203,19 @@ locals {
     },
   )
 
-  # Each environment's deploy role is suffixed with its name; the legacy one keeps the
-  # name it was created with. All of them fall under <name_prefix>-github-*, which no
+  # All of them fall under <name_prefix>-github-*, which no
   # deploy role may edit (DenyAccessPrincipals) and bootstrap's pipeline manages.
   deploy_role_names = {
     for name, env in var.environments :
     name => env.legacy ? "${var.name_prefix}-github-deploy" : "${var.name_prefix}-github-deploy-${name}"
   }
 
-  # The resource names each environment's deploy role and workload boundary cover. The
-  # legacy prefix (petbot) contains every other environment's, so the legacy environment
-  # covers only its own two deployables' names and never a petbot-prod-* or petbot-dev-*
-  # resource.
+  # The resource names each environment's deploy role and workload boundary cover.
   env_name_patterns = {
     for name, env in var.environments :
     name => env.legacy ? ["${env.name_prefix}-core*", "${env.name_prefix}-edge*"] : ["${env.name_prefix}-*"]
   }
 
-  # The workflow that may assume each deploy role: a job in its GitHub environment that
-  # runs any other workflow file is refused.
   deploy_role_workflows = {
     for name, env in var.environments :
     "deploy-${name}" => env.legacy ? "legacy.yml" : "deploy.yml"
@@ -263,10 +245,6 @@ data "aws_iam_policy_document" "github_trust" {
       values   = ["repo:${var.github_repo}:environment:${each.value}"]
     }
 
-    # A deploy role is assumed only by its workflow file, so a job elsewhere (another
-    # workflow on any branch) that names the same environment is refused. IfExists: GitHub
-    # documents job_workflow_ref for jobs in reusable workflows; where a token carries it,
-    # it must name this workflow.
     dynamic "condition" {
       for_each = contains(keys(local.deploy_role_workflows), each.key) ? [local.deploy_role_workflows[each.key]] : []
       content {
@@ -315,7 +293,6 @@ data "aws_iam_policy_document" "workload_boundary" {
     resources = ["*"]
   }
 
-  # PutMetricData and the X-Ray writes have no resource-level scoping.
   statement {
     sid       = "PublishTelemetry"
     actions   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords", "cloudwatch:PutMetricData"]
@@ -328,7 +305,6 @@ data "aws_iam_policy_document" "workload_boundary" {
     resources = ["*"]
   }
 
-  # Bedrock's OpenAI-compatible endpoint, signed with the workload's own identity (SigV4).
   dynamic "statement" {
     for_each = each.value.bedrock_mantle ? [1] : []
     content {
@@ -387,10 +363,7 @@ output "workload_boundary_arns" {
   value       = { for name, policy in aws_iam_policy.workload_boundary : name => policy.arn }
 }
 
-# Each deploy role's permissions. Service-level action wildcards (e.g. ecr:*) are kept
-# where enumerating every Terraform-issued call is brittle; each statement is scoped to
-# resources named after its environment's <name_prefix>-*, so a stolen CI token reaches that
-# stack and nothing else in the account. IAM writes require the environment's workload
+# Each deploy role's permissions. IAM writes require the environment's workload
 # boundary, and the CI roles are carved out (DenyAccessPrincipals), so a deploy role can
 # never widen its own permissions.
 data "aws_iam_policy_document" "deploy_permissions" {
@@ -416,8 +389,6 @@ data "aws_iam_policy_document" "deploy_permissions" {
     resources = ["arn:aws:ssm:${local.arn_region}:parameter/${each.value.name_prefix}/*"]
   }
 
-  # The stack's own parameters, under /<name_prefix>/ (the root stack's ssm_parameters,
-  # and a retired stack's removal of its parameters). Listing has no resource form.
   statement {
     sid = "ManageStackParameters"
     actions = [
@@ -516,8 +487,6 @@ data "aws_iam_policy_document" "deploy_permissions" {
     }
   }
 
-  # The stack's IAM roles (the Lambda execution role). Creating one, or changing what it
-  # may do, requires the workload boundary on it.
   statement {
     sid = "ManageStackRoles"
     actions = [
@@ -609,10 +578,6 @@ data "aws_iam_policy_document" "deploy_permissions" {
     }
   }
 
-  # The edge runs on Lightsail's container service. Lightsail resources are
-  # identified by random-GUID ARNs, so there is no name-based ARN to scope to: the
-  # blast radius is the account's Lightsail, which holds only the production edge, so
-  # an environment without an edge gets none of it.
   dynamic "statement" {
     for_each = each.value.edge ? [1] : []
     content {
@@ -650,8 +615,6 @@ output "deploy_role_arns" {
   value       = { for name, role in aws_iam_role.github_deploy : name => role.arn }
 }
 
-# The unkeyed deploy role, its policy and the workload boundary map onto the legacy
-# environment's instances.
 moved {
   from = aws_iam_role.github_deploy
   to   = aws_iam_role.github_deploy["legacy"]

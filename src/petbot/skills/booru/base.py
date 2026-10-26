@@ -18,18 +18,13 @@ from petbot.skills.booru.types import Post, SearchRequest
 
 
 class BooruProvider(Protocol):
-    """Everything the engine needs from a site, and nothing site-specific leaks."""
-
     name: str
     site_name: str
-    #: The provider's full native vocabularies (subclasses of the abstract bases).
     Sort: type[tags.Sort]
     Rating: type[tags.Rating]
     FileType: type[tags.FileType]
 
-    def parse_tags(self, raw: str) -> tuple[str, ...]:
-        """Split a raw user tag string per this site's convention."""
-        ...
+    def parse_tags(self, raw: str) -> tuple[str, ...]: ...
 
     def build_request(self, client: httpx.AsyncClient, search: SearchRequest) -> httpx.Request:
         """Serialize a search into a ready-to-send request (incl. headers/auth)."""

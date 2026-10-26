@@ -1,5 +1,3 @@
-"""The voice provider's conversation-id parsing (gateway resolution is smoke-only)."""
-
 from __future__ import annotations
 
 from petbot.services.music.provider import _channel_id

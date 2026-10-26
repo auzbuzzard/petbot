@@ -2,15 +2,8 @@
 
 Every hop (the URL and each redirect) goes through pydantic-ai's SSRF guard: the host is
 resolved and refused if any address is private, loopback, link-local or cloud metadata,
-then dialed by IP with the original Host/SNI. That matters on Lambda, where the runtime API
-listens on localhost. pydantic-ai's own ``safe_download`` reads the whole body into
-memory, so the request loop is ours: it streams with a byte cap and an overall deadline.
-The ``_ssrf`` helpers are private, but the dependency is pinned below its next major and
-the guard is covered by tests.
-
-An HTML page is reduced to its main content (``trafilatura``) before it reaches the model:
-a whole-page conversion is mostly navigation, link markup and embedded schema JSON, which
-crowds the article out of the text cap and leaves the model reasoning over boilerplate.
+then dialed by IP with the original Host/SNI. The ``_ssrf`` helpers are private, but the
+dependency is pinned below its next major and the guard is covered by tests.
 """
 
 from __future__ import annotations
@@ -35,7 +28,6 @@ from petbot.types import WebFetchArgs
 
 logger = logging.getLogger(__name__)
 
-#: Page text cap, in characters (~2K tokens): the gist of an article, not the whole site.
 MAX_CONTENT = 8_000
 #: Download cap, in bytes: a long article's HTML fits; a video or ISO is cut off early.
 MAX_BYTES = 2_000_000
@@ -124,8 +116,6 @@ def to_markdown(media_type: str, text: str, url: str) -> tuple[str, str]:
 
 
 class WebFetchSkill(Skill[WebFetchArgs]):
-    """Fetch a public web page and return its text."""
-
     name = "web_fetch"
     description = "Read a web page."
     args_model = WebFetchArgs

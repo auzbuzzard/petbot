@@ -24,11 +24,7 @@ TrackFinishedCallback = Callable[[], Awaitable[None]]
 
 @runtime_checkable
 class VoicePort(Protocol):
-    """Plays audio in one conversation's voice channel."""
-
-    async def join(self, channel_id: str) -> None:
-        """Connect to (or move to) the given voice channel."""
-        ...
+    async def join(self, channel_id: str) -> None: ...
 
     async def play(
         self,
@@ -44,13 +40,9 @@ class VoicePort(Protocol):
         """
         ...
 
-    async def stop(self) -> None:
-        """Stop playback and disconnect."""
-        ...
+    async def stop(self) -> None: ...
 
-    def is_playing(self) -> bool:
-        """Whether audio is currently playing."""
-        ...
+    def is_playing(self) -> bool: ...
 
 
 @runtime_checkable
@@ -64,9 +56,7 @@ class VoiceProvider(Protocol):
     user (from ``ctx.user``), not just the conversation.
     """
 
-    def for_context(self, ctx: SkillContext) -> VoicePort | None:
-        """The voice port for this request, or ``None`` if voice is unavailable."""
-        ...
+    def for_context(self, ctx: SkillContext) -> VoicePort | None: ...
 
 
 @runtime_checkable
@@ -75,27 +65,12 @@ class StylePort(Protocol):
     PetBot's voice — text style transfer: change the wording/register, preserve the
     meaning. It is the persona for a frontend that has no LLM of its own (a slash
     command); the ``@mention`` path needs none, since the chat agent already voices
-    its output. An error result is returned unchanged.
+    its output.
     """
 
-    async def stylize(self, result: SkillResult, ctx: SkillContext) -> SkillResult:
-        """Return ``result`` with its text restyled in character (meaning intact)."""
-        ...
+    async def stylize(self, result: SkillResult, ctx: SkillContext) -> SkillResult: ...
 
 
 @runtime_checkable
 class Notifier(Protocol):
-    """Outbound port: deliver a result to a conversation *out-of-band*.
-
-    The inbound side is ``frontend event -> Input -> Process``; this is its mirror.
-    A long-running effect (a music queue advancing, a future streamed reply) owns
-    its work behind a port and, when it has more to say, calls :meth:`deliver` —
-    which the *frontend* implements, since it already knows how to render a
-    :class:`~petbot.domain.result.SkillResult` to its channel. So "later,
-    unsolicited output" never forces the synchronous pipeline to become a stream;
-    it rides this one port instead.
-    """
-
-    async def deliver(self, conversation_id: str, result: SkillResult) -> None:
-        """Deliver ``result`` to the conversation identified by ``conversation_id``."""
-        ...
+    async def deliver(self, conversation_id: str, result: SkillResult) -> None: ...

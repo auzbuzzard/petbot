@@ -24,7 +24,6 @@ class EmptyReason(StrEnum):
 
     #: A safe-only search (the channel isn't age-gated) found nothing.
     SAFE_FLOOR = "safe_floor"
-    #: A search that looked at everything available found nothing.
     NO_MATCH = "no_match"
 
 
@@ -64,12 +63,10 @@ def render(post: Post | None, *, request: SearchRequest) -> SkillResult:
         author_url=post.site_root,
         author_icon_url=post.site_icon_url,
     )
-    # No greeting text: the card is the content, and the persona layer greets over it.
     return SkillResult.message(embed=embed)
 
 
 def tags_label(tags: Sequence[str], *, limit: int = 256) -> str:
-    """A comma-joined tag label, truncated to ``limit`` characters."""
     label = ", ".join(tags)
     if len(label) <= limit:
         return label

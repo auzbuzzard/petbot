@@ -31,12 +31,9 @@ from petbot.process.settings import (
     SummarizeContext,
 )
 
-#: How many times to compact-and-retry before giving up on an over-long conversation.
 MAX_COMPACTION_RETRIES = 3
 
-#: HTTP statuses a provider uses to reject an over-long request.
 _OVERFLOW_STATUS = frozenset({400, 413})
-#: Phrases providers put in the body of a context-length rejection (lower-cased).
 _OVERFLOW_PHRASES = (
     "context length",
     "context window",
@@ -69,16 +66,10 @@ def is_context_overflow(exc: Exception) -> bool:
 
 
 class Compactor(Protocol):
-    """Shrinks an over-long message history so a retried run can fit."""
-
-    async def compact(self, messages: list[ModelMessage]) -> list[ModelMessage]:
-        """Return a shorter history; return it unchanged if it can't be shortened."""
-        ...
+    async def compact(self, messages: list[ModelMessage]) -> list[ModelMessage]: ...
 
 
 class SlidingWindow:
-    """Drop the oldest half of the history. Zero cost — old turns are simply forgotten."""
-
     async def compact(self, messages: list[ModelMessage]) -> list[ModelMessage]:
         if len(messages) <= 1:
             return messages
@@ -125,11 +116,6 @@ def build_compactor(
     *,
     model: Model | str | None = None,
 ) -> Compactor:
-    """Build the configured compaction strategy (a config ``match``, like the model).
-
-    ``model`` is forwarded to the summarizer (``None`` ⇒ it lazily builds the stylizer
-    tier); the sliding window ignores it.
-    """
     match settings.context:
         case SlidingWindowContext():
             return SlidingWindow()

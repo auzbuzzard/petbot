@@ -44,7 +44,6 @@ override_resource {
   values          = { arn = "arn:aws:iam::123456789012:user/claude" }
 }
 
-# The retiring user is imported, which reads it; the test stands in for that read.
 override_resource {
   target = aws_iam_user.retired
   values = { arn = "arn:aws:iam::123456789012:user/petbot-bedrock-key" }

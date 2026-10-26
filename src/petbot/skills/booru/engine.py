@@ -39,7 +39,6 @@ async def run_search(
     client: httpx.AsyncClient,
     search: SearchRequest,
 ) -> SkillResult:
-    """Send the search, surface any site/HTTP error, then render the first result."""
     # Logged from the neutral SearchRequest, never the wire request — the latter
     # can carry an api_key/User-Agent, and secrets must never reach the logs.
     logger.debug(
@@ -58,13 +57,11 @@ async def run_search(
     # report. We deliberately don't log here: that would double-log (the caller
     # that handles the exception is the right place to decide level + traceback).
 
-    # 1. The site's own error message wins (best UX) — when the body decoded.
     if body is not None and (reason := provider.error(body)) is not None:
         raise SiteFailureStatusError(
             site_message=reason,
             print_message=_site_rejected(provider.name, reason),
         )
-    # 2. Any other non-2xx is still an error, even with no recognizable error body.
     if response.status_code >= 400:
         raise SiteFailureStatusError(
             site_message=f"HTTP {response.status_code}",

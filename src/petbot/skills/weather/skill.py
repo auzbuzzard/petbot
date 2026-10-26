@@ -1,6 +1,4 @@
-"""The ``weather`` skill: Open-Meteo geocoding + forecast (free, no key).
-
-A place name resolves to coordinates, and the forecast is requested in the place's own
+"""A place name resolves to coordinates, and the forecast is requested in the place's own
 timezone, so the result also carries its local time. Temperatures come in °C with °F
 alongside, so the answer suits whoever asks.
 """
@@ -28,7 +26,6 @@ logger = logging.getLogger(__name__)
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
-#: WMO weather interpretation codes, as Open-Meteo documents them.
 _WMO: dict[int, str] = {
     0: "clear sky",
     1: "mainly clear",
@@ -71,8 +68,6 @@ def _temp(celsius: object) -> str:
     return f"{celsius:.0f}°C / {celsius * 9 / 5 + 32:.0f}°F"
 
 
-#: US state / DC postal codes, for the common "City, ST" form (Open-Meteo returns the full
-#: state name in ``admin1``).
 _US_STATES: dict[str, str] = dict(
     pair.split(":")
     for pair in (
@@ -124,7 +119,6 @@ def _place_name(place: dict[str, Any]) -> str:
 
 
 def format_forecast(place: dict[str, Any], data: dict[str, Any]) -> str:
-    """The forecast summary handed to the model."""
     current = data.get("current", {})
     lines = [
         f"Weather for {_place_name(place)} (local time {current.get('time', '?')}, "
@@ -151,8 +145,6 @@ def format_forecast(place: dict[str, Any], data: dict[str, Any]) -> str:
 
 
 class WeatherSkill(Skill[WeatherArgs]):
-    """Current conditions and a short forecast for a named place."""
-
     name = "weather"
     description = "Get the weather for a place."
     args_model = WeatherArgs

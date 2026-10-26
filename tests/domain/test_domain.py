@@ -1,5 +1,3 @@
-"""The kernel models are frozen, self-serialising, and reject unknown fields."""
-
 from __future__ import annotations
 
 import pytest
@@ -51,9 +49,6 @@ def test_unknown_fields_rejected() -> None:
 
 
 def test_text_input_history_round_trips() -> None:
-    # History rides on the wire inside the Input sum type: dump to JSON-able data, then
-    # re-hydrate the right member by `kind` — the Recalled/Unrecalled union, Role enum, and
-    # nested Turn all survive.
     adapter: TypeAdapter[Input] = TypeAdapter(Input)
     recalled = TextInput(
         text="and another?",
@@ -71,5 +66,4 @@ def test_text_input_history_round_trips() -> None:
 
 
 def test_command_input_has_no_history() -> None:
-    # History is sum-type-local: only the conversational variant carries it.
     assert "history" not in CommandInput.model_fields

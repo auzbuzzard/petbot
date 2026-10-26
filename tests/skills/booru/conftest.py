@@ -23,7 +23,6 @@ def make_context(
     user_id: str = "42",
     conversation_id: str = "conv-1",
 ) -> SkillContext:
-    """Construct a :class:`SkillContext` for tests without a live frontend."""
     return SkillContext(
         platform=Platform.DISCORD,
         user=User(platform=Platform.DISCORD, id=user_id, display_name=display_name),
@@ -33,7 +32,6 @@ def make_context(
 
 
 def load_fixture(name: str) -> dict[str, Any]:
-    """Load a JSON fixture by file name (the .json suffix is optional)."""
     filename = name if name.endswith(".json") else f"{name}.json"
     data: dict[str, Any] = json.loads((FIXTURES / filename).read_text(encoding="utf-8"))
     return data

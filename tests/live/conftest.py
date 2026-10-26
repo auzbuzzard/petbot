@@ -22,7 +22,6 @@ from petbot.platform import LambdaTransport, ProcessClient
 FUNCTION = os.environ.get("PETBOT_LIVE_FUNCTION", "")
 _LIVE_DIR = Path(__file__).parent
 
-#: Appends one exchange (a title and what was said) to the job's transcripts.
 Record = Callable[[str, str], None]
 
 
@@ -37,13 +36,11 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 @pytest.fixture(scope="session")
 def core() -> ProcessClient:
-    """The deployed core, reached as the frontend reaches it."""
     return ProcessClient(LambdaTransport.from_function_name(FUNCTION))
 
 
 @pytest.fixture
 def ctx() -> SkillContext:
-    """A message in an ordinary (not age-gated) server channel."""
     return SkillContext(
         platform=Platform.DISCORD,
         user=User(platform=Platform.DISCORD, id="live:tester", display_name="tester"),
@@ -55,8 +52,6 @@ def ctx() -> SkillContext:
 
 @pytest.fixture
 def record() -> Record:
-    """Appends to the transcripts file the job posts, if it names one."""
-
     def append(title: str, body: str) -> None:
         path = os.environ.get("PETBOT_LIVE_TRANSCRIPTS")
         if path:

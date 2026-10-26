@@ -1,7 +1,5 @@
 """A minimal dev HTTP server for the core service: ``python -m petbot.services.core``.
 
-Serves the same dispatch -> ``SkillResult`` contract as the Lambda handler at
-``POST /dispatch``, so the frontend (``transport=http``) can talk to a local service.
 A single persistent event loop runs in a background thread, so skills' async clients
 (the booru ``httpx.AsyncClient``) stay bound to one loop across requests. A dev
 convenience; production uses the Lambda handler.

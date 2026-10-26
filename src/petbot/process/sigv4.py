@@ -20,8 +20,6 @@ MANTLE_SERVICE = "bedrock-mantle"
 
 
 def mantle_region(base_url: str) -> str:
-    """The Region of a ``https://bedrock-mantle.<region>.api.aws/...`` base URL, which is the
-    Region its requests are signed for."""
     host = urlparse(base_url).hostname or ""
     service, _, rest = host.partition(".")
     region, _, domain = rest.partition(".")

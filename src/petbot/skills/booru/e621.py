@@ -1,11 +1,7 @@
 """e621 provider (furry imageboard), modern ``/posts.json`` schema.
 
 Tags are space-separated and use underscores within a tag (the user follows the
-site's own convention; we don't coerce). A descriptive User-Agent is mandatory,
-and optional ``username``/``api_key`` basic auth (sent as an ``Authorization``
-header so the engine stays generic) raises rate limits. The safety floor is the
-``rating:s`` system tag. Errors come back as ``{"success": false, "message": …}``
-(e.g. the 422 when an anonymous search exceeds 40 tags).
+site's own convention; we don't coerce). The safety floor is the ``rating:s`` system tag.
 """
 
 from __future__ import annotations
@@ -89,7 +85,7 @@ class _Post(BaseModel):
     sample: _Sample = Field(default_factory=_Sample)
     score: _Score = Field(default_factory=_Score)
     fav_count: int = 0
-    rating: Rating = Rating.safe  # "s"/"q"/"e" coerced into the enum by pydantic
+    rating: Rating = Rating.safe
 
 
 class _Response(BaseModel):
@@ -120,7 +116,6 @@ class E621Provider(BooruProvider):
         self._api_key = api_key
 
     def parse_tags(self, raw: str) -> tuple[str, ...]:
-        # e621 separates tags by spaces; underscores live *within* a tag.
         return tuple(raw.split())
 
     def build_request(self, client: httpx.AsyncClient, search: SearchRequest) -> httpx.Request:
@@ -142,7 +137,7 @@ class E621Provider(BooruProvider):
             return None
         post = posts[0]
         url = post.sample.url or post.file.url
-        if not url:  # blocked posts have null urls
+        if not url:
             return None
         return Post(
             post_id=post.id,

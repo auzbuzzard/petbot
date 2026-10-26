@@ -53,6 +53,6 @@ async def test_serve_reparents_into_the_client_trace(span_exporter: InMemorySpan
 
     serve_spans = [s for s in span_exporter.get_finished_spans() if s.name == "serve"]
     assert serve_spans, "serve span not recorded"
-    assert serve_spans[0].context.trace_id == client_trace_id  # one trace edge->core
+    assert serve_spans[0].context.trace_id == client_trace_id
     assert serve_spans[0].parent is not None
-    assert serve_spans[0].parent.span_id == client_span_id  # child of the client span
+    assert serve_spans[0].parent.span_id == client_span_id

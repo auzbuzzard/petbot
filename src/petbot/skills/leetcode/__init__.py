@@ -10,5 +10,4 @@ __all__ = ["GraphQLProvider", "LeetCodeProvider", "LeetCodeSkill", "build_leetco
 
 
 def build_leetcode() -> LeetCodeSkill:
-    """Build the LeetCode skill with its own HTTP client."""
     return LeetCodeSkill([GraphQLProvider(httpx.AsyncClient(timeout=10.0))])

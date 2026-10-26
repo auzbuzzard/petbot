@@ -1,8 +1,6 @@
 """PetBot Shared Kernel: neutral domain models and port interfaces.
 
-Frozen pydantic models for the data, an ABC for the typed ``Skill`` contract,
-Protocols for the ports and the transport. Frontends and skills both depend on
-this; neither depends on the other. See
+Frontends and skills both depend on this; neither depends on the other. See
 ``docs/adr/0006-gateway-edge-microservice-skills.md``.
 """
 

@@ -37,15 +37,12 @@ on:
   push:
     branches: [main]
 
-# OIDC: request a short-lived token to assume the AWS deploy role.
 permissions:
   id-token: write
   contents: read
 
 # One run per environment at a time, held from deploy to test, so no other deploy to the
-# same stage lands between a run's deploy and its tests. GitHub keeps only the newest
-# waiting run of a group: when several pull requests queue for dev, an older waiting one is
-# cancelled and its check shows that; re-run it.
+# same stage lands between a run's deploy and its tests.
 concurrency:
   group: deploy-${{ inputs.environment || (github.event_name == 'pull_request' && 'dev' || 'production') }}
   cancel-in-progress: false
@@ -78,8 +75,6 @@ jobs:
           fi
           echo "defer=$defer" >> "$GITHUB_OUTPUT"
 
-  # A pull request from a fork, or Dependabot's, gets no OIDC token or secrets, so it can't
-  # deploy or test on AWS; say so instead of failing.
   untrusted:
     if: >-
       github.event_name == 'pull_request'
@@ -104,9 +99,8 @@ jobs:
     # image builds natively; the smaller edge image cross-builds for amd64 via
     # QEMU (cheaper to emulate than the heavy worker image).
     runs-on: ubuntu-24.04-arm
-    # Each deploy role's trust names its environment. `production` admits only main and
-    # needs a required reviewer's approval, so a merge alone ships nothing; a push always
-    # deploys there. `dev` is created by the first run that references it, with no rules.
+    # Each deploy role's trust names its environment. `dev` is created by the first run that
+    # references it, with no rules.
     environment: ${{ inputs.environment || (github.event_name == 'pull_request' && 'dev' || 'production') }}
     env:
       TF_DIR: deploy/terraform
@@ -194,7 +188,6 @@ jobs:
           fi
           echo "TF_VAR_existing_ssm_parameters=$(jq -c . <<< "$existing")" >> "$GITHUB_ENV"
 
-      # buildx for the gha layer cache; QEMU for the amd64 edge build on arm.
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         if: env.EDGE == 'true'

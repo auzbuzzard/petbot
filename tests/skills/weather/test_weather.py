@@ -1,5 +1,3 @@
-"""The weather skill against mocked Open-Meteo responses (no live API calls)."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -113,8 +111,8 @@ def test_pick_never_matches_a_qualifier_by_substring() -> None:
     assert _pick([au, fl], "US") is fl
     assert _pick([au, fl], "FL") is fl
     assert _pick([au, fl], "Australia") is au
-    assert _pick([fl, au], "Vic") is au  # a name's start still matches
+    assert _pick([fl, au], "Vic") is au
     paris_fr = _PLACES[1]
     paris_tx = _PLACES[0]
     assert _pick([paris_fr, paris_tx], "TX") is paris_tx
-    assert _pick([paris_fr, paris_tx], "Nowhere") is paris_fr  # no match: top hit
+    assert _pick([paris_fr, paris_tx], "Nowhere") is paris_fr

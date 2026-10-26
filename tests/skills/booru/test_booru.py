@@ -19,20 +19,18 @@ from petbot.skills.booru.skill import DerpiSkill, E621Skill, _build_search
 from petbot.skills.booru.types import SearchRequest
 from petbot.types import BooruArgs
 
-# --- abstract vocabulary ------------------------------------------------------
-
 
 def test_provider_enums_subclass_the_abstract_bases() -> None:
     assert issubclass(e621.Sort, tags.Sort) and issubclass(derpibooru.Sort, tags.Sort)
     assert isinstance(e621.Sort.favorites, tags.Sort)
-    assert e621.Sort.favorites.value == "favcount"  # member .value is the wire token
+    assert e621.Sort.favorites.value == "favcount"
 
 
 def test_vocabulary_is_per_site_and_full_native() -> None:
     assert "wilson_score" in {s.value for s in derpibooru.Sort}
     assert "wilson_score" not in {s.value for s in e621.Sort}
     assert "hot" in {s.value for s in e621.Sort}
-    assert "suggestive" in {r.value for r in derpibooru.Rating}  # Derpi-only
+    assert "suggestive" in {r.value for r in derpibooru.Rating}
     assert "suggestive" not in {r.value for r in e621.Rating}
 
 
@@ -67,9 +65,6 @@ def test_parse_tags_follows_site_convention() -> None:
         "twilight sparkle",
         "safe",
     )
-
-
-# --- request shaping (inspect the built httpx.Request) ------------------------
 
 
 async def test_e621_build_request_serializes_system_tags() -> None:
@@ -140,9 +135,6 @@ async def test_derpi_sort_direction_is_caller_controlled() -> None:
     assert asc.url.params["sd"] == "asc"
 
 
-# --- response decoding --------------------------------------------------------
-
-
 def test_e621_parse() -> None:
     post = e621.E621Provider(user_agent="x").parse(load_fixture("e621_success"))
     assert post is not None
@@ -179,9 +171,6 @@ def test_error_extraction() -> None:
     assert d.error(load_fixture("derpibooru_success")) is None
 
 
-# --- engine (respx transport mock) -------------------------------------------
-
-
 @respx.mock
 async def test_run_search_renders_post() -> None:
     respx.get("https://e621.net/posts.json").mock(
@@ -204,9 +193,6 @@ async def test_run_search_surfaces_site_error_body() -> None:
         with pytest.raises(SiteFailureStatusError) as exc:
             await run_search(provider, client, SearchRequest(tags=("x",), safe_only=False))
     assert "more than 40 tags" in exc.value.site_message
-
-
-# --- skills end to end --------------------------------------------------------
 
 
 @respx.mock
@@ -234,7 +220,6 @@ async def test_skill_nsfw_does_not_inject_safe() -> None:
 
 @respx.mock
 async def test_e621_skill_surfaces_failure() -> None:
-    # A site error is raised as a neutral UpstreamUnavailable carrying the site's reason.
     respx.get("https://e621.net/posts.json").mock(
         return_value=httpx.Response(422, json=load_fixture("e621_error"))
     )

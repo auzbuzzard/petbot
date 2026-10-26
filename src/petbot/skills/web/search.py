@@ -2,12 +2,9 @@
 
 Tavily (keyed, built for LLM consumers) runs first; ``ddgs`` (keyless metasearch over
 public result pages) is the fallback for a missing key, an exhausted quota, or an outage.
-Tavily also answers the query itself, from the pages it found, the way an answer engine
-does: the agent gets that answer to voice instead of piecing one together from snippets.
 The sources come back as a compact numbered list the agent cites from, each with its
 publication date when the provider knows it and marked undated when it doesn't, so the
-model never has to guess when a snippet was written. Outside an age-gated channel both
-providers are asked for safe results (Tavily's ``safe_search``, ddgs's ``safesearch``).
+model never has to guess when a snippet was written.
 """
 
 from __future__ import annotations
@@ -36,9 +33,7 @@ logger = logging.getLogger(__name__)
 
 #: Results per search: enough to cross-check, few enough to keep the prompt small.
 MAX_RESULTS = 5
-#: Per-result snippet cap, in characters.
 MAX_SNIPPET = 400
-#: Cap on the provider's own answer, in characters.
 MAX_ANSWER = 1_200
 
 TAVILY_URL = "https://api.tavily.com/search"
@@ -46,8 +41,6 @@ TAVILY_URL = "https://api.tavily.com/search"
 
 @dataclass(frozen=True)
 class SearchHit:
-    """One search result, provider-neutral."""
-
     title: str
     url: str
     snippet: str
@@ -57,8 +50,6 @@ class SearchHit:
 
 @dataclass(frozen=True)
 class SearchResults:
-    """One provider's response: its hits, and its own answer to the query if it writes one."""
-
     hits: list[SearchHit]
     answer: str | None = None
 
@@ -77,7 +68,6 @@ def _text(value: object) -> str:
 
 
 def _day(value: object) -> str | None:
-    """The ``YYYY-MM-DD`` day of a provider timestamp, or ``None`` if it has none."""
     text = _text(value).strip()
     return text[:10] if len(text) >= 10 and text[4] == "-" and text[7] == "-" else None
 
@@ -121,8 +111,6 @@ class TavilyProvider(SearchProvider):
 
 
 class DdgsProvider(SearchProvider):
-    """Keyless metasearch via ``ddgs``, pinned to the engines that answer cloud IPs."""
-
     name = "ddgs"
 
     def __init__(self, backend: str = "duckduckgo,startpage") -> None:
@@ -137,8 +125,6 @@ class DdgsProvider(SearchProvider):
                 safesearch="on" if safe else "off",
             )
         except DDGSException as exc:
-            # ddgs raises this exact message when every engine answered with nothing; any
-            # engine error replaces it, so it reliably means "no results", not an outage.
             if str(exc) == "No results found.":
                 return SearchResults(hits=[])
             raise
@@ -161,9 +147,6 @@ def _clip(text: str, limit: int) -> str:
 
 
 def format_results(query: str, results: SearchResults) -> str:
-    """What the model reads: the provider's answer when it wrote one, then the numbered
-    sources, each dated or marked undated, closed by how to use them: a small model follows
-    an instruction next to the material far more reliably than one in its system prompt."""
     lines = [f'Web results for "{query}":']
     if results.answer:
         lines.append(f"Answer, from the sources below: {_clip(results.answer, MAX_ANSWER)}")
@@ -181,8 +164,6 @@ def format_results(query: str, results: SearchResults) -> str:
 
 
 class WebSearchSkill(Skill[WebSearchArgs]):
-    """Search the web through the first provider that answers."""
-
     name = "web_search"
     description = "Search the web."
     args_model = WebSearchArgs
@@ -201,7 +182,6 @@ class WebSearchSkill(Skill[WebSearchArgs]):
             try:
                 results = await provider.search(query, safe=not ctx.allows_explicit)
             except (httpx.HTTPError, DDGSException, KeyError, ValueError) as exc:
-                # A quota/outage/parse failure on one provider falls through to the next.
                 failures += 1
                 logger.warning("web_search: %s failed: %s", provider.name, type(exc).__name__)
                 continue

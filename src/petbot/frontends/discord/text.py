@@ -1,8 +1,4 @@
-"""Platform-neutral text chunking for the per-message length cap.
-
-Pure (no platform types): the frontend is the only thing left that needs it, so it
-lives beside the renderer rather than in the kernel.
-"""
+"""Platform-neutral text chunking for the per-message length cap."""
 
 from __future__ import annotations
 

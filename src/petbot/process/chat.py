@@ -107,8 +107,6 @@ def run_context(ctx: SkillContext, now: datetime) -> str:
     )
 
 
-# Tool decisions are also counters, so a dashboard can alarm on a zero-tool-call spike
-# without parsing logs.
 _meter = metrics.get_meter("petbot.process.chat")
 _TOOL_CALLS = _meter.create_counter(
     "petbot.agent.tool_calls", description="Agent tool calls, by tool name."
@@ -127,8 +125,6 @@ _LOST_CONTEXT_RUNS = _meter.create_counter(
 
 
 class ChatProcess(Process):
-    """Talk to PetBot in natural language; it may call tools to answer."""
-
     def __init__(
         self,
         registry: ToolRegistry,
@@ -140,16 +136,6 @@ class ChatProcess(Process):
         id_salt: str = "",
         clock: Callable[[], datetime] = _utc_now,
     ) -> None:
-        """Wire the agent.
-
-        ``registry`` is the tools the agent dispatches to (in-process — no wire hop).
-        ``model`` may be injected directly (e.g. a ``TestModel``); otherwise it is built
-        lazily from ``settings`` on first use. ``style`` defaults to a no-op (the agent
-        already voices its output). ``instrumentation`` (from the composition root) turns on
-        pydantic-ai's OTel spans; ``id_salt`` salts the one user id we attach to the
-        run-outcome record. Both default off, so dev/tests stay quiet. ``clock`` supplies the
-        "now" each run is grounded in (injectable for tests).
-        """
         self._registry = registry
         self._settings = settings or ChatSettings()
         self._model = model
@@ -168,15 +154,12 @@ class ChatProcess(Process):
 
     async def respond(self, inp: Input, ctx: SkillContext) -> SkillResult:
         if not isinstance(inp, TextInput):
-            # The router only sends conversational input here; guard for type-safety.
             raise TypeError(f"ChatProcess received {type(inp).__name__}")
         deps = ChatDeps(registry=self._registry, ctx=ctx)
         match inp.history:
             case Recalled(turns=turns):
                 history, recalled = to_model_messages(turns), True
             case Unrecalled():
-                # Replied to context we couldn't read: no history, and tell the agent so it
-                # voices that it lost the thread rather than answering blind.
                 history, recalled = [], False
             case _:
                 assert_never(inp.history)
@@ -200,8 +183,6 @@ class ChatProcess(Process):
             # another model call.
             return SkillResult.message(_OUT_OF_TIME)
         self._log_outcome(result, ctx, recalled=recalled)
-        # The last card: when the agent calls tools more than once, a later call is the one
-        # it settled on (an earlier result it rejected and searched past isn't the answer).
         card = next((a for a in reversed(deps.attachments) if a.embed is not None), None)
         files = tuple(f for a in deps.attachments for f in a.files)
         out = SkillResult.message(

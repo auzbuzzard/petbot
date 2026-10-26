@@ -1,5 +1,3 @@
-"""The LeetCode skill against mocked GraphQL responses (no live API calls)."""
-
 from __future__ import annotations
 
 import json
@@ -66,8 +64,6 @@ def _listing(total: int, questions: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 class _FixedRng(random.Random):
-    """Lands every draw on ``offset``."""
-
     def __init__(self, offset: int) -> None:
         super().__init__()
         self._offset = offset
@@ -220,12 +216,12 @@ async def test_the_problem_count_is_reused_until_it_goes_stale() -> None:
     async with httpx.AsyncClient() as client:
         skill = LeetCodeSkill([GraphQLProvider(client, clock=lambda: now[0])])
         await skill.run(LeetCodeArgs(mode="random"), _ctx())
-        assert route.call_count == 2  # count + draw
+        assert route.call_count == 2
         await skill.run(LeetCodeArgs(mode="random"), _ctx())
-        assert route.call_count == 3  # the count is reused: draw only
+        assert route.call_count == 3
         now[0] += TOTAL_TTL + 1
         await skill.run(LeetCodeArgs(mode="random"), _ctx())
-        assert route.call_count == 5  # stale: counted again
+        assert route.call_count == 5
 
 
 @respx.mock
@@ -241,12 +237,9 @@ async def test_random_from_an_empty_set_is_empty() -> None:
     "response",
     [
         httpx.Response(503),
-        # A query LeetCode rejects comes back as HTTP 400 with GraphQL errors...
         httpx.Response(400, json={"errors": [{"message": "Expected type DifficultyEnum"}]}),
-        # ...and a partial failure can arrive as 200 with errors alongside the data.
         httpx.Response(200, json={"data": {}, "errors": [{"message": "boom"}]}),
         httpx.Response(200, text="<html>not json</html>"),
-        # A daily missing a required field is not an answer.
         httpx.Response(
             200,
             json={

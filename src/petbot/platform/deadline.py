@@ -31,6 +31,5 @@ def budget(seconds: float) -> Iterator[None]:
 
 
 def remaining() -> float | None:
-    """Seconds left in the current turn's budget, or ``None`` when no budget is set."""
     deadline = _deadline.get()
     return None if deadline is None else max(0.0, deadline - time.monotonic())

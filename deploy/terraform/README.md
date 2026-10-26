@@ -13,8 +13,6 @@ The same stack deploys two stages, each under its own prefix: **prod**
 (`petbot-prod-*`, core + edge) and **dev** (`petbot-dev-*`), a core worker alone
 (`edge_enabled = false`), built from any branch and talked to through the chat
 harness rather than Discord. See [Dev core](#dev-core-an-unmerged-branch-before-it-merges).
-Production still runs under the pre-stage prefix `petbot` until it is migrated: see
-[Migrating production to petbot-prod](#migrating-production-to-petbot-prod).
 
 ```
 bootstrap/        root of trust: state bucket, GitHub OIDC, CI roles, workload boundary, operator access
@@ -27,24 +25,6 @@ Images build from [`../Dockerfile.lambda`](../Dockerfile.lambda) (worker, arm64)
 and [`../Dockerfile.edge`](../Dockerfile.edge) (edge, amd64).
 
 ## Topology
-
-```
-Discord ⇄ [ edge ]  --boto3 invoke (IAM)-->  [ core worker Lambda ]  math · booru · chat
-          Lightsail container service          private, no public endpoint
-```
-
-The edge carries a **scoped IAM user** whose only permissions are
-`lambda:InvokeFunction` and `lambda:GetFunctionConfiguration` (to wait out an
-Inactive/Pending function) on the core worker, and `dynamodb:PutItem` /
-`dynamodb:UpdateItem` on its `<name_prefix>-edge-claims` table (one copy answers each
-message; see `claims.tf`). Its access key is injected into the
-container's environment (Lightsail container services have no IAM instance roles),
-and replaced every `edge_key_rotation_days` (default 90) on the next deploy after that.
-To replace it sooner, run the Deploy workflow by hand with **rotate_edge_key** ticked; it
-acts on the edge of the stage it deploys, and fails on a stage without one. Until the
-production cutover the live edge is the legacy stack's, which `legacy.yml` operates and
-which keeps rotating on its schedule.
-No public, unauthenticated surface exists, so there is no LLM cost-abuse vector.
 
 Both images live in **ECR**. The worker Lambda runs its image directly; the edge
 **pulls** its image from ECR via Lightsail's private-registry access (an
@@ -61,9 +41,6 @@ scraping.
   A stage owns its parameters (`ssm_parameters` in `stages/<stage>.tfvars`,
   `parameters.tf`): each is created with the value of an existing parameter, read through
   an ephemeral resource and written write-only, so no value reaches the plan or the state.
-  Production's Discord token is copied this way from the pre-migration
-  `/petbot/edge/discord_token`. Keys need none: `bedrock_mantle` calls the model with the
-  function's role; web search and the boorus run keyless.
 
   A secret that exists nowhere in AWS yet (a new third-party key) has no path in from
   code: its value is issued by the third party and someone has to enter it once. That is
@@ -71,9 +48,7 @@ scraping.
 
   > Each process reads its secrets from SSM when it starts: Terraform passes it only
   > the parameter *names* (`SSM_SECRETS`, see `secrets.tf`), and its IAM identity may
-  > read exactly those parameters. No secret value lands in the function's
-  > configuration or in Terraform state. The exception is the edge's own AWS access
-  > key: Lightsail has no IAM roles, so Terraform creates the key and it lives in state.
+  > read exactly those parameters.
 
 ## Bootstrap (root of trust)
 
@@ -90,7 +65,6 @@ an environment). Every environment but `dev` admits only `main`:
 | --- | --- | --- | --- |
 | `petbot-github-deploy-prod` | `deploy.yml` (prod stack) | `production` | `main` only + required reviewer |
 | `petbot-github-deploy-dev` | `deploy.yml` run for `dev` (dev stack) | `dev` | any branch |
-| `petbot-github-deploy` | the pre-migration `petbot` stack (`legacy`); removed after the migration | `production` | `main` only + required reviewer |
 | `petbot-github-bootstrap-plan` | `bootstrap.yml`, plan job (read-only) | `bootstrap-plan` | `main` only |
 | `petbot-github-bootstrap-apply` | `bootstrap.yml`, apply job | `bootstrap` | `main` only + required reviewer |
 | `petbot-operator` | the `claude` IAM user (`sts:AssumeRole`) | — | read-only |
@@ -109,7 +83,6 @@ boundary, and no stage's prefix may contain another's:
 | --- | --- | --- | --- | --- |
 | `prod` | `production` | `petbot-prod` | core + edge | `petbot-prod/terraform.tfstate` |
 | `dev` | `dev` | `petbot-dev` | core only | `petbot-dev/terraform.tfstate` |
-| `legacy` (until migrated) | `production` | `petbot` | core + edge | `petbot/terraform.tfstate` |
 
 **A deploy role** is scoped by naming convention: it may manage resources named
 `<name_prefix>-*` of its environment (ECR repos, the Lambda and its log group,
@@ -123,8 +96,7 @@ bootstrap change**; only a new AWS service does.
 
 Neither stage reaches the other: `petbot-prod-*` and `petbot-dev-*` match nothing of
 each other's, nor do their states and parameters. The dev role, reachable from any
-branch, also has no Lightsail, IAM-user or Budgets rights. The `legacy` role's
-`petbot-*` scope covers both stages; it exists only until the old stack is destroyed.
+branch, also has no Lightsail, IAM-user or Budgets rights.
 
 **Changing bootstrap** is a PR like any other. After it merges, `bootstrap.yml`
 plans with the read-only role and posts the plan, with its digest, to the run's
@@ -174,10 +146,6 @@ Then set the GitHub secrets below from `terraform output`. From here on, no one 
 bootstrap by hand. The state bucket is named `petbot-tfstate-<account-id>`: a stage
 whose environment has no `DEPLOY_ROLE_ARN` (dev) takes the account ID from it.
 
-The state bucket and the role ARNs carry the AWS account ID, and the workflow logs are
-public like the repository, so they are **Secrets**, which GitHub masks in every log and
-summary:
-
 | GitHub Actions secret | Scope | Value | Read for |
 | --- | --- | --- | --- |
 | `TF_STATE_BUCKET` | repo | the state bucket name | the backend; the account ID where no `DEPLOY_ROLE_ARN` is set |
@@ -186,14 +154,12 @@ summary:
 | `BOOTSTRAP_APPLY_ROLE_ARN` | `bootstrap` | the bootstrap apply role ARN | `bootstrap.yml` |
 
 The credentials step also masks the account ID wherever it appears after it (ARNs,
-registry URLs, Terraform output). The one **Variable** is `AWS_REGION` (repo level).
+registry URLs, Terraform output).
 
 **Stage settings are code.** Everything else a deploy needs is in
 `stages/<stage>.tfvars` (`prod`, `dev`, and `legacy` until the old stack is gone),
 which `deploy.yml` hands to every Terraform command: the model and endpoint, whether the
-edge runs, the parameters the stage owns. Changing a setting is a pull request. The
-GitHub variables the pipeline used to read (`CHAT_LLM_*`, `TAVILY_API_KEY_SSM_PARAMETER`,
-`OBSERVABILITY_*`, …) are no longer read.
+edge runs, the parameters the stage owns. Changing a setting is a pull request.
 
 The dev core reads no secret: it calls the model with its role, and its boundary can't
 read production's `/petbot-prod/*` parameters, so web search runs on the keyless `ddgs`
@@ -275,78 +241,9 @@ addresses, whether the function's IAM and packaging work. Its tool calls are in 
 log group, `/aws/lambda/petbot-dev-core`.
 
 Dev is one slot: each run replaces what the last one deployed, and runs take turns
-(`concurrency`). Idle, a Lambda costs nothing; what remains is ECR storage for its
-images (the lifecycle policy keeps the last `ecr_keep_last_images`) and its retained
-logs. Tearing dev down has no pipeline yet; it would go the way `legacy.yml` retires
-the old stack.
+(`concurrency`).
 
 ## Migrating production to petbot-prod
-
-Production runs as the pre-stage `petbot` stack (`petbot-core`, `petbot-edge`, state
-`petbot/terraform.tfstate`, parameters under `/petbot/`). Names can't change in place, so
-`petbot-prod` is built beside it, the edge is cut over, and the old stack is destroyed.
-The per-resource decisions and the downtime are in
-[ADR 0014](../../docs/adr/0014-dev-core-environment.md#migrating-production-petbot-to-petbot-prod).
-
-Every step is a pull request. Merging it runs the pipelines, and each run waits for the
-owner's approval of `production` or `bootstrap`, after which its log shows the plan it
-applies. The old stack is operated by `.github/workflows/legacy.yml` from
-`stages/legacy.tfvars`, as its own deploy role (`petbot-github-deploy`).
-
-1. **This change.** Merging it runs two pipelines, and bootstrap's starts a third; approve them in this order:
-   - `bootstrap.yml`: three moves to `["legacy"]`; a role, policy and boundary each for
-     `prod` and `dev`; the parameter statements added to legacy's policy; the operator's
-     and the pipeline roles' updates (`petbot-prod-core`, `petbot-dev-core`,
-     `petbot-bedrock-key`).
-   - `legacy.yml`, in two approvals: approving its `plan` job changes nothing and posts
-     the plan's resource changes to the run's summary; its `apply` job, approved after
-     you've read them, applies only that same plan. The plan moves ten edge resources
-     to `[0]` and changes nothing. A
-     change in it means `stages/legacy.tfvars` doesn't describe the live stack: fix the
-     file in a pull request rather than applying.
-   - `deploy.yml` (production): creates `petbot-prod-core`, its registry, role and log
-     group, and `/petbot-prod/edge/discord_token` and `/petbot-prod/core/tavily_api_key`,
-     copied from the legacy parameters (their values show as write-only, never printed). No
-     edge (`edge_enabled = false`); the legacy stack keeps serving Discord. The push's own
-     deploy run steps aside (its `gate` job sees bootstrap changed); `bootstrap.yml` starts
-     this one once its apply is done, so it never runs before its deploy role exists.
-
-   A pull request from then on is tested on the dev core (its `test` job).
-
-   From here until the cutover, `main` deploys to `petbot-prod`, not to the stack
-   serving Discord: keep this window short.
-
-2. **Cutover.** One pull request: `edge_enabled = true` in `stages/prod.tfvars` and
-   `edge_paused = true` in `stages/legacy.tfvars`. Merging it runs `deploy.yml`
-   (production: the new edge) and `legacy.yml` (pauses the old edge's service, which
-   shuts its containers down). The order you approve them in sets the trade-off: the
-   pause first, and PetBot is offline in Discord until the production run's container
-   connects (one deploy run; no duration measured yet); production first, and messages
-   sent while both are connected get two answers. **Rollback** is reverting this pull
-   request.
-
-3. **Retire the old stack**, after a soak. One pull request:
-   - `retired = true` in `stages/legacy.tfvars`: `legacy.yml` plans the destroy, applies
-     it once approved, then deletes `retired_parameters` (the old Discord token, Bedrock
-     API key and Tavily key) and the old state object;
-   - in `bootstrap/`, adopt the hand-made Bedrock key user, so the next step can delete
-     it through the pipeline:
-
-     ```hcl
-     import {
-       to = aws_iam_user.retired["petbot-bedrock-key"]
-       id = "petbot-bedrock-key"
-     }
-
-     resource "aws_iam_user" "retired" {
-       for_each      = toset(var.retiring_users)
-       name          = each.key
-       force_destroy = true
-     }
-     ```
-
-     Its plan imports the user and sets `force_destroy`; read it for any other change
-     (the user's path or tags) and match the block to it.
 
 4. **Remove `legacy`.** One pull request: delete the `legacy` entry and its three
    `moved` blocks from `bootstrap/main.tf`, the `adopt_parameters` of `prod`, the
@@ -388,27 +285,16 @@ docker build --platform linux/amd64 -f ../Dockerfile.edge   -t "$EDGE:latest" ..
 # 3. Stand up the worker + edge deployment (the edge pulls its image from ECR).
 terraform apply -var 'image_tag=latest' -var 'edge_image_tag=latest'
 
-terraform output core_function_arn          # the edge's WORKER__FUNCTION_NAME target
+terraform output core_function_arn
 terraform output edge_container_service_name
 ```
 
 For subsequent deploys, push new images (prefer a unique tag, e.g. the git SHA)
 and re-`apply` with the new `image_tag` / `edge_image_tag`.
 
-## Migrating from the old interactions stack (one-time)
-
-PetBot 2.0 deployed a single public **interactions** Lambda (`petbot-interactions`,
-state key `interactions/terraform.tfstate`). 2.1 replaces it with the private core
-worker + the edge, under a new state key (`petbot/terraform.tfstate`) and new
-names. The old stack is **decommissioned**: once, run `terraform destroy` against
-the old `interactions/…` state (or delete the orphaned function, ECR repo, and
-role in the console). Nothing imports from the old state.
-
 ## Cost & retention
 
 - **Edge:** Lightsail `nano` ~$7/mo flat (public IPv4 + 500 GB transfer bundled).
-- **Worker:** Lambda — ~$0 at this scale (scale-to-zero); chat inference is the
-  only real variable (cents–low-$/mo).
 - **ECR lifecycle** (`retention.tf`) expires old/untagged images in both repos.
 - **CloudWatch Logs** retain `log_retention_days`; the group is owned here so
   `terraform destroy` removes it.
