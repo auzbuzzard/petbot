@@ -82,6 +82,10 @@ resource "aws_lightsail_container_service_deployment_version" "edge" {
       AWS_SECRET_ACCESS_KEY  = aws_iam_access_key.edge[0].secret
       SSM_SECRETS            = jsonencode(local.edge_secret_parameters)
       CLAIMS_TABLE           = aws_dynamodb_table.claims[0].name
+      KEYLESS_PROBE = jsonencode({
+        service = aws_lightsail_container_service.edge[0].principal_arn
+        puller  = aws_lightsail_container_service.edge[0].private_registry_access[0].ecr_image_puller_role[0].principal_arn
+      })
     }, local.observability_edge_env)
   }
 

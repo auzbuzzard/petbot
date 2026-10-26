@@ -272,6 +272,23 @@ jobs:
           terraform output -raw core_function_arn; echo
           if [ "$EDGE" = true ]; then terraform output -raw edge_container_service_name; echo; fi
 
+      - name: Keyless probe (edge)
+        if: env.EDGE == 'true'
+        continue-on-error: true
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          service=$(terraform output -raw edge_container_service_name)
+          for _ in $(seq 1 20); do
+            lines=$(aws lightsail get-container-log --service-name "$service" --container-name edge \
+              --filter-pattern keyless-probe --query 'logEvents[].message' --output text)
+            if [ -n "$lines" ] && [ "$lines" != None ]; then
+              tr '\t' '\n' <<< "$lines" | grep -o 'keyless-probe: .*'
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::warning::No keyless-probe lines in the edge's log yet."
+
   # Every deploy to dev (each pull request from this repository, or a manual dev run) is
   # tested live: tests/live runs against petbot-dev-core, dispatched as the Discord
   # frontend dispatches, as the dev deploy role. Its result is this job's check on the pull
