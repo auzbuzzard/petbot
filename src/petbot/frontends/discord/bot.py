@@ -25,6 +25,7 @@ from petbot.frontends.discord.history import (
     reconstruct,
     strip_self_mention,
 )
+from petbot.frontends.discord.keyless import probe_container_identity
 from petbot.frontends.discord.render import SERVICE_UNREACHABLE, respond
 from petbot.frontends.discord.settings import DiscordSettings, HttpService, LambdaService
 from petbot.frontends.discord.slash import build_commands
@@ -162,4 +163,5 @@ def run(settings: DiscordSettings) -> None:
     # Discord turn is one trace edge->core. No-op unless OBS_ENABLED is set.
     configure_observability(ObservabilitySettings())
     logger.info("Starting PetBot Discord frontend (service=%s).", settings.service.kind)
+    probe_container_identity()
     PetBot(settings).run(settings.discord_token, log_handler=None)
