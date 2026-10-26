@@ -38,8 +38,6 @@ compute-core = [
     "petbot[observability]",
     "httpx>=0.28",
     "pydantic-settings>=2.14",
-    "numexpr>=2.14",
-    "numpy>=2.4",
     "pydantic-ai-slim[bedrock,openai]>=1.107,<2",
     "trafilatura>=2.0",
     # Keyless web-search fallback (metasearch over public result pages).
@@ -112,7 +110,7 @@ files = ["src", "tests"]
 exclude = ["tests/conftest\\.py$"]
 
 [[tool.mypy.overrides]]
-module = ["numexpr.*", "yt_dlp.*", "nacl.*", "boto3.*", "botocore.*", "requests.*", "conftest"]
+module = ["yt_dlp.*", "nacl.*", "boto3.*", "botocore.*", "requests.*", "conftest"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
