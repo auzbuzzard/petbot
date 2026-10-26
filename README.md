@@ -18,7 +18,7 @@ chain. The agent (pydantic-ai) decides when to call a tool:
 
 | Tool | What it does |
 | --- | --- |
-| `math` | Evaluate an arithmetic expression (`numexpr`). |
+| `math` | Evaluate an arithmetic expression. |
 | `derpi` | Search Derpibooru (comma-separated tags). |
 | `e621` | Search e621 (space-separated tags, `_` within a tag). |
 | `music` | Voice playback with a queue and skip-votes (its own service). |

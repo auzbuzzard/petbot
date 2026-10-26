@@ -33,7 +33,7 @@ call across modules.
 ## Install extras
 
 `pip install petbot[discord]` (discord.py, httpx), `petbot[compute-core]`
-(pydantic-ai, numexpr), `petbot[compute-music]` (yt-dlp, voice), `petbot[lambda]`
+(pydantic-ai), `petbot[compute-music]` (yt-dlp, voice), `petbot[lambda]`
 (boto3), `petbot[dev]` (everything + tooling). The module boundaries are enforced
 statically by `lint-imports`, not by packaging.
 
@@ -50,7 +50,7 @@ statically by `lint-imports`, not by packaging.
    `channel.is_nsfw()`).
 4. **`SkillContext` is pure serialisable data** — no live ports, no presentation flags. A
    voice-needing skill gets its port from an injected `VoiceProvider` compute-side.
-5. **Never block the event loop.** Offload `numexpr`/`yt-dlp`/sync work with
+5. **Never block the event loop.** Offload `yt-dlp`/sync work with
    `asyncio.to_thread`.
 6. **Logging is configured once, at each entrypoint.** Modules do
    `logger = logging.getLogger(__name__)` and never configure at import time;
