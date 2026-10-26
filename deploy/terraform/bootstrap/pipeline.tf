@@ -16,26 +16,8 @@ variable "bootstrap_plan_environment" {
 
 variable "retiring_users" {
   type        = list(string)
-  description = <<-EOT
-    IAM users made outside Terraform that this stack adopts (an import) and then deletes
-    (removing the resource; force_destroy takes their keys, credentials and policies), so
-    a hand-made identity is retired through the reviewed pipeline. Listed here first, so
-    the pipeline roles may read and manage them before the import is planned.
-  EOT
+  description = "IAM users this stack deletes; its pipeline roles keep permission to manage them until the apply that deletes them has run."
   default     = ["petbot-bedrock-key"]
-}
-
-resource "aws_iam_user" "retired" {
-  for_each = toset(var.retiring_users)
-
-  name          = each.key
-  force_destroy = true
-}
-
-import {
-  for_each = toset(var.retiring_users)
-  to       = aws_iam_user.retired[each.key]
-  id       = each.key
 }
 
 variable "bootstrap_apply_environment" {

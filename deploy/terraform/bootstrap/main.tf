@@ -69,18 +69,13 @@ variable "environments" {
     # Whether its workloads may call Bedrock's mantle endpoint with their own IAM identity
     # (the root stack's chat_llm_kind = "bedrock_mantle").
     bedrock_mantle = optional(bool, false)
-    # Parameters outside its prefix that its stack copies into its own (the root stack's
-    # var.ssm_parameters): its deploy role may read exactly these.
-    adopt_parameters = optional(list(string), [])
-    legacy           = optional(bool, false)
   }))
-  description = "Each deploy environment, by name: prod deploys from main; dev deploys any branch's core, with no edge; legacy is the pre-migration production stack."
+  description = "Each deploy environment, by name: prod deploys from main; dev deploys any branch's core, with no edge."
   default = {
     prod = {
       name_prefix        = "petbot-prod"
       github_environment = "production"
       bedrock_mantle     = true
-      adopt_parameters   = ["/petbot/edge/discord_token", "/petbot/core/tavily_api_key"]
     }
     dev = {
       name_prefix        = "petbot-dev"
@@ -89,18 +84,13 @@ variable "environments" {
       budget             = false
       bedrock_mantle     = true
     }
-    legacy = {
-      name_prefix        = "petbot"
-      github_environment = "production"
-      legacy             = true
-    }
   }
 
   validation {
     condition = alltrue(flatten([
       for a_name, a in var.environments : [
         for b_name, b in var.environments :
-        a_name == b_name || a.legacy || b.legacy || !startswith("${a.name_prefix}-", "${b.name_prefix}-")
+        a_name == b_name || !startswith("${a.name_prefix}-", "${b.name_prefix}-")
       ]
     ]))
     error_message = "No environment's name_prefix may contain another's (petbot-prod and petbot-dev, not petbot and petbot-dev): each deploy role and boundary covers its own stage only."
@@ -109,8 +99,8 @@ variable "environments" {
   validation {
     condition = alltrue([
       for e in values(var.environments) : !startswith("${e.name_prefix}-", "${var.name_prefix}-github-")
-    ]) && length([for e in values(var.environments) : e if e.legacy]) <= 1
-    error_message = "An environment's name_prefix must stay outside <name_prefix>-github-* (the CI roles), and at most one environment is legacy."
+    ])
+    error_message = "An environment's name_prefix must stay outside <name_prefix>-github-* (the CI roles)."
   }
 }
 
@@ -207,18 +197,18 @@ locals {
   # deploy role may edit (DenyAccessPrincipals) and bootstrap's pipeline manages.
   deploy_role_names = {
     for name, env in var.environments :
-    name => env.legacy ? "${var.name_prefix}-github-deploy" : "${var.name_prefix}-github-deploy-${name}"
+    name => "${var.name_prefix}-github-deploy-${name}"
   }
 
   # The resource names each environment's deploy role and workload boundary cover.
   env_name_patterns = {
     for name, env in var.environments :
-    name => env.legacy ? ["${env.name_prefix}-core*", "${env.name_prefix}-edge*"] : ["${env.name_prefix}-*"]
+    name => ["${env.name_prefix}-*"]
   }
 
   deploy_role_workflows = {
     for name, env in var.environments :
-    "deploy-${name}" => env.legacy ? "legacy.yml" : "deploy.yml"
+    "deploy-${name}" => "deploy.yml"
   }
 }
 
@@ -406,17 +396,6 @@ data "aws_iam_policy_document" "deploy_permissions" {
     sid       = "DescribeParameters"
     actions   = ["ssm:DescribeParameters"]
     resources = ["*"]
-  }
-
-  dynamic "statement" {
-    for_each = length(each.value.adopt_parameters) > 0 ? [1] : []
-    content {
-      sid     = "ReadAdoptedParameters"
-      actions = ["ssm:GetParameter", "ssm:GetParameters"]
-      resources = [
-        for name in each.value.adopt_parameters : "arn:aws:ssm:${local.arn_region}:parameter/${trimprefix(name, "/")}"
-      ]
-    }
   }
 
   # SecureString parameters are KMS-encrypted; reading and writing them needs kms:Decrypt
@@ -613,19 +592,4 @@ resource "aws_iam_role_policy" "github_deploy" {
 output "deploy_role_arns" {
   description = "Each environment's deploy role. deploy.yml derives each ARN from its role name (.github/scripts/deploy-role.sh), so nothing needs setting."
   value       = { for name, role in aws_iam_role.github_deploy : name => role.arn }
-}
-
-moved {
-  from = aws_iam_role.github_deploy
-  to   = aws_iam_role.github_deploy["legacy"]
-}
-
-moved {
-  from = aws_iam_role_policy.github_deploy
-  to   = aws_iam_role_policy.github_deploy["legacy"]
-}
-
-moved {
-  from = aws_iam_policy.workload_boundary
-  to   = aws_iam_policy.workload_boundary["legacy"]
 }
