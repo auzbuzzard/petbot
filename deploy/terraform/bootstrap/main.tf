@@ -613,12 +613,53 @@ data "aws_iam_policy_document" "deploy_permissions" {
     }
   }
 
+  # Lightsail's container reads have no resource type; its container services are told apart
+  # by their Stack tag (edge.tf), set on create and required on every change:
+  # https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonlightsail.html
   dynamic "statement" {
     for_each = each.value.edge ? [1] : []
     content {
-      sid       = "ManageEdgeContainerService"
-      actions   = ["lightsail:*"]
+      sid = "ReadContainerServices"
+      actions = [
+        "lightsail:GetContainerServices",
+        "lightsail:GetContainerServiceDeployments",
+        "lightsail:GetContainerLog",
+      ]
       resources = ["*"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = each.value.edge ? [1] : []
+    content {
+      sid       = "CreateEdgeContainerService"
+      actions   = ["lightsail:CreateContainerService"]
+      resources = ["*"]
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/Stack"
+        values   = [each.value.name_prefix]
+      }
+    }
+  }
+
+  dynamic "statement" {
+    for_each = each.value.edge ? [1] : []
+    content {
+      sid = "ManageEdgeContainerService"
+      actions = [
+        "lightsail:UpdateContainerService",
+        "lightsail:DeleteContainerService",
+        "lightsail:CreateContainerServiceDeployment",
+        "lightsail:TagResource",
+        "lightsail:UntagResource",
+      ]
+      resources = ["arn:aws:lightsail:${local.arn_region}:ContainerService/*"]
+      condition {
+        test     = "StringEquals"
+        variable = "aws:ResourceTag/Stack"
+        values   = [each.value.name_prefix]
+      }
     }
   }
 

@@ -86,7 +86,8 @@ boundary, and no stage's prefix may contain another's:
 
 **A deploy role** is scoped by naming convention: it may manage resources named
 `<name_prefix>-*` of its environment (ECR repos, the Lambda and its log group,
-DynamoDB tables, plus Lightsail where the stack runs the edge), its own state, its own
+DynamoDB tables, plus, where the stack runs the edge, the Lightsail container service
+tagged `Stack = <name_prefix>`), its own state, its own
 SSM parameters (`/<name_prefix>/*`) and its own budget (`<name_prefix>-monthly`, where
 it sets one). It may create, and grant permissions to, only the IAM principals the
 stack defines, by exact name: the core's role (`<name_prefix>-core-role`) and, where the

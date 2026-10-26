@@ -237,6 +237,31 @@ run "the_operator_reads_only_stack_query_results_and_budgets" {
   }
 }
 
+run "the_edge_role_changes_only_its_own_tagged_container_service" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      !strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["prod"].statement), "lightsail:*"),
+      join(" ", flatten([
+        for s in data.aws_iam_policy_document.deploy_permissions["prod"].statement : [
+          for c in s.condition : "${c.test} ${c.variable} ${join(",", c.values)}"
+        ] if s.sid == "ManageEdgeContainerService"
+      ])) == "StringEquals aws:ResourceTag/Stack petbot-prod",
+      join(" ", flatten([
+        for s in data.aws_iam_policy_document.deploy_permissions["prod"].statement : [
+          for c in s.condition : "${c.test} ${c.variable} ${join(",", c.values)}"
+        ] if s.sid == "CreateEdgeContainerService"
+      ])) == "StringEquals aws:RequestTag/Stack petbot-prod",
+      length([
+        for s in data.aws_iam_policy_document.deploy_permissions["prod"].statement : s.sid
+        if anytrue([for a in s.actions : startswith(a, "lightsail:")]) && contains(s.resources, "*") && length(s.condition) == 0 && s.sid != "ReadContainerServices"
+      ]) == 0,
+    ])
+    error_message = "The deploy role creates and changes only container services tagged with its stack."
+  }
+}
+
 run "the_operator_cannot_read_container_environments" {
   command = plan
 
