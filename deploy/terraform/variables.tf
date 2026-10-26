@@ -185,18 +185,6 @@ variable "existing_ssm_parameters" {
   default     = []
 }
 
-variable "retired" {
-  type        = bool
-  description = "This stack is to be destroyed: its pipeline destroys it, deletes retired_parameters and its state."
-  default     = false
-}
-
-variable "retired_parameters" {
-  type        = list(string)
-  description = "Parameters under /<name_prefix>/ made outside Terraform, deleted after a retired stack is destroyed."
-  default     = []
-}
-
 variable "log_retention_days" {
   type        = number
   description = "CloudWatch Logs retention for the function (a valid CloudWatch value, e.g. 7/14/30/90)."

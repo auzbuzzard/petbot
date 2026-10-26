@@ -24,7 +24,6 @@ done
 for file in stages/*.tfvars; do
   stage=$(basename "$file" .tfvars)
   prefix="petbot-$stage"
-  if [ "$stage" = legacy ]; then prefix=petbot; fi
   echo "--- $file (name_prefix $prefix)"
   terraform test -no-color -test-directory=tests/stages -var-file="$file" -var="name_prefix=$prefix"
 done

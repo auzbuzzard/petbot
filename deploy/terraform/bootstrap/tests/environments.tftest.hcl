@@ -45,11 +45,6 @@ override_resource {
 }
 
 override_resource {
-  target = aws_iam_user.retired
-  values = { arn = "arn:aws:iam::123456789012:user/petbot-bedrock-key" }
-}
-
-override_resource {
   target          = aws_iam_policy.workload_boundary
   override_during = plan
   values          = { arn = "arn:aws:iam::123456789012:policy/BOUNDARY" }
@@ -62,12 +57,10 @@ run "each_stage_gets_its_own_role_and_boundary" {
     condition = alltrue([
       aws_iam_role.github_deploy["prod"].name == "petbot-github-deploy-prod",
       aws_iam_role.github_deploy["dev"].name == "petbot-github-deploy-dev",
-      aws_iam_role.github_deploy["legacy"].name == "petbot-github-deploy",
       aws_iam_policy.workload_boundary["prod"].name == "petbot-prod-workload-boundary",
       aws_iam_policy.workload_boundary["dev"].name == "petbot-dev-workload-boundary",
-      aws_iam_policy.workload_boundary["legacy"].name == "petbot-workload-boundary",
     ])
-    error_message = "Each stage's role and boundary are named after it; legacy keeps its names."
+    error_message = "Each stage's role and boundary are named after it."
   }
 
   assert {
@@ -83,18 +76,14 @@ run "each_stage_gets_its_own_role_and_boundary" {
 
   assert {
     condition = alltrue([
-      strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["prod"].statement), "parameter/petbot/edge/discord_token"),
+      strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["prod"].statement), "function:petbot-prod-*"),
+      !strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["prod"].statement), "parameter/petbot/"),
       !strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["dev"].statement), "parameter/petbot/"),
       !strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["dev"].statement), "petbot-prod"),
       !strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["prod"].statement), "petbot-dev"),
       !strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["dev"].statement), "lightsail"),
     ])
-    error_message = "Prod may read only the legacy token it adopts; neither stage's deploy role reaches the other."
-  }
-
-  assert {
-    condition     = strcontains(jsonencode(data.aws_iam_policy_document.bootstrap_apply.statement), "user/petbot-bedrock-key")
-    error_message = "Bootstrap's pipeline may manage the user it retires."
+    error_message = "Each stage's deploy role covers its own prefix and never reaches the other's."
   }
 }
 
@@ -111,37 +100,6 @@ run "a_prefix_containing_another_is_rejected" {
   expect_failures = [var.environments]
 }
 
-run "legacy_may_contain_the_stages" {
-  command = plan
-
-  variables {
-    environments = {
-      prod   = { name_prefix = "petbot-prod", github_environment = "production" }
-      legacy = { name_prefix = "petbot", github_environment = "production", legacy = true }
-    }
-  }
-}
-
-run "legacy_covers_only_its_own_resources" {
-  command = plan
-
-  assert {
-    condition = alltrue([
-      strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["legacy"].statement), "function:petbot-core*"),
-      strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["legacy"].statement), "repository/petbot-edge*"),
-      !strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["legacy"].statement), "function:petbot-*\""),
-      !strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["legacy"].statement), "role/petbot-*\""),
-      !strcontains(aws_iam_policy.workload_boundary["legacy"].policy, "function:petbot-*\""),
-    ])
-    error_message = "The legacy role and boundary must not cover petbot-* (which holds petbot-prod-* and petbot-dev-*)."
-  }
-
-  assert {
-    condition     = strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["prod"].statement), "function:petbot-prod-*")
-    error_message = "A stage's role covers its own prefix."
-  }
-}
-
 run "deploy_roles_are_pinned_to_their_workflow" {
   command = plan
 
@@ -149,20 +107,10 @@ run "deploy_roles_are_pinned_to_their_workflow" {
     condition = alltrue([
       strcontains(jsonencode(data.aws_iam_policy_document.github_trust["deploy-dev"].statement), "auzbuzzard/petbot/.github/workflows/deploy.yml@*"),
       strcontains(jsonencode(data.aws_iam_policy_document.github_trust["deploy-prod"].statement), "auzbuzzard/petbot/.github/workflows/deploy.yml@*"),
-      strcontains(jsonencode(data.aws_iam_policy_document.github_trust["deploy-legacy"].statement), "auzbuzzard/petbot/.github/workflows/legacy.yml@*"),
       strcontains(jsonencode(data.aws_iam_policy_document.github_trust["deploy-dev"].statement), "StringLikeIfExists"),
       !strcontains(jsonencode(data.aws_iam_policy_document.github_trust["bootstrap-apply"].statement), "job_workflow_ref"),
     ])
     error_message = "Each deploy role trusts only its workflow file; the bootstrap pipeline roles are unchanged."
-  }
-}
-
-run "the_hand_made_user_is_adopted_for_deletion" {
-  command = plan
-
-  assert {
-    condition     = aws_iam_user.retired["petbot-bedrock-key"].force_destroy
-    error_message = "A retiring user is adopted with force_destroy, so removing it deletes its keys and credentials too."
   }
 }
 
@@ -171,7 +119,7 @@ run "a_stack_with_an_edge_may_delete_its_edge_user" {
 
   assert {
     condition = alltrue([
-      for env in ["prod", "legacy"] :
+      for env in ["prod"] :
       strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions[env].statement), "iam:ListGroupsForUser")
     ])
     error_message = "Deleting the edge's IAM user needs iam:ListGroupsForUser: the provider removes its group memberships first."

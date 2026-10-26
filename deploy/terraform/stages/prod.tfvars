@@ -13,6 +13,6 @@ edge_enabled = true
 tavily_api_key_ssm_parameter = "/petbot-prod/core/tavily_api_key"
 
 ssm_parameters = {
-  "/petbot-prod/edge/discord_token"  = "/petbot/edge/discord_token"
-  "/petbot-prod/core/tavily_api_key" = "/petbot/core/tavily_api_key"
+  "/petbot-prod/edge/discord_token"  = ""
+  "/petbot-prod/core/tavily_api_key" = ""
 }

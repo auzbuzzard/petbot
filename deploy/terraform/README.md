@@ -157,7 +157,7 @@ The credentials step also masks the account ID wherever it appears after it (ARN
 registry URLs, Terraform output).
 
 **Stage settings are code.** Everything else a deploy needs is in
-`stages/<stage>.tfvars` (`prod`, `dev`, and `legacy` until the old stack is gone),
+`stages/<stage>.tfvars` (`prod`, `dev`),
 which `deploy.yml` hands to every Terraform command: the model and endpoint, whether the
 edge runs, the parameters the stage owns. Changing a setting is a pull request.
 
@@ -171,7 +171,7 @@ endpoint**, reached two ways: `chat_llm_kind = "bedrock_mantle"` signs each requ
 the function's own role (SigV4; the role gets `bedrock-mantle:CreateInference` and no
 key exists), and `chat_llm_kind = "openai_compatible"` sends a **Bedrock API key** from
 SSM. `bedrock_mantle` also needs the stage's workload boundary to allow mantle
-(`bedrock_mantle = true` in `var.environments`; both stages have it, `legacy` not). The
+(`bedrock_mantle = true` in `var.environments`; both stages have it). The
 `openai_compatible` kind also points at a self-hosted Ollama/vLLM later — just a
 different base URL.
 
@@ -242,24 +242,6 @@ log group, `/aws/lambda/petbot-dev-core`.
 
 Dev is one slot: each run replaces what the last one deployed, and runs take turns
 (`concurrency`).
-
-## Migrating production to petbot-prod
-
-4. **Remove `legacy`.** One pull request: delete the `legacy` entry and its three
-   `moved` blocks from `bootstrap/main.tf`, the `adopt_parameters` of `prod`, the
-   `retiring_users` default and the `aws_iam_user.retired` block (with its import);
-   delete `stages/legacy.tfvars`, `.github/workflows/legacy.yml` and the root `moved.tf`;
-   set both sources in `stages/prod.tfvars`'s `ssm_parameters` to `""`. That only tidies
-   the file: each copy already reads its own value once it exists (`deploy.yml` lists the
-   existing ones before planning), which is why step 3 deleting the sources can't break a
-   production deploy.
-   Bootstrap's plan deletes `petbot-github-deploy`, its policy, `petbot-workload-boundary`
-   (no longer attached) and the `petbot-bedrock-key` user, with its policies and its
-   service-specific credential (`force_destroy`).
-
-What stays outside this code: GitHub's own settings (see *GitHub settings*). After step 4,
-the `production` secret `DEPLOY_ROLE_ARN` names a deleted role; the pipelines read only
-its account ID, so it keeps working.
 
 ## Deploy (manual / break-glass)
 
