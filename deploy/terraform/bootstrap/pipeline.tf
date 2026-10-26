@@ -123,6 +123,16 @@ data "aws_iam_policy_document" "bootstrap_apply" {
     resources = local.bootstrap_iam_arns
   }
 
+  # Deleting a force_destroy user lists the account's virtual MFA devices first.
+  dynamic "statement" {
+    for_each = length(var.retiring_users) > 0 ? [1] : []
+    content {
+      sid       = "ListMfaForRetiringUsers"
+      actions   = ["iam:ListVirtualMFADevices"]
+      resources = ["arn:aws:iam::${local.account_id}:mfa/*"]
+    }
+  }
+
   statement {
     sid    = "NoOperatorCredentials"
     effect = "Deny"
