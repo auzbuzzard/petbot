@@ -27,16 +27,19 @@ targets=(
 
 retired=$(echo 'var.retired' | terraform console)
 
-# The function is pinned to an image digest that its plan reads back, so the plan uses the
-# newest tag in the stack's registry, which is what it runs.
-tag=$(aws ecr describe-images --repository-name petbot-core \
-  --query 'sort_by(imageDetails, &imagePushedAt)[-1].imageTags[0]' --output text)
-export TF_VAR_image_tag="$tag" TF_VAR_edge_image_tag="$tag"
-
 args=(-input=false -lock-timeout=120s -out=legacy.tfplan)
 if [ "$retired" = true ]; then
-  args+=(-destroy)
+  # Destroy what the state holds, as it stands: no refresh, so no data source is read, and
+  # a destroy resumed after a partial one (its registry already gone) still plans. A
+  # destroy needs no image, so none is looked up.
+  export TF_VAR_image_tag=retired TF_VAR_edge_image_tag=retired
+  args+=(-destroy -refresh=false)
 else
+  # The function is pinned to an image digest that its plan reads back, so the plan uses
+  # the newest tag in the stack's registry, which is what it runs.
+  tag=$(aws ecr describe-images --repository-name petbot-core \
+    --query 'sort_by(imageDetails, &imagePushedAt)[-1].imageTags[0]' --output text)
+  export TF_VAR_image_tag="$tag" TF_VAR_edge_image_tag="$tag"
   for target in "${targets[@]}"; do
     args+=("-target=$target")
   done
