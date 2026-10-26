@@ -8,4 +8,7 @@ chat_llm_model    = "google.gemma-4-31b"
 chat_llm_base_url = "https://bedrock-mantle.us-east-1.api.aws/openai/v1"
 chat_thinking     = "high"
 
+# Each result carries its tool calls, which deploy.yml's test job grades (tests/regression).
+report_trajectory = true
+
 edge_enabled = false

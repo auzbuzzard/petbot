@@ -18,7 +18,7 @@ chain. The agent (pydantic-ai) decides when to call a tool:
 
 | Tool | What it does |
 | --- | --- |
-| `math` | Evaluate an arithmetic expression (`numexpr`). |
+| `math` | Evaluate an arithmetic expression. |
 | `derpi` | Search Derpibooru (comma-separated tags). |
 | `e621` | Search e621 (space-separated tags, `_` within a tag). |
 | `music` | Voice playback with a queue and skip-votes (its own service). |
@@ -72,8 +72,11 @@ python -m petbot.services.core.chat conversations/leetcode-daily.json -v
 python -m petbot.services.core.chat --say "what's today's leetcode daily?"
 ```
 
-Every pull request from this repository is also deployed to the dev core and tested live
-there (`tests/live`), as the pull request's check ([ADR 0014](docs/adr/0014-dev-core-environment.md)).
+Every pull request from this repository is also deployed to the dev core, where a regression
+suite (`tests/regression`) checks which tool the agent calls, with which arguments, for each
+of a set of golden cases, as the pull request's check
+([ADR 0014](docs/adr/0014-dev-core-environment.md),
+[docs/contributing.md](docs/contributing.md#the-regression-suite)).
 
 ### Configuration
 
@@ -97,7 +100,7 @@ uv run lint-imports                                   # package boundaries
 uv run pytest                                         # tests (fully offline)
 ```
 
-CI runs all of the above on every push and pull request. It needs **no
+CI runs all of the above on every pull request and every push to `main`. It needs **no
 secrets** — every test is offline (mocked APIs, pydantic-ai `TestModel`, no
 Discord login).
 

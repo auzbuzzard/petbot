@@ -47,6 +47,7 @@ from petbot.process.context import (
 from petbot.process.history import drop_leading_assistant, to_model_messages
 from petbot.process.model import build_model
 from petbot.process.settings import ChatSettings
+from petbot.process.trajectory import trajectory
 from petbot.process.voice import PassthroughStyle
 
 logger = logging.getLogger(__name__)
@@ -135,8 +136,10 @@ class ChatProcess(Process):
         instrumentation: InstrumentationSettings | None = None,
         id_salt: str = "",
         clock: Callable[[], datetime] = _utc_now,
+        report_trajectory: bool = False,
     ) -> None:
         self._registry = registry
+        self._report_trajectory = report_trajectory
         self._settings = settings or ChatSettings()
         self._model = model
         self._style: StylePort = style or PassthroughStyle()
@@ -190,7 +193,10 @@ class ChatProcess(Process):
             embed=card.embed if card is not None else None,
             files=files,
         )
-        return await self._style.stylize(out, ctx)
+        styled = await self._style.stylize(out, ctx)
+        if not self._report_trajectory:
+            return styled
+        return styled.model_copy(update={"trajectory": trajectory(result.new_messages())})
 
     def _log_outcome(
         self, result: AgentRunResult[str], ctx: SkillContext, *, recalled: bool
