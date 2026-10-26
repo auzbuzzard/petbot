@@ -602,6 +602,8 @@ data "aws_iam_policy_document" "deploy_permissions" {
         "iam:GetUserPolicy",
         "iam:ListUserPolicies",
         "iam:ListAttachedUserPolicies",
+        # Deleting a user: the provider lists its groups to remove it from them first.
+        "iam:ListGroupsForUser",
       ]
       resources = [for p in local.env_name_patterns[each.key] : "arn:aws:iam::${local.account_id}:user/${p}"]
     }
