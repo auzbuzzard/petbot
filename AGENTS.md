@@ -105,7 +105,7 @@ python -m petbot.frontends.discord               # the Discord frontend (talks t
 python -m petbot.services.core.chat conversations/leetcode-daily.json -v
 python -m petbot.services.core.chat --say "what's today's leetcode daily?"
 # On AWS: every pull request from this repository deploys to the dev core and runs
-# tests/live there as its check (deploy.yml's test job); no local AWS call.
+# tests/regression there as its check (deploy.yml's test job); no local AWS call.
 ```
 
 The chat harness sends each message of a scripted conversation (`conversations/`) through
@@ -113,12 +113,16 @@ The chat harness sends each message of a scripted conversation (`conversations/`
 environment (`CHAT_LLM__*`, `TAVILY_API_KEY`; see `.env.example`), production's turn budget
 and reply-chain history. It prints each reply as Discord would post it, after the agent's
 tool calls (`-v`: and what each returned to the model). Run it on any prompt, persona or
-tool change before it merges; add a conversation file for a case worth keeping.
-`--lambda <function>` sends the same conversation to a deployed core instead (the dev
-core, `petbot-dev-core`, runs any branch: [ADR 0014](docs/adr/0014-dev-core-environment.md)),
-for what only the deployed function shows: its network, IAM and packaging. CI does this for
-every pull request: `deploy.yml` deploys it to `petbot-dev-core` and runs `tests/live` (each
-skill through the slash path, each `conversations/` file through chat) as the pull
-request's check. Add a conversation file or a skill case there for a case worth keeping.
+tool change before it merges. `--lambda <function>` sends the same conversation to a
+deployed core instead (the dev core, `petbot-dev-core`, runs any branch:
+[ADR 0014](docs/adr/0014-dev-core-environment.md)), for what only the deployed function
+shows: its network, IAM and packaging. The harness is for people; CI doesn't run it.
+
+CI's check on the deployed code is the regression suite (`tests/regression`): `deploy.yml`
+deploys every pull request to `petbot-dev-core`, which reports each answer's tool calls
+(`CORE_REPORT_TRAJECTORY`, set by `stages/dev.tfvars` only), and the suite asserts which
+tool each golden case calls with which arguments, never the reply's wording. Add a case to
+`tests/regression/cases.toml` for each agent failure worth keeping fixed
+([docs/contributing.md](docs/contributing.md#the-regression-suite)).
 
 CI runs lint/format/mypy/lint-imports/pytest and needs **no secrets**.

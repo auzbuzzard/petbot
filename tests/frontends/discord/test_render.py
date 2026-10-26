@@ -13,6 +13,7 @@ from petbot.domain import (
     Recalled,
     SkillContext,
     SkillResult,
+    ToolCall,
 )
 from petbot.frontends.discord.bot import PetBot
 from petbot.frontends.discord.context import build_context, build_interaction_context
@@ -106,6 +107,13 @@ async def test_respond_sends_text_only() -> None:
     channel = FakeChannel()
     await respond(channel, SkillResult.message("nope"))  # type: ignore[arg-type]
     assert channel.sent == [{"content": "nope", "embed": None}]
+
+
+async def test_respond_never_posts_a_reported_trajectory() -> None:
+    channel = FakeChannel()
+    call = ToolCall(tool="math", args={"expression": "6*7"}, outcome="returned", output="42")
+    await respond(channel, SkillResult(text="42!", trajectory=(call,)))  # type: ignore[arg-type]
+    assert channel.sent == [{"content": "42!", "embed": None}]
 
 
 async def test_respond_sends_text_then_embed_on_first_chunk() -> None:

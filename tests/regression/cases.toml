@@ -1,0 +1,103 @@
+# The regression suite's golden cases (see docs/contributing.md). Each case is graded on
+# the tool calls the deployed core reports for it, never on the reply's wording.
+#
+#   say            a chat message, sent as an @mention; or
+#   command/values a slash command and its option values.
+#   nsfw           whether the channel is age-gated (default false).
+#   expect.tool    a call to this tool must be among the turn's calls, and one such call
+#                  must meet every check below.
+#   expect.args    per argument: equals (exact), iequals (same string ignoring case),
+#                  contains (every substring, ignoring case), contains_any (at least one).
+#   expect.output_contains
+#                  substrings of the tool's own output: only for output computed in the
+#                  core (math), never a third party's answer, which may change or fail.
+#
+# Every case also needs a non-empty reply that isn't the frontend's fallback. Add a case
+# for each failure worth keeping fixed, with `why` saying where it came from.
+
+# --- Chat: the agent picks the tool and its arguments.
+
+[[case]]
+id = "chat-leetcode-random"
+why = "A request for a random problem once called leetcode without mode."
+say = "give me a random leetcode problem"
+expect = { tool = "leetcode", args = { mode = { iequals = "random" } } }
+
+[[case]]
+id = "chat-leetcode-random-easy"
+why = "A difficulty named in a random-problem request is passed to leetcode."
+say = "give me a random easy leetcode problem"
+expect = { tool = "leetcode", args = { mode = { iequals = "random" }, difficulty = { iequals = "easy" } } }
+
+[[case]]
+id = "chat-leetcode-daily"
+why = "Today's daily problem is mode=daily."
+say = "what's today's leetcode daily?"
+expect = { tool = "leetcode", args = { mode = { iequals = "daily" } } }
+
+[[case]]
+id = "chat-leetcode-daily-if-easy"
+why = "The first message of conversations/leetcode-daily.json; the agent prompt says this is answered by checking the daily first."
+say = "give us a random easy LeetCode problem for today. Is today's daily an easy? If it is, pick that; if not, pick another easy one"
+expect = { tool = "leetcode", args = { mode = { iequals = "daily" } } }
+
+[[case]]
+id = "chat-math"
+why = "Arithmetic goes to the math tool, whose result is exact."
+say = "what is 1234 * 5678?"
+expect = { tool = "math", args = { expression = { contains = ["1234", "5678"] } }, output_contains = ["7006652"] }
+
+[[case]]
+id = "chat-weather"
+why = "A weather question calls weather with the place named."
+say = "what's the weather like in Paris right now?"
+expect = { tool = "weather", args = { location = { contains = ["paris"] } } }
+
+[[case]]
+id = "chat-web-search"
+why = "A search request calls web_search with a query about the subject, whatever the search returns (dev has no Tavily key)."
+say = "search the web for the latest stable release of Python"
+expect = { tool = "web_search", args = { query = { contains = ["python"] } } }
+
+[[case]]
+id = "chat-derpi-safe"
+why = "A safe image request in a channel that isn't age-gated calls the booru tool."
+say = "show me a picture of a pony from derpibooru"
+expect = { tool = "derpi", args = { tags = { contains = ["pony"] } } }
+
+# --- Slash: the command names its tool; the call must complete and be answered.
+
+[[case]]
+id = "slash-math"
+why = "/math answers with the exact result."
+command = "math"
+values = { expression = "6 * 7" }
+expect = { tool = "math", output_contains = ["42"] }
+
+[[case]]
+id = "slash-leetcode-daily"
+why = "/leetcode daily completes."
+command = "leetcode"
+values = { mode = "daily" }
+expect = { tool = "leetcode" }
+
+[[case]]
+id = "slash-leetcode-random-easy"
+why = "/leetcode random with a difficulty completes."
+command = "leetcode"
+values = { mode = "random", difficulty = "easy" }
+expect = { tool = "leetcode" }
+
+[[case]]
+id = "slash-derpi"
+why = "/derpi completes."
+command = "derpi"
+values = { tags = "pony" }
+expect = { tool = "derpi" }
+
+[[case]]
+id = "slash-e621"
+why = "/e621 completes."
+command = "e621"
+values = { tags = "fox" }
+expect = { tool = "e621" }

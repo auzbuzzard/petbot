@@ -74,6 +74,11 @@ run "production_runs_the_edge_on_a_keyed_model" {
     condition     = local.edge_secret_parameters.DISCORD_TOKEN == "/petbot-prod/edge/discord_token"
     error_message = "The edge reads its Discord token from under its own prefix."
   }
+
+  assert {
+    condition     = !contains(keys(aws_lambda_function.this.environment[0].variables), "CORE_REPORT_TRAJECTORY")
+    error_message = "Production reports no trajectory."
+  }
 }
 
 run "a_dev_core_runs_alone_with_no_key" {
@@ -119,6 +124,35 @@ run "a_dev_core_runs_alone_with_no_key" {
     condition     = aws_lambda_function.this.environment[0].variables.CHAT_LLM__KIND == "bedrock_mantle"
     error_message = "The dev core signs its model calls."
   }
+}
+
+run "a_dev_core_can_report_its_trajectory" {
+  command = plan
+
+  variables {
+    name_prefix        = "petbot-dev"
+    lambda_environment = "dev"
+    chat_llm_kind      = "bedrock_mantle"
+    edge_enabled       = false
+    report_trajectory  = true
+  }
+
+  assert {
+    condition     = aws_lambda_function.this.environment[0].variables.CORE_REPORT_TRAJECTORY == "true"
+    error_message = "report_trajectory sets CORE_REPORT_TRAJECTORY in the worker."
+  }
+}
+
+run "production_never_reports_a_trajectory" {
+  command = plan
+
+  variables {
+    chat_llm_kind     = "bedrock_mantle"
+    edge_enabled      = false
+    report_trajectory = true
+  }
+
+  expect_failures = [var.report_trajectory]
 }
 
 run "mantle_needs_its_endpoint" {

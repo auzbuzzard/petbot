@@ -72,8 +72,11 @@ python -m petbot.services.core.chat conversations/leetcode-daily.json -v
 python -m petbot.services.core.chat --say "what's today's leetcode daily?"
 ```
 
-Every pull request from this repository is also deployed to the dev core and tested live
-there (`tests/live`), as the pull request's check ([ADR 0014](docs/adr/0014-dev-core-environment.md)).
+Every pull request from this repository is also deployed to the dev core, where a regression
+suite (`tests/regression`) checks which tool the agent calls, with which arguments, for each
+of a set of golden cases, as the pull request's check
+([ADR 0014](docs/adr/0014-dev-core-environment.md),
+[docs/contributing.md](docs/contributing.md#the-regression-suite)).
 
 ### Configuration
 
