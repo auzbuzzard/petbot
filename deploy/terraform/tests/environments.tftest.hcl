@@ -74,6 +74,19 @@ run "production_runs_the_edge_on_a_keyed_model" {
     condition     = local.edge_secret_parameters.DISCORD_TOKEN == "/petbot-prod/edge/discord_token"
     error_message = "The edge reads its Discord token from under its own prefix."
   }
+
+  assert {
+    condition = alltrue([
+      aws_iam_role.lambda.name == "petbot-prod-core-role",
+      aws_iam_user.edge[0].name == "petbot-prod-edge",
+    ])
+    error_message = "The stack's IAM principals keep the exact names its deploy role may create (bootstrap's stack_role_names and stack_user_names)."
+  }
+
+  assert {
+    condition     = aws_lightsail_container_service.edge[0].tags.Stack == "petbot-prod"
+    error_message = "The edge's container service is tagged with its stack."
+  }
 }
 
 run "a_dev_core_runs_alone_with_no_key" {
@@ -101,8 +114,8 @@ run "a_dev_core_runs_alone_with_no_key" {
   }
 
   assert {
-    condition     = aws_lambda_function.this.function_name == "petbot-dev-core"
-    error_message = "The dev core is named after its prefix."
+    condition     = aws_lambda_function.this.function_name == "petbot-dev-core" && aws_iam_role.lambda.name == "petbot-dev-core-role"
+    error_message = "The dev core and its role are named after its prefix."
   }
 
   assert {

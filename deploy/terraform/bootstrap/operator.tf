@@ -60,6 +60,7 @@ data "aws_iam_policy_document" "operator_permissions" {
       "logs:DescribeLogStreams",
       "logs:StartQuery",
       "logs:StopQuery",
+      "logs:GetQueryResults",
     ]
     # The stack's Lambda log groups (the trailing wildcard also covers their streams), and
     # aws/spans, where X-Ray Transaction Search writes traces (observability.tf).
@@ -76,10 +77,8 @@ data "aws_iam_policy_document" "operator_permissions" {
     sid = "ListResources"
     actions = [
       "logs:DescribeLogGroups",
-      "logs:GetQueryResults",
       "lambda:ListFunctions",
       "dynamodb:ListTables",
-      "ecr:DescribeRepositories",
     ]
     resources = ["*"]
   }
@@ -169,9 +168,14 @@ data "aws_iam_policy_document" "operator_permissions" {
       "xray:GetTraceGraph",
       "cloudtrail:LookupEvents",
       "iam:SimulateCustomPolicy",
-      "budgets:ViewBudget",
     ]
     resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadStackBudgets"
+    actions   = ["budgets:ViewBudget"]
+    resources = [for stack in local.stacks : "arn:aws:budgets::${local.account_id}:budget/${stack}"]
   }
 }
 
