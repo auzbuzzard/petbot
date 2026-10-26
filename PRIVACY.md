@@ -62,9 +62,9 @@ you asked for, and is not retained.
 Telemetry is sent to **Amazon Web Services** (AWS X-Ray for traces, Amazon CloudWatch for
 metrics and logs) in the controller's own AWS account, region **[AWS REGION]**. Model
 inference is performed by **[MODEL PROVIDER]** to generate replies. To answer a request
-that needs them, search queries go to **Tavily** (web search; with **DuckDuckGo** or
-**Startpage** as fallbacks), place names to **Open-Meteo** (weather), and a requested URL to
-the website it names. We use no other sub-processors and do not sell or share data for
+that needs them, search queries go to **Tavily** (web search; with **DuckDuckGo**,
+**Startpage**, **Brave Search** or **Mojeek** as fallbacks), place names to **Open-Meteo**
+(weather), and a requested URL to the website it names. We use no other sub-processors and do not sell or share data for
 advertising.
 
 ## Retention
