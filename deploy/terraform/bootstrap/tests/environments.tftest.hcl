@@ -105,12 +105,19 @@ run "deploy_roles_are_pinned_to_their_workflow" {
 
   assert {
     condition = alltrue([
-      strcontains(jsonencode(data.aws_iam_policy_document.github_trust["deploy-dev"].statement), "auzbuzzard/petbot/.github/workflows/deploy.yml@*"),
-      strcontains(jsonencode(data.aws_iam_policy_document.github_trust["deploy-prod"].statement), "auzbuzzard/petbot/.github/workflows/deploy.yml@*"),
-      strcontains(jsonencode(data.aws_iam_policy_document.github_trust["deploy-dev"].statement), "StringLikeIfExists"),
-      !strcontains(jsonencode(data.aws_iam_policy_document.github_trust["bootstrap-apply"].statement), "job_workflow_ref"),
+      for role in ["deploy-prod", "deploy-dev"] :
+      toset(flatten([
+        for s in data.aws_iam_policy_document.github_trust[role].statement : [
+          for c in s.condition : "${c.test} ${c.variable} ${join(",", c.values)}"
+        ]
+        ])) == toset([
+        "StringEquals token.actions.githubusercontent.com:aud sts.amazonaws.com",
+        "StringEquals token.actions.githubusercontent.com:sub repo:auzbuzzard/petbot:environment:${role == "deploy-prod" ? "production" : "dev"}",
+        "StringLike token.actions.githubusercontent.com:job_workflow_ref auzbuzzard/petbot/.github/workflows/deploy.yml@*",
+        "StringEquals token.actions.githubusercontent.com:repository_id 129497244",
+      ])
     ])
-    error_message = "Each deploy role trusts only its workflow file; the bootstrap pipeline roles are unchanged."
+    error_message = "Each deploy role trusts only its environment, its workflow file and the repository by ID, and the workflow claim must be present."
   }
 }
 

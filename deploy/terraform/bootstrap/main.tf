@@ -49,6 +49,12 @@ variable "github_repo" {
   default     = "auzbuzzard/petbot"
 }
 
+variable "github_repository_id" {
+  type        = string
+  description = "GitHub's immutable ID of github_repo (the OIDC token's repository_id claim)."
+  default     = "129497244"
+}
+
 variable "name_prefix" {
   type        = string
   description = "Prefix of the root of trust: the CI roles (<name_prefix>-github-*) and the operator's role and policies."
@@ -249,9 +255,20 @@ data "aws_iam_policy_document" "github_trust" {
     dynamic "condition" {
       for_each = contains(keys(local.deploy_role_workflows), each.key) ? [local.deploy_role_workflows[each.key]] : []
       content {
-        test     = "StringLikeIfExists"
+        test     = "StringLike"
         variable = "token.actions.githubusercontent.com:job_workflow_ref"
         values   = ["${var.github_repo}/.github/workflows/${condition.value}@*"]
+      }
+    }
+
+    # The repository's name can be reused after a rename; its ID can't:
+    # https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_iam-condition-keys.html#condition-keys-wif
+    dynamic "condition" {
+      for_each = contains(keys(local.deploy_role_workflows), each.key) ? [1] : []
+      content {
+        test     = "StringEquals"
+        variable = "token.actions.githubusercontent.com:repository_id"
+        values   = [var.github_repository_id]
       }
     }
   }
