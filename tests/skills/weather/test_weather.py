@@ -7,7 +7,7 @@ import pytest
 import respx
 
 from petbot.domain import EmptyResult, Platform, SkillContext, UpstreamUnavailable, User
-from petbot.skills.weather.skill import FORECAST_URL, GEOCODE_URL, WeatherSkill
+from petbot.skills.weather.skill import _WMO, FORECAST_URL, GEOCODE_URL, WeatherSkill, _describe
 from petbot.types import WeatherArgs
 
 
@@ -116,3 +116,31 @@ def test_pick_never_matches_a_qualifier_by_substring() -> None:
     paris_tx = _PLACES[0]
     assert _pick([paris_fr, paris_tx], "TX") is paris_tx
     assert _pick([paris_fr, paris_tx], "Nowhere") is paris_fr
+
+
+# The codes in Open-Meteo's "WMO Weather interpretation codes (WW)" table,
+# https://open-meteo.com/en/docs
+_DOCUMENTED_CODES = {0, 1, 2, 3, 45, 48, 51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77}
+_DOCUMENTED_CODES |= {80, 81, 82, 85, 86, 95, 96, 97, 99}
+
+
+def test_every_documented_weather_code_is_described() -> None:
+    assert set(_WMO) == _DOCUMENTED_CODES
+
+
+@pytest.mark.parametrize(
+    ("code", "description"),
+    [
+        (57, "dense freezing drizzle"),
+        (67, "heavy freezing rain"),
+        (80, "light rain showers"),
+        (82, "violent rain showers"),
+        (86, "heavy snow showers"),
+        (97, "heavy thunderstorm"),
+        (99, "thunderstorm with heavy hail"),
+        (98, "unknown conditions"),
+        ("97", "unknown conditions"),
+    ],
+)
+def test_weather_code_descriptions(code: object, description: str) -> None:
+    assert _describe(code) == description
