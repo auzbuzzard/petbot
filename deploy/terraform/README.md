@@ -61,7 +61,7 @@ boundary and the operator's access. Its state lives in the same bucket, under
 token's `sub` is `repo:auzbuzzard/petbot:environment:<name>` whenever a job references
 an environment). Every environment but `dev` admits only `main`. Each role's trust also
 requires the repository's ID (`repository_id`) and the workflow file its jobs run
-(`job_workflow_ref`); the bootstrap roles' also requires the `main` ref:
+(`job_workflow_ref`); every role's but the dev deploy role's also requires the `main` ref:
 
 | Role | Assumed by | Environment | Gate |
 | --- | --- | --- | --- |

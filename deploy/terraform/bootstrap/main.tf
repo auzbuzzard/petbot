@@ -75,6 +75,8 @@ variable "environments" {
     # Whether its workloads may call Bedrock's mantle endpoint with their own IAM identity
     # (the root stack's chat_llm_kind = "bedrock_mantle").
     bedrock_mantle = optional(bool, false)
+    # Whether its deploy role trusts only jobs run from main, as well as its environment.
+    main_only = optional(bool, true)
   }))
   description = "Each deploy environment, by name: prod deploys from main; dev deploys any branch's core, with no edge."
   default = {
@@ -89,6 +91,7 @@ variable "environments" {
       edge               = false
       budget             = false
       bedrock_mantle     = true
+      main_only          = false
     }
   }
 
@@ -225,7 +228,10 @@ locals {
 
   # The workflow file each CI role's jobs run, and the ref they must run from ("*": any).
   github_role_workflows = merge(
-    { for name, env in var.environments : "deploy-${name}" => { file = "deploy.yml", ref = "*" } },
+    {
+      for name, env in var.environments :
+      "deploy-${name}" => { file = "deploy.yml", ref = env.main_only ? "refs/heads/main" : "*" }
+    },
     {
       "bootstrap-plan"  = { file = "bootstrap.yml", ref = "refs/heads/main" }
       "bootstrap-apply" = { file = "bootstrap.yml", ref = "refs/heads/main" }

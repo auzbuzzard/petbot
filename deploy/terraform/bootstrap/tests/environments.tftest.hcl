@@ -104,20 +104,32 @@ run "deploy_roles_are_pinned_to_their_workflow" {
   command = plan
 
   assert {
-    condition = alltrue([
-      for role in ["deploy-prod", "deploy-dev"] :
-      toset(flatten([
-        for s in data.aws_iam_policy_document.github_trust[role].statement : [
-          for c in s.condition : "${c.test} ${c.variable} ${join(",", c.values)}"
-        ]
-        ])) == toset([
-        "StringEquals token.actions.githubusercontent.com:aud sts.amazonaws.com",
-        "StringEquals token.actions.githubusercontent.com:sub repo:auzbuzzard/petbot:environment:${role == "deploy-prod" ? "production" : "dev"}",
-        "StringLike token.actions.githubusercontent.com:job_workflow_ref auzbuzzard/petbot/.github/workflows/deploy.yml@*",
-        "StringEquals token.actions.githubusercontent.com:repository_id 129497244",
-      ])
+    condition = toset(flatten([
+      for s in data.aws_iam_policy_document.github_trust["deploy-prod"].statement : [
+        for c in s.condition : "${c.test} ${c.variable} ${join(",", c.values)}"
+      ]
+      ])) == toset([
+      "StringEquals token.actions.githubusercontent.com:aud sts.amazonaws.com",
+      "StringEquals token.actions.githubusercontent.com:sub repo:auzbuzzard/petbot:environment:production",
+      "StringLike token.actions.githubusercontent.com:job_workflow_ref auzbuzzard/petbot/.github/workflows/deploy.yml@refs/heads/main",
+      "StringEquals token.actions.githubusercontent.com:ref refs/heads/main",
+      "StringEquals token.actions.githubusercontent.com:repository_id 129497244",
     ])
-    error_message = "Each deploy role trusts only its environment, its workflow file and the repository by ID, and the workflow claim must be present."
+    error_message = "The prod deploy role trusts only deploy.yml run from main in production, in this repository."
+  }
+
+  assert {
+    condition = toset(flatten([
+      for s in data.aws_iam_policy_document.github_trust["deploy-dev"].statement : [
+        for c in s.condition : "${c.test} ${c.variable} ${join(",", c.values)}"
+      ]
+      ])) == toset([
+      "StringEquals token.actions.githubusercontent.com:aud sts.amazonaws.com",
+      "StringEquals token.actions.githubusercontent.com:sub repo:auzbuzzard/petbot:environment:dev",
+      "StringLike token.actions.githubusercontent.com:job_workflow_ref auzbuzzard/petbot/.github/workflows/deploy.yml@*",
+      "StringEquals token.actions.githubusercontent.com:repository_id 129497244",
+    ])
+    error_message = "The dev deploy role trusts deploy.yml from any ref in dev, in this repository."
   }
 }
 
