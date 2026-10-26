@@ -138,6 +138,13 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "stage=$stage" >> "$GITHUB_OUTPUT"
 
+      # Which claims this job's OIDC token carries, as true/false only: what the deploy
+      # roles' trust policies can match.
+      - name: OIDC token claims
+        if: env.DEPLOY_ENV == 'dev'
+        continue-on-error: true
+        run: bash .github/scripts/oidc-claims.sh deploy.yml
+
       - name: Deploy role
         env:
           ROLE_ARN_SECRET: ${{ secrets.DEPLOY_ROLE_ARN }}

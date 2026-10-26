@@ -63,6 +63,12 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Which claims this job's OIDC token carries, as true/false only: what the bootstrap
+      # roles' trust policies can match.
+      - name: OIDC token claims
+        continue-on-error: true
+        run: bash .github/scripts/oidc-claims.sh bootstrap.yml
+
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ secrets.BOOTSTRAP_PLAN_ROLE_ARN || vars.BOOTSTRAP_PLAN_ROLE_ARN }}
