@@ -21,14 +21,18 @@ unset token
 result=$(base64 -d <<< "$payload" | jq -r \
   --arg file ".github/workflows/$workflow@" \
   --arg pinned "$GITHUB_REPOSITORY/.github/workflows/$workflow@" \
-  --arg repo_id "$GITHUB_REPOSITORY_ID" '
+  --arg repo_id "$GITHUB_REPOSITORY_ID" \
+  --arg ref "$GITHUB_REF" '
   [
     "job_workflow_ref present: \(has("job_workflow_ref"))",
     "job_workflow_ref names \($file): \((.job_workflow_ref // "") | contains($file))",
     "job_workflow_ref starts with <repository>/\($file): \((.job_workflow_ref // "") | startswith($pinned))",
+    "job_workflow_ref ends with @GITHUB_REF: \((.job_workflow_ref // "") | endswith("@" + $ref))",
     "repository_id present: \(has("repository_id"))",
     "repository_id matches this repository: \(.repository_id == $repo_id)",
-    "ref present: \(has("ref"))"
+    "ref present: \(has("ref"))",
+    "ref equals GITHUB_REF: \(.ref == $ref)",
+    "ref is refs/heads/main: \(.ref == "refs/heads/main")"
   ] | .[]')
 
 while IFS= read -r line; do echo "oidc-claims: $line"; done <<< "$result"
