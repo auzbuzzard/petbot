@@ -126,6 +126,117 @@ run "a_stack_with_an_edge_may_delete_its_edge_user" {
   }
 }
 
+
+run "deploy_roles_create_only_their_stacks_principals" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for env in ["prod", "dev"] :
+      join(" ", flatten([for s in data.aws_iam_policy_document.deploy_permissions[env].statement : tolist(s.resources) if s.sid == "ManageStackRoles"])) == "arn:aws:iam::123456789012:role/petbot-${env}-core-role"
+    ])
+    error_message = "A deploy role may create, and grant permissions to, only its stack's core role."
+  }
+
+  assert {
+    condition = alltrue([
+      join(" ", flatten([for s in data.aws_iam_policy_document.deploy_permissions["prod"].statement : tolist(s.resources) if s.sid == "ManageStackUsers"])) == "arn:aws:iam::123456789012:user/petbot-prod-edge",
+      join(" ", flatten([for s in data.aws_iam_policy_document.deploy_permissions["prod"].statement : tolist(s.resources) if s.sid == "CreateStackUserKeys"])) == "arn:aws:iam::123456789012:user/petbot-prod-edge",
+      length([for s in data.aws_iam_policy_document.deploy_permissions["prod"].statement : s.sid if s.sid != "CreateStackUserKeys" && contains(s.actions, "iam:CreateAccessKey")]) == 0,
+      !strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["dev"].statement), "iam:CreateUser"),
+      !strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["dev"].statement), "iam:CreateAccessKey"),
+    ])
+    error_message = "Only a stack with the edge may create a user and its keys, and only the edge's."
+  }
+}
+
+run "deploy_roles_attach_no_resource_policies" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for env in ["prod", "dev"] : length([
+        for s in data.aws_iam_policy_document.deploy_permissions[env].statement : s.sid
+        if s.sid == "DenyResourcePolicies" && s.effect == "Deny" && s.resources == toset(["*"]) && length(setsubtract([
+          "lambda:AddPermission",
+          "lambda:CreateFunctionUrlConfig",
+          "lambda:UpdateFunctionUrlConfig",
+          "lambda:PutResourcePolicy",
+          "dynamodb:PutResourcePolicy",
+          "logs:PutSubscriptionFilter",
+        ], s.actions)) == 0
+      ]) == 1
+    ])
+    error_message = "Each deploy role is denied the resource-policy actions the stack never uses."
+  }
+
+  assert {
+    condition = alltrue([
+      join(" ", flatten([for s in data.aws_iam_policy_document.deploy_permissions["prod"].statement : tolist(s.not_resources) if s.sid == "DenyRepositoryPolicies" && s.effect == "Deny"])) == "arn:aws:ecr:us-east-1:123456789012:repository/petbot-prod-edge",
+      join(" ", flatten([for s in data.aws_iam_policy_document.deploy_permissions["dev"].statement : tolist(s.resources) if s.sid == "DenyRepositoryPolicies" && s.effect == "Deny"])) == "*",
+    ])
+    error_message = "Only the edge's repository may have a policy, and only where the stack runs the edge."
+  }
+}
+
+run "deploy_roles_manage_only_their_own_budget" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      join(" ", flatten([for s in data.aws_iam_policy_document.deploy_permissions["prod"].statement : tolist(s.resources) if s.sid == "ManageBudget"])) == "arn:aws:budgets::123456789012:budget/petbot-prod-monthly",
+      !strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["dev"].statement), "budgets:"),
+    ])
+    error_message = "A deploy role manages its own stack's budget only."
+  }
+}
+
+run "deploy_roles_list_only_the_workspace_prefix" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for env in ["prod", "dev"] :
+      join(" ", flatten([
+        for s in data.aws_iam_policy_document.deploy_permissions[env].statement : [
+          for c in s.condition : "${c.test} ${c.variable} ${join(",", c.values)}"
+        ] if s.sid == "ListState"
+      ])) == "StringEquals s3:prefix env:/"
+    ])
+    error_message = "A deploy role lists the state bucket only under the backend's workspace prefix."
+  }
+}
+
+run "workloads_write_their_own_logs_and_invoke_regional_models" {
+  command = plan
+
+  assert {
+    condition = alltrue(flatten([
+      for env in ["prod", "dev"] : [
+        join(" ", flatten([for s in data.aws_iam_policy_document.workload_boundary[env].statement : tolist(s.resources) if s.sid == "WriteLogs"])) == "arn:aws:logs:us-east-1:123456789012:log-group:/aws/lambda/petbot-${env}-*",
+        join(" ", sort(flatten([for s in data.aws_iam_policy_document.workload_boundary[env].statement : tolist(s.resources) if s.sid == "InvokeModels"]))) == "arn:aws:bedrock:us-east-1:123456789012:inference-profile/* arn:aws:bedrock:us-east-1::foundation-model/*",
+      ]
+    ]))
+    error_message = "A workload may write only its stack's Lambda logs and invoke only the models the root stack grants."
+  }
+}
+
+run "the_operator_reads_only_stack_query_results_and_budgets" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      contains(flatten([for s in data.aws_iam_policy_document.operator_permissions.statement : tolist(s.actions) if s.sid == "ReadStackLogs"]), "logs:GetQueryResults"),
+      length([
+        for s in data.aws_iam_policy_document.operator_permissions.statement : s.sid
+        if contains(s.resources, "*") && length(setintersection(s.actions, ["logs:GetQueryResults", "ecr:DescribeRepositories", "budgets:ViewBudget"])) > 0
+      ]) == 0,
+      join(" ", flatten([for s in data.aws_iam_policy_document.operator_permissions.statement : tolist(s.resources) if s.sid == "ReadStackBudgets"])) == "arn:aws:budgets::123456789012:budget/petbot-*",
+    ])
+    error_message = "The operator reads query results, repositories and budgets of the stacks only."
+  }
+}
+
 run "the_operator_cannot_read_container_environments" {
   command = plan
 

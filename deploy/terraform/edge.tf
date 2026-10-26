@@ -17,6 +17,13 @@ resource "aws_lightsail_container_service" "edge" {
   # A disabled service shuts its containers down, so the edge leaves the Discord gateway.
   is_disabled = var.edge_paused
 
+  # A container service's ARN carries an id, not its name, so IAM can tell stacks' services
+  # apart only by tag:
+  # https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonlightsail.html
+  tags = {
+    Stack = var.name_prefix
+  }
+
   # Activating this creates an AWS-managed ECR "image puller" principal for the
   # service; we grant it read on the edge repo below. (Same-Region requirement:
   # the repo and the service are both in var.aws_region.)
