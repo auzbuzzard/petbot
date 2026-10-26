@@ -110,18 +110,25 @@ class TavilyProvider(SearchProvider):
         return SearchResults(hits=hits, answer=_text(body.get("answer")).strip() or None)
 
 
+#: ddgs backends whose request carries the safesearch setting (ddgs 9.16:
+#: ``ddgs/engines/{startpage,brave,mojeek}.py``). Its ``duckduckgo`` text engine ignores it.
+SAFE_BACKENDS = "startpage,brave,mojeek"
+ANY_BACKENDS = "duckduckgo,startpage"
+
+
 class DdgsProvider(SearchProvider):
     name = "ddgs"
 
-    def __init__(self, backend: str = "duckduckgo,startpage") -> None:
+    def __init__(self, backend: str = ANY_BACKENDS, safe_backend: str = SAFE_BACKENDS) -> None:
         self._backend = backend
+        self._safe_backend = safe_backend
 
     def _search_sync(self, query: str, safe: bool) -> SearchResults:
         try:
             rows = DDGS(timeout=8).text(
                 query,
                 max_results=MAX_RESULTS,
-                backend=self._backend,
+                backend=self._safe_backend if safe else self._backend,
                 safesearch="on" if safe else "off",
             )
         except DDGSException as exc:

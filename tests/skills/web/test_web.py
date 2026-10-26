@@ -244,6 +244,56 @@ def test_ddgs_engine_errors_still_raise(monkeypatch: pytest.MonkeyPatch) -> None
         search_module.DdgsProvider()._search_sync("q", True)
 
 
+def _recording_ddgs(calls: list[dict[str, object]]) -> type:
+    class _Recording:
+        def __init__(self, **kwargs: object) -> None: ...
+
+        def text(self, query: str, **kwargs: object) -> list[dict[str, str]]:
+            calls.append(kwargs)
+            return [{"title": "t", "href": "https://x.test/a", "body": "b"}]
+
+    return _Recording
+
+
+@pytest.mark.parametrize(
+    ("safe", "backend", "safesearch"),
+    [(True, "startpage,brave,mojeek", "on"), (False, "duckduckgo,startpage", "off")],
+)
+def test_ddgs_backends_follow_safe_search(
+    monkeypatch: pytest.MonkeyPatch, safe: bool, backend: str, safesearch: str
+) -> None:
+    from petbot.skills.web import search as search_module
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(search_module, "DDGS", _recording_ddgs(calls))
+    search_module.DdgsProvider()._search_sync("q", safe)
+    assert len(calls) == 1
+    assert calls[0]["backend"] == backend
+    assert calls[0]["safesearch"] == safesearch
+
+
+async def test_web_search_outside_age_gated_channel_uses_safe_backends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from petbot.skills.web import search as search_module
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(search_module, "DDGS", _recording_ddgs(calls))
+    skill = WebSearchSkill([search_module.DdgsProvider()])
+    await skill.run(WebSearchArgs(query="q"), _ctx())
+    await skill.run(WebSearchArgs(query="q"), _ctx().model_copy(update={"allows_explicit": True}))
+    assert [c["backend"] for c in calls] == ["startpage,brave,mojeek", "duckduckgo,startpage"]
+
+
+def test_safe_backends_exist_in_installed_ddgs() -> None:
+    from ddgs.engines import ENGINES
+
+    from petbot.skills.web.search import SAFE_BACKENDS
+
+    # ddgs falls back to every engine when none of the named backends exist.
+    assert set(SAFE_BACKENDS.split(",")) <= set(ENGINES["text"])
+
+
 # --- fetch --------------------------------------------------------------------
 #
 # DNS is stubbed to a public address so the SSRF guard passes offline; HTTP is mocked at
