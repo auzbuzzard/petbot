@@ -18,7 +18,8 @@ discord_token_ssm_parameter = "/petbot/edge/discord_token"
 # Paused: production's edge (stages/prod.tfvars) holds the Discord gateway.
 edge_paused = true
 
-retired = false
+# Retired: legacy.yml destroys the stack, then deletes retired_parameters and its state.
+retired = true
 retired_parameters = [
   "/petbot/edge/discord_token",
   "/petbot/core/bedrock_api_key",

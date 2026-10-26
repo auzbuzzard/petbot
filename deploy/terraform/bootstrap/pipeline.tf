@@ -28,6 +28,21 @@ variable "retiring_users" {
   default     = ["petbot-bedrock-key"]
 }
 
+# Each retiring user, adopted with force_destroy, so removing it from var.retiring_users
+# deletes it through this pipeline with its keys, service-specific credentials and policies.
+resource "aws_iam_user" "retired" {
+  for_each = toset(var.retiring_users)
+
+  name          = each.key
+  force_destroy = true
+}
+
+import {
+  for_each = toset(var.retiring_users)
+  to       = aws_iam_user.retired[each.key]
+  id       = each.key
+}
+
 variable "bootstrap_apply_environment" {
   type        = string
   description = "GitHub environment, with a required reviewer, whose jobs may assume the bootstrap apply role."
