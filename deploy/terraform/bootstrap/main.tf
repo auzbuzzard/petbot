@@ -223,10 +223,14 @@ locals {
     name => env.edge ? ["${env.name_prefix}-edge"] : []
   }
 
-  deploy_role_workflows = {
-    for name, env in var.environments :
-    "deploy-${name}" => "deploy.yml"
-  }
+  # The workflow file each CI role's jobs run, and the ref they must run from ("*": any).
+  github_role_workflows = merge(
+    { for name, env in var.environments : "deploy-${name}" => { file = "deploy.yml", ref = "*" } },
+    {
+      "bootstrap-plan"  = { file = "bootstrap.yml", ref = "refs/heads/main" }
+      "bootstrap-apply" = { file = "bootstrap.yml", ref = "refs/heads/main" }
+    },
+  )
 }
 
 data "aws_iam_policy_document" "github_trust" {
@@ -252,24 +256,27 @@ data "aws_iam_policy_document" "github_trust" {
       values   = ["repo:${var.github_repo}:environment:${each.value}"]
     }
 
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:job_workflow_ref"
+      values   = ["${var.github_repo}/.github/workflows/${local.github_role_workflows[each.key].file}@${local.github_role_workflows[each.key].ref}"]
+    }
+
     dynamic "condition" {
-      for_each = contains(keys(local.deploy_role_workflows), each.key) ? [local.deploy_role_workflows[each.key]] : []
+      for_each = local.github_role_workflows[each.key].ref == "*" ? [] : [local.github_role_workflows[each.key].ref]
       content {
-        test     = "StringLike"
-        variable = "token.actions.githubusercontent.com:job_workflow_ref"
-        values   = ["${var.github_repo}/.github/workflows/${condition.value}@*"]
+        test     = "StringEquals"
+        variable = "token.actions.githubusercontent.com:ref"
+        values   = [condition.value]
       }
     }
 
     # The repository's name can be reused after a rename; its ID can't:
     # https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_iam-condition-keys.html#condition-keys-wif
-    dynamic "condition" {
-      for_each = contains(keys(local.deploy_role_workflows), each.key) ? [1] : []
-      content {
-        test     = "StringEquals"
-        variable = "token.actions.githubusercontent.com:repository_id"
-        values   = [var.github_repository_id]
-      }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:repository_id"
+      values   = [var.github_repository_id]
     }
   }
 }

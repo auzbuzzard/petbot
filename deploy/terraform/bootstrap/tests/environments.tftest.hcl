@@ -121,6 +121,28 @@ run "deploy_roles_are_pinned_to_their_workflow" {
   }
 }
 
+run "bootstrap_roles_are_pinned_to_their_workflow_on_main" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for role in ["bootstrap-plan", "bootstrap-apply"] :
+      toset(flatten([
+        for s in data.aws_iam_policy_document.github_trust[role].statement : [
+          for c in s.condition : "${c.test} ${c.variable} ${join(",", c.values)}"
+        ]
+        ])) == toset([
+        "StringEquals token.actions.githubusercontent.com:aud sts.amazonaws.com",
+        "StringEquals token.actions.githubusercontent.com:sub repo:auzbuzzard/petbot:environment:${role == "bootstrap-plan" ? "bootstrap-plan" : "bootstrap"}",
+        "StringLike token.actions.githubusercontent.com:job_workflow_ref auzbuzzard/petbot/.github/workflows/bootstrap.yml@refs/heads/main",
+        "StringEquals token.actions.githubusercontent.com:ref refs/heads/main",
+        "StringEquals token.actions.githubusercontent.com:repository_id 129497244",
+      ])
+    ])
+    error_message = "Each bootstrap role trusts only its environment, bootstrap.yml run from main, and the repository by ID."
+  }
+}
+
 run "a_stack_with_an_edge_may_delete_its_edge_user" {
   command = plan
 
