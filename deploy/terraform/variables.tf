@@ -1,14 +1,11 @@
 variable "aws_region" {
   type        = string
   description = <<-EOT
-    Region for every regional resource in this stack (Lambda, ECR, CloudWatch,
-    SSM, and the state bucket). This is the single knob — you decide; all
-    resources inherit it (IAM is global and unaffected). Default us-east-1: it's
-    AWS's cheapest US region (the pricing baseline) and where the global pieces a
-    future custom domain needs (ACM for CloudFront) must live, avoiding
-    cross-region friction. us-east-2 / us-west-2 cost the same if you prefer one
-    of those. NOTE: the SSM secret parameters must be created in this region, and
-    the state-bucket region in backend.hcl should match.
+    Region of every regional resource in this stack: the Lambda function, ECR
+    repositories, CloudWatch log group, SSM parameters, and the edge's Lightsail
+    service and claims table. IAM is global. The SSM parameters this stack reads must
+    exist in this region. The state bucket belongs to bootstrap; backend.hcl names
+    its region.
   EOT
   default     = "us-east-1"
 }
@@ -31,7 +28,7 @@ variable "image_tag" {
 
 variable "lambda_environment" {
   type        = string
-  description = "Value of the bot's ENV variable (drives logging profile)."
+  description = "Value of ENV in the core function and the edge container. Nothing in src/petbot reads ENV."
   default     = "prod"
 }
 
@@ -43,25 +40,24 @@ variable "log_level" {
 
 variable "user_agent" {
   type        = string
-  description = "Optional override for the booru User-Agent; empty uses the app default."
+  description = "Optional User-Agent for the booru and web_fetch requests (USER_AGENT in the worker); empty uses the app default."
   default     = ""
 }
 
+# https://docs.aws.amazon.com/lambda/latest/dg/configuration-memory.html
 variable "memory_size" {
   type        = number
-  description = "Lambda memory (MB); also scales CPU, which helps cold starts and numpy."
+  description = "Memory (MB) of the core Lambda function. Lambda allocates CPU in proportion to it."
   default     = 1024
 }
 
 variable "timeout" {
   type        = number
   description = <<-EOT
-    Lambda timeout (seconds). The edge invokes the worker synchronously and the
-    chat agent runs an LLM tool-loop: a search -> read -> answer turn is three model
-    calls with reasoning on, each up to ~30s. The worker hands the remaining
-    invocation time (minus a small reserve) to the turn as its budget, so a turn
-    that runs long answers with a fallback line instead of being killed. Not the
-    old 3s Discord-interaction bound (the edge holds the gateway, not this function).
+    Timeout (seconds) of the core Lambda function, which the edge invokes
+    synchronously. The worker gives each chat turn the remaining invocation time,
+    minus a small reserve, as its budget, so a turn that runs long answers with a
+    fallback line instead of being killed.
   EOT
   default     = 120
 }
@@ -110,12 +106,9 @@ variable "chat_llm_api_key_ssm_parameter" {
 variable "chat_thinking" {
   type        = string
   description = <<-EOT
-    Whether the chat agent reasons before answering. Sets CHAT_THINKING in the worker:
-    "" leaves the model's default; otherwise true, false, minimal, low, medium, high.
-    The reasoning is never shown or replayed; it only improves answers. Gemma 4 on
-    mantle thinks only at "high" (lower levels return no reasoning). Measured on
-    PetBot prompts: p50 1.6 s -> 5.8 s for chat, 0.8 s -> 2.5 s for a tool call, with
-    4-8x the output tokens and a 41.6 s outlier.
+    Whether the chat agent reasons before answering, passed to pydantic-ai's thinking
+    setting. Sets CHAT_THINKING in the worker: "" leaves it unset (the model's
+    default); otherwise true, false, minimal, low, medium or high.
   EOT
   default     = "high"
 
