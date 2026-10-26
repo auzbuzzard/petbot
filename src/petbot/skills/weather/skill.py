@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
+# WMO weather interpretation codes, per https://open-meteo.com/en/docs ("WMO Weather
+# interpretation codes (WW)").
 _WMO: dict[int, str] = {
     0: "clear sky",
     1: "mainly clear",
@@ -37,24 +39,25 @@ _WMO: dict[int, str] = {
     53: "drizzle",
     55: "dense drizzle",
     56: "light freezing drizzle",
-    57: "freezing drizzle",
+    57: "dense freezing drizzle",
     61: "light rain",
     63: "rain",
     65: "heavy rain",
     66: "light freezing rain",
-    67: "freezing rain",
+    67: "heavy freezing rain",
     71: "light snow",
     73: "snow",
     75: "heavy snow",
     77: "snow grains",
-    80: "light showers",
-    81: "showers",
-    82: "violent showers",
+    80: "light rain showers",
+    81: "rain showers",
+    82: "violent rain showers",
     85: "light snow showers",
-    86: "snow showers",
+    86: "heavy snow showers",
     95: "thunderstorm",
     96: "thunderstorm with light hail",
-    99: "thunderstorm with hail",
+    97: "heavy thunderstorm",
+    99: "thunderstorm with heavy hail",
 }
 
 
