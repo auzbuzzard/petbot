@@ -249,3 +249,25 @@ run "the_operator_cannot_read_container_environments" {
     error_message = "The operator may read the edge's logs but not its container environment, which holds the edge's AWS key."
   }
 }
+
+run "the_apply_role_can_delete_a_retiring_user" {
+  command = plan
+
+  assert {
+    condition     = strcontains(jsonencode(data.aws_iam_policy_document.bootstrap_apply.statement), "iam:ListVirtualMFADevices")
+    error_message = "Deleting a retiring force_destroy user needs iam:ListVirtualMFADevices."
+  }
+}
+
+run "no_retiring_users_no_mfa_listing" {
+  command = plan
+
+  variables {
+    retiring_users = []
+  }
+
+  assert {
+    condition     = !strcontains(jsonencode(data.aws_iam_policy_document.bootstrap_apply.statement), "iam:ListVirtualMFADevices")
+    error_message = "The apply role lists MFA devices only while a user is retiring."
+  }
+}
