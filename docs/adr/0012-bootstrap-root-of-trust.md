@@ -113,3 +113,27 @@ Decision:
 - The workflows that hold AWS credentials pin their actions to commit SHAs.
 
 The only manual step left is seeding a new account.
+
+## Follow-on: one pipeline, the plan on the pull request (2026-10)
+
+Bootstrap was planned after a merge and applied once a reviewer approved the `bootstrap`
+environment; production deployed from a second workflow, which the first started, after
+its own approval. A run nobody approved held production's concurrency group, so later
+merges queued behind it, and a change needed approvals after its review.
+
+Decision:
+
+- One workflow, `deploy.yml`. Every pull request plans bootstrap with the read-only role
+  (which takes no lock) and posts the plan's digest to its head commit. Merging is the
+  approval: the merge's run plans again under the lock, applies only a plan with that
+  digest (`main` requires branches to be up to date, so it is the same plan), and then
+  deploys production. A plan that changed in between stops the run. The `bootstrap`
+  environment has no reviewer; `production` keeps one until production is planned on the
+  pull request too.
+- Every OIDC role trusts only jobs of `deploy.yml` (`job_workflow_ref`) in this repository
+  by its ID (`repository_id`), and the prod deploy and bootstrap apply roles only runs of
+  `main` (`ref`). STS evaluates these claims of GitHub's token as condition keys.
+- After applying, the bootstrap job assumes its role again with a new token, so a trust
+  change that would lock out the next merge fails the merge that made it.
+- A merge cancels any earlier run of `deploy.yml` on `main` still waiting for an approval
+  (`supersede.yml`).

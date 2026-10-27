@@ -2,15 +2,16 @@
 # (deploy, and bootstrap's own plan/apply pipeline in pipeline.tf), the workload
 # permissions boundary and the operator's access (operator.tf).
 #
-# Every OIDC role trusts exactly one GitHub environment, never a branch or a PR. Each
+# Every OIDC role trusts one GitHub environment, and only jobs of deploy.yml in this
+# repository; the roles that apply production or this stack trust only runs from main. Each
 # deploy environment (var.environments) gets its own deploy role and workload boundary,
 # scoped to its own <name_prefix>-* resources and state, and no environment's prefix
-# contains another's: the deploy workflow assumes petbot-github-deploy-prod from
-# `production` (main only) and petbot-github-deploy-dev from `dev` (any branch; see
-# docs/adr/0014). The bootstrap workflow plans this stack from
-# `bootstrap-plan` and applies the reviewed plan from `bootstrap`, which needs a required
-# reviewer's approval; both admit only main. An admin applies this stack by hand exactly
-# once, to seed it in a new account. See README "Bootstrap" and docs/adr/0012.
+# contains another's: deploy.yml assumes petbot-github-deploy-prod from `production` (main
+# only) and petbot-github-deploy-dev from `dev` (any branch; see docs/adr/0014). It plans
+# this stack on each pull request from `bootstrap-plan`, and on merge applies it from
+# `bootstrap` (main only), if the plan is the one the pull request showed. An admin applies
+# this stack by hand exactly once, to seed it in a new account. See README "Bootstrap" and
+# docs/adr/0012.
 #
 # Its own state lives in the bucket it manages (key bootstrap/terraform.tfstate),
 # locked natively by S3 (`use_lockfile`, Terraform >= 1.11).
@@ -49,6 +50,12 @@ variable "github_repo" {
   default     = "auzbuzzard/petbot"
 }
 
+variable "github_repository_id" {
+  type        = string
+  description = "GitHub's ID of github_repo (the OIDC token's repository_id claim). A deleted repository's name can be taken again; its ID can't."
+  default     = "129497244"
+}
+
 variable "name_prefix" {
   type        = string
   description = "Prefix of the root of trust: the CI roles (<name_prefix>-github-*) and the operator's role and policies."
@@ -69,6 +76,11 @@ variable "environments" {
     # Whether its workloads may call Bedrock's mantle endpoint with their own IAM identity
     # (the root stack's chat_llm_kind = "bedrock_mantle").
     bedrock_mantle = optional(bool, false)
+    # Whether its workloads may export traces and metrics (the root stack's
+    # observability_enabled).
+    observability = optional(bool, false)
+    # Whether its deploy role trusts only runs from main.
+    main_only = optional(bool, true)
   }))
   description = "Each deploy environment, by name: prod deploys from main; dev deploys any branch's core, with no edge."
   default = {
@@ -83,6 +95,7 @@ variable "environments" {
       edge               = false
       budget             = false
       bedrock_mantle     = true
+      main_only          = false
     }
   }
 
@@ -158,6 +171,29 @@ data "aws_iam_policy_document" "state_bucket" {
       values   = ["false"]
     }
   }
+
+  # A stage's state holds what its stack created, the edge's AWS key among them: only that
+  # stage's deploy role may touch it, whatever IAM grants anyone else.
+  dynamic "statement" {
+    for_each = var.environments
+    content {
+      sid       = "OnlyItsDeployRoleUsesState${replace(title(statement.key), "/[^A-Za-z0-9]/", "")}"
+      effect    = "Deny"
+      actions   = ["s3:*"]
+      resources = ["${aws_s3_bucket.state.arn}/${statement.value.name_prefix}/*"]
+
+      principals {
+        type        = "*"
+        identifiers = ["*"]
+      }
+
+      condition {
+        test     = "ArnNotEquals"
+        variable = "aws:PrincipalArn"
+        values   = ["arn:aws:iam::${local.account_id}:role/${local.deploy_role_names[statement.key]}"]
+      }
+    }
+  }
 }
 
 resource "aws_s3_bucket_policy" "state" {
@@ -217,10 +253,14 @@ locals {
     name => env.edge ? ["${env.name_prefix}-edge"] : []
   }
 
-  deploy_role_workflows = {
-    for name, env in var.environments :
-    "deploy-${name}" => "deploy.yml"
-  }
+  # The ref each CI role's deploy.yml jobs must run from ("*": any, pull requests included).
+  github_role_refs = merge(
+    { for name, env in var.environments : "deploy-${name}" => env.main_only ? "refs/heads/main" : "*" },
+    {
+      "bootstrap-plan"  = "*"
+      "bootstrap-apply" = "refs/heads/main"
+    },
+  )
 }
 
 data "aws_iam_policy_document" "github_trust" {
@@ -246,13 +286,27 @@ data "aws_iam_policy_document" "github_trust" {
       values   = ["repo:${var.github_repo}:environment:${each.value}"]
     }
 
+    # STS matches these claims of GitHub's token:
+    # https://docs.aws.amazon.com/service-authorization/latest/reference/list_sts.html
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:job_workflow_ref"
+      values   = ["${var.github_repo}/.github/workflows/deploy.yml@${local.github_role_refs[each.key]}"]
+    }
+
     dynamic "condition" {
-      for_each = contains(keys(local.deploy_role_workflows), each.key) ? [local.deploy_role_workflows[each.key]] : []
+      for_each = local.github_role_refs[each.key] == "*" ? [] : [local.github_role_refs[each.key]]
       content {
-        test     = "StringLikeIfExists"
-        variable = "token.actions.githubusercontent.com:job_workflow_ref"
-        values   = ["${var.github_repo}/.github/workflows/${condition.value}@*"]
+        test     = "StringEquals"
+        variable = "token.actions.githubusercontent.com:ref"
+        values   = [condition.value]
       }
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:repository_id"
+      values   = [var.github_repository_id]
     }
   }
 }
@@ -296,10 +350,13 @@ data "aws_iam_policy_document" "workload_boundary" {
     resources = [for p in local.env_name_patterns[each.key] : "arn:aws:logs:${local.arn_region}:log-group:/aws/lambda/${p}"]
   }
 
-  statement {
-    sid       = "PublishTelemetry"
-    actions   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords", "cloudwatch:PutMetricData"]
-    resources = ["*"]
+  dynamic "statement" {
+    for_each = each.value.observability ? [1] : []
+    content {
+      sid       = "PublishTelemetry"
+      actions   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords", "cloudwatch:PutMetricData"]
+      resources = ["*"]
+    }
   }
 
   # What the root stack's bedrock policy grants (main.tf).
@@ -519,11 +576,13 @@ data "aws_iam_policy_document" "deploy_permissions" {
     }
   }
 
+  # No iam:DeleteRole: a role created once keeps the trust it was created with (no
+  # iam:UpdateAssumeRolePolicy either), so a stack's role can't be replaced by one that
+  # trusts someone else.
   statement {
     sid = "MaintainStackRoles"
     actions = [
       "iam:GetRole",
-      "iam:DeleteRole",
       "iam:GetRolePolicy",
       "iam:ListRolePolicies",
       "iam:ListAttachedRolePolicies",
@@ -613,12 +672,85 @@ data "aws_iam_policy_document" "deploy_permissions" {
     }
   }
 
+  # Lightsail's container reads take no resource; a container service's ARN carries an ID,
+  # not its name, so a stack's service is told apart by its Stack tag (edge.tf), which
+  # creating one must set and every change requires:
+  # https://docs.aws.amazon.com/service-authorization/latest/reference/list_lightsail.html
   dynamic "statement" {
     for_each = each.value.edge ? [1] : []
     content {
-      sid       = "ManageEdgeContainerService"
-      actions   = ["lightsail:*"]
+      sid = "ReadContainerServices"
+      actions = [
+        "lightsail:GetContainerServices",
+        "lightsail:GetContainerServiceDeployments",
+        "lightsail:GetContainerLog",
+      ]
       resources = ["*"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = each.value.edge ? [1] : []
+    content {
+      sid       = "CreateEdgeContainerService"
+      actions   = ["lightsail:CreateContainerService"]
+      resources = ["*"]
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/Stack"
+        values   = [each.value.name_prefix]
+      }
+    }
+  }
+
+  dynamic "statement" {
+    for_each = each.value.edge ? [1] : []
+    content {
+      sid = "ManageEdgeContainerService"
+      actions = [
+        "lightsail:UpdateContainerService",
+        "lightsail:DeleteContainerService",
+        "lightsail:CreateContainerServiceDeployment",
+        "lightsail:TagResource",
+        "lightsail:UntagResource",
+      ]
+      resources = ["arn:aws:lightsail:${local.arn_region}:ContainerService/*"]
+      condition {
+        test     = "StringEquals"
+        variable = "aws:ResourceTag/Stack"
+        values   = [each.value.name_prefix]
+      }
+    }
+  }
+
+  # A service this project created before it set the Stack tag (it carries the provider's
+  # default Project tag) may be given its stack's tag, and only that.
+  dynamic "statement" {
+    for_each = each.value.edge ? [1] : []
+    content {
+      sid       = "TagUntaggedEdgeContainerService"
+      actions   = ["lightsail:TagResource"]
+      resources = ["arn:aws:lightsail:${local.arn_region}:ContainerService/*"]
+      condition {
+        test     = "StringEquals"
+        variable = "aws:ResourceTag/Project"
+        values   = ["petbot"]
+      }
+      condition {
+        test     = "Null"
+        variable = "aws:ResourceTag/Stack"
+        values   = ["true"]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/Stack"
+        values   = [each.value.name_prefix]
+      }
+      condition {
+        test     = "ForAllValues:StringEquals"
+        variable = "aws:TagKeys"
+        values   = ["Stack"]
+      }
     }
   }
 

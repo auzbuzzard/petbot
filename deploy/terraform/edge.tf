@@ -19,7 +19,7 @@ resource "aws_lightsail_container_service" "edge" {
 
   # A container service's ARN carries an id, not its name, so IAM can tell stacks' services
   # apart only by tag:
-  # https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonlightsail.html
+  # https://docs.aws.amazon.com/service-authorization/latest/reference/list_lightsail.html
   tags = {
     Stack = var.name_prefix
   }
@@ -80,7 +80,6 @@ resource "aws_lightsail_container_service_deployment_version" "edge" {
 
     environment = merge({
       LOG_LEVEL              = var.log_level
-      ENV                    = var.lambda_environment
       SERVICE__KIND          = "lambda"
       SERVICE__FUNCTION_NAME = aws_lambda_function.this.function_name
       AWS_REGION             = var.aws_region

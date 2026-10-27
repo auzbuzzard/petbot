@@ -100,17 +100,41 @@ run "a_prefix_containing_another_is_rejected" {
   expect_failures = [var.environments]
 }
 
-run "deploy_roles_are_pinned_to_their_workflow" {
+run "each_ci_role_trusts_only_deploy_yml_in_this_repository" {
   command = plan
 
   assert {
     condition = alltrue([
-      strcontains(jsonencode(data.aws_iam_policy_document.github_trust["deploy-dev"].statement), "auzbuzzard/petbot/.github/workflows/deploy.yml@*"),
-      strcontains(jsonencode(data.aws_iam_policy_document.github_trust["deploy-prod"].statement), "auzbuzzard/petbot/.github/workflows/deploy.yml@*"),
-      strcontains(jsonencode(data.aws_iam_policy_document.github_trust["deploy-dev"].statement), "StringLikeIfExists"),
-      !strcontains(jsonencode(data.aws_iam_policy_document.github_trust["bootstrap-apply"].statement), "job_workflow_ref"),
+      for role, expected in {
+        "deploy-prod" = [
+          "StringEquals token.actions.githubusercontent.com:sub repo:auzbuzzard/petbot:environment:production",
+          "StringLike token.actions.githubusercontent.com:job_workflow_ref auzbuzzard/petbot/.github/workflows/deploy.yml@refs/heads/main",
+          "StringEquals token.actions.githubusercontent.com:ref refs/heads/main",
+        ]
+        "deploy-dev" = [
+          "StringEquals token.actions.githubusercontent.com:sub repo:auzbuzzard/petbot:environment:dev",
+          "StringLike token.actions.githubusercontent.com:job_workflow_ref auzbuzzard/petbot/.github/workflows/deploy.yml@*",
+        ]
+        "bootstrap-plan" = [
+          "StringEquals token.actions.githubusercontent.com:sub repo:auzbuzzard/petbot:environment:bootstrap-plan",
+          "StringLike token.actions.githubusercontent.com:job_workflow_ref auzbuzzard/petbot/.github/workflows/deploy.yml@*",
+        ]
+        "bootstrap-apply" = [
+          "StringEquals token.actions.githubusercontent.com:sub repo:auzbuzzard/petbot:environment:bootstrap",
+          "StringLike token.actions.githubusercontent.com:job_workflow_ref auzbuzzard/petbot/.github/workflows/deploy.yml@refs/heads/main",
+          "StringEquals token.actions.githubusercontent.com:ref refs/heads/main",
+        ]
+      } :
+      toset(flatten([
+        for s in data.aws_iam_policy_document.github_trust[role].statement : [
+          for c in s.condition : "${c.test} ${c.variable} ${join(",", c.values)}"
+        ]
+        ])) == toset(concat(expected, [
+        "StringEquals token.actions.githubusercontent.com:aud sts.amazonaws.com",
+        "StringEquals token.actions.githubusercontent.com:repository_id 129497244",
+      ]))
     ])
-    error_message = "Each deploy role trusts only its workflow file; the bootstrap pipeline roles are unchanged."
+    error_message = "Each CI role trusts its environment and deploy.yml in this repository (by ID); the prod deploy and bootstrap apply roles only from main."
   }
 }
 
@@ -250,24 +274,116 @@ run "the_operator_cannot_read_container_environments" {
   }
 }
 
-run "the_apply_role_can_delete_a_retiring_user" {
+run "deploy_roles_cannot_replace_a_role" {
   command = plan
 
   assert {
-    condition     = strcontains(jsonencode(data.aws_iam_policy_document.bootstrap_apply.statement), "iam:ListVirtualMFADevices")
-    error_message = "Deleting a retiring force_destroy user needs iam:ListVirtualMFADevices."
+    condition = alltrue([
+      for env in ["prod", "dev"] : alltrue([
+        for s in data.aws_iam_policy_document.deploy_permissions[env].statement :
+        s.effect == "Deny" || length(setintersection(s.actions, ["iam:DeleteRole", "iam:UpdateAssumeRolePolicy", "iam:*"])) == 0
+      ])
+    ])
+    error_message = "No deploy role may delete a role or change its trust: a stack's role keeps the trust it was created with."
   }
 }
 
-run "no_retiring_users_no_mfa_listing" {
+run "the_edge_deploy_role_changes_only_its_own_tagged_container_service" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      !strcontains(jsonencode(data.aws_iam_policy_document.deploy_permissions["prod"].statement), "lightsail:*"),
+      join(" ", flatten([
+        for s in data.aws_iam_policy_document.deploy_permissions["prod"].statement : [
+          for c in s.condition : "${c.test} ${c.variable} ${join(",", c.values)}"
+        ] if s.sid == "ManageEdgeContainerService"
+      ])) == "StringEquals aws:ResourceTag/Stack petbot-prod",
+      join(" ", flatten([
+        for s in data.aws_iam_policy_document.deploy_permissions["prod"].statement : [
+          for c in s.condition : "${c.test} ${c.variable} ${join(",", c.values)}"
+        ] if s.sid == "CreateEdgeContainerService"
+      ])) == "StringEquals aws:RequestTag/Stack petbot-prod",
+      toset(flatten([
+        for s in data.aws_iam_policy_document.deploy_permissions["prod"].statement : [
+          for c in s.condition : "${c.test} ${c.variable} ${join(",", c.values)}"
+        ] if s.sid == "TagUntaggedEdgeContainerService"
+        ])) == toset([
+        "StringEquals aws:ResourceTag/Project petbot",
+        "Null aws:ResourceTag/Stack true",
+        "StringEquals aws:RequestTag/Stack petbot-prod",
+        "ForAllValues:StringEquals aws:TagKeys Stack",
+      ]),
+      length([
+        for s in data.aws_iam_policy_document.deploy_permissions["prod"].statement : s.sid
+        if anytrue([for a in s.actions : startswith(a, "lightsail:")]) && length(s.condition) == 0 && s.sid != "ReadContainerServices"
+      ]) == 0,
+      toset(flatten([for s in data.aws_iam_policy_document.deploy_permissions["prod"].statement : tolist(s.actions) if s.sid == "ReadContainerServices"])) == toset([
+        "lightsail:GetContainerServices",
+        "lightsail:GetContainerServiceDeployments",
+        "lightsail:GetContainerLog",
+      ]),
+    ])
+    error_message = "The prod deploy role reads container services and changes only the one tagged with its stack."
+  }
+}
+
+run "workloads_publish_telemetry_only_where_observability_is_on" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for env in ["prod", "dev"] :
+      !strcontains(aws_iam_policy.workload_boundary[env].policy, "xray:") && !strcontains(aws_iam_policy.workload_boundary[env].policy, "cloudwatch:PutMetricData")
+    ])
+    error_message = "No stage turns on observability, so no boundary allows telemetry."
+  }
+}
+
+run "a_stage_with_observability_may_publish_telemetry" {
   command = plan
 
   variables {
-    retiring_users = []
+    environments = {
+      prod = { name_prefix = "petbot-prod", github_environment = "production", observability = true }
+      dev  = { name_prefix = "petbot-dev", github_environment = "dev", edge = false, budget = false, main_only = false }
+    }
   }
 
   assert {
-    condition     = !strcontains(jsonencode(data.aws_iam_policy_document.bootstrap_apply.statement), "iam:ListVirtualMFADevices")
-    error_message = "The apply role lists MFA devices only while a user is retiring."
+    condition = alltrue([
+      strcontains(aws_iam_policy.workload_boundary["prod"].policy, "xray:PutTraceSegments"),
+      !strcontains(aws_iam_policy.workload_boundary["dev"].policy, "xray:"),
+    ])
+    error_message = "Only a stage with observability = true lets its workloads publish telemetry."
+  }
+}
+
+run "only_a_stages_deploy_role_touches_its_state" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for env in ["prod", "dev"] : length([
+        for s in data.aws_iam_policy_document.state_bucket.statement : s.sid
+        if s.effect == "Deny" && s.actions == toset(["s3:*"])
+        && s.resources == toset(["arn:aws:s3:::tfstate-test/petbot-${env}/*"])
+        && join(" ", flatten([for c in s.condition : "${c.test} ${c.variable} ${join(",", c.values)}"])) == "ArnNotEquals aws:PrincipalArn arn:aws:iam::123456789012:role/petbot-github-deploy-${env}"
+      ]) == 1
+    ])
+    error_message = "The state bucket denies a stage's state to every principal but that stage's deploy role."
+  }
+}
+
+run "the_plan_role_only_reads" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.bootstrap_read.statement : alltrue([
+        for a in s.actions : anytrue([for prefix in ["s3:Get", "s3:List", "iam:Get", "iam:List"] : startswith(a, prefix)])
+      ])
+    ])
+    error_message = "The bootstrap plan role, which pull requests assume, may only read."
   }
 }

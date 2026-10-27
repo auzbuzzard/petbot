@@ -60,7 +60,11 @@ resource "aws_iam_role_policy" "bedrock" {
 
 # Bedrock's OpenAI-compatible mantle endpoint, SigV4-signed with this role, so the agent
 # holds no API key. CreateInference is authorized against a mantle project; the stack names
-# none, so the grant covers the Region's projects. Only attached for bedrock_mantle.
+# none, so the grant covers the Region's projects, for the configured model only. The
+# reference lists bedrock-mantle:Model without its value's format, so the condition matches
+# the model ID anywhere in it:
+# https://docs.aws.amazon.com/service-authorization/latest/reference/list_bedrock-mantle.html
+# Only attached for bedrock_mantle.
 resource "aws_iam_role_policy" "bedrock_mantle" {
   count = var.chat_llm_kind == "bedrock_mantle" ? 1 : 0
   name  = "${local.core_name}-bedrock-mantle"
@@ -69,9 +73,10 @@ resource "aws_iam_role_policy" "bedrock_mantle" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect   = "Allow"
-      Action   = "bedrock-mantle:CreateInference"
-      Resource = "arn:aws:bedrock-mantle:${var.aws_region}:${data.aws_caller_identity.current.account_id}:project/*"
+      Effect    = "Allow"
+      Action    = "bedrock-mantle:CreateInference"
+      Resource  = "arn:aws:bedrock-mantle:${var.aws_region}:${data.aws_caller_identity.current.account_id}:project/*"
+      Condition = { StringLike = { "bedrock-mantle:Model" = "*${var.chat_llm_model}*" } }
     }]
   })
 }
