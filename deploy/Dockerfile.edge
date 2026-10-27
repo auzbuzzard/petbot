@@ -15,12 +15,15 @@ WORKDIR /app
 
 # PetBot is one package; install only the edge + lambda extras so the image
 # carries discord.py + boto3 and not pydantic-ai.
-COPY pyproject.toml README.md ./
+COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 
-# `.[discord,lambda]` = the Discord frontend plus the boto3 dispatch transport.
+# `uv export` emits the lock's pins for the Discord frontend and the boto3 dispatch
+# transport; the project itself is then installed --no-deps.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --compile-bytecode ".[discord,lambda]"
+    uv export --frozen --no-emit-project --extra discord --extra lambda -o /tmp/requirements.txt \
+    && uv pip install --system --compile-bytecode -r /tmp/requirements.txt \
+    && uv pip install --system --compile-bytecode --no-deps .
 
 RUN useradd --create-home --uid 10001 petbot
 USER petbot

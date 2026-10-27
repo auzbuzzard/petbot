@@ -1,17 +1,22 @@
 name: Deploy
 
-# Build + push the core worker image (arm64) and the edge image (amd64) to ECR,
-# then terraform apply — entirely from CI via GitHub OIDC (no static AWS keys).
-# The Lightsail edge pulls its image from ECR (private-registry access). See
-# deploy/terraform/README.md. A push to main deploys `production` (the prod stage), whose
-# deploy role trusts only jobs in that environment (which admits only main). A pull request
-# from this repository deploys to `dev` (or a manual run picks it): that commit's core,
-# alone (no edge), into its own stack with its own deploy role, and the `test` job then runs
-# the regression suite (tests/regression) against it, as the pull request's check (see
-# docs/adr/0014).
-# Each stage's settings are code (deploy/terraform/stages/<stage>.tfvars). The root of trust
-# itself is applied by bootstrap.yml. Actions are pinned to commit SHAs: these jobs hold AWS
-# credentials.
+# The one pipeline for the root of trust (deploy/terraform/bootstrap) and both stages
+# (deploy/terraform), entirely from CI via GitHub OIDC (no static AWS keys). Every CI role
+# trusts only this file (bootstrap's github_trust). See deploy/terraform/README.md.
+#
+# - A pull request from this repository: bootstrap is planned with its read-only role and
+#   the plan's digest posted to the pull request's head commit; the change deploys to `dev`,
+#   that commit's core alone (no edge), into its own stack with its own deploy role, and the
+#   `test` job runs the regression suite (tests/regression) against it (docs/adr/0014).
+# - A merge (a push to main): bootstrap applies the plan its pull request showed, and no
+#   other; then `production` deploys, from main only.
+# - A manual run deploys the stage it names and leaves bootstrap alone.
+#
+# Each stage's settings are code (deploy/terraform/stages/<stage>.tfvars). Actions are pinned
+# to commit SHAs: these jobs hold AWS credentials. The log is public like the repository: the
+# state bucket and the role ARNs carry the account ID, so they are read as secrets (a
+# variable of the same name stands in, unmasked, while no secret is set), and the credentials
+# step masks it everywhere after. No plan file or state leaves the runner.
 on:
   pull_request:
   workflow_dispatch:
@@ -29,13 +34,12 @@ on:
     branches: [main]
 
 permissions:
-  id-token: write
   contents: read
 
-# One run per environment at a time, held from deploy to test, so no other deploy to the
-# same stage lands between a run's deploy and its tests. A group keeps one waiting run and
-# cancels an older waiting one, so a fork's or Dependabot's pull request, which never
-# deploys, gets a group of its own:
+# One run per environment at a time, held from bootstrap to deploy to test, so no other run
+# lands between a run's steps. A group keeps one waiting run and cancels an older waiting
+# one, so a fork's or Dependabot's pull request, which never deploys, gets a group of its
+# own (supersede.yml cancels an older run still waiting for an approval):
 # https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions#concurrency
 concurrency:
   group: >-
@@ -46,34 +50,13 @@ concurrency:
         || format('deploy-{0}', inputs.environment || (github.event_name == 'pull_request' && 'dev' || 'production')) }}
   cancel-in-progress: false
 
+env:
+  TF_IN_AUTOMATION: "true"
+  # AWS_REGION is a repository variable; TF_STATE_BUCKET a repository secret.
+  TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+  STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}
+
 jobs:
-  # A push that changes the root of trust deploys only once bootstrap.yml has applied it:
-  # this stack's deploy role may not exist yet, or may lack a permission the change adds.
-  # bootstrap.yml starts this workflow when its apply is done (or had nothing to apply),
-  # so here such a push steps aside instead of racing it. The paths are bootstrap.yml's.
-  gate:
-    runs-on: ubuntu-latest
-    outputs:
-      defer: ${{ steps.paths.outputs.defer }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: github.event_name == 'push'
-        with:
-          fetch-depth: 0
-
-      - name: Does this push change bootstrap?
-        id: paths
-        env:
-          BEFORE: ${{ github.event.before }}
-        run: |
-          defer=false
-          if [ "$GITHUB_EVENT_NAME" = push ] && [ -n "${BEFORE//0/}" ] \
-            && [ -n "$(git diff --name-only "$BEFORE" "$GITHUB_SHA" -- deploy/terraform/bootstrap .github/workflows/bootstrap.yml)" ]; then
-            defer=true
-            echo "::notice::This push changes bootstrap: production deploys when bootstrap.yml has applied it."
-          fi
-          echo "defer=$defer" >> "$GITHUB_OUTPUT"
-
   untrusted:
     if: >-
       github.event_name == 'pull_request'
@@ -83,17 +66,151 @@ jobs:
     steps:
       - run: echo "::notice::Live tests skipped. A pull request from a fork or Dependabot can't reach AWS; a maintainer's branch is tested on the dev core."
 
-  deploy:
-    needs: gate
+  # Bootstrap's plan for this pull request, with the read-only role: the full plan in the
+  # log, its resource changes in the summary, and its digest (of the resource changes) as
+  # the head commit's bootstrap-plan/digest status. It takes no lock and writes nothing.
+  bootstrap-plan:
     if: >-
-      needs.gate.outputs.defer != 'true'
-      && (github.event_name != 'pull_request'
-          || (github.event.pull_request.head.repo.full_name == github.repository
+      github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    environment: bootstrap-plan
+    permissions:
+      contents: read
+      id-token: write
+      statuses: write
+    defaults:
+      run:
+        working-directory: deploy/terraform/bootstrap
+    env:
+      TF_VAR_state_bucket: ${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.BOOTSTRAP_PLAN_ROLE_ARN || vars.BOOTSTRAP_PLAN_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.11.4"
+          terraform_wrapper: false
+
+      - name: Terraform plan
+        id: plan
+        run: |
+          bash ../../../.github/scripts/bootstrap-plan.sh -lock=false
+          {
+            echo "## Bootstrap plan"
+            echo "Digest: \`$(cat plan.digest)\`. Merging applies this plan, and no other."
+            echo
+            echo "The full plan is in the **Terraform plan** step's log."
+            echo
+            cat plan.resources
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "digest=$(cat plan.digest)" >> "$GITHUB_OUTPUT"
+
+      - name: Post the digest to the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DIGEST: ${{ steps.plan.outputs.digest }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" \
+            -f state=success -f context=bootstrap-plan/digest \
+            -f description="$DIGEST" -f target_url="$RUN_URL" > /dev/null
+
+  # A merge's bootstrap change: plan again under the state lock and apply only if that plan
+  # is the one its pull request showed (same digest). If anything changed since (the state,
+  # the account), re-run the pull request's bootstrap-plan job, read the new plan, then
+  # re-run this job.
+  bootstrap:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: bootstrap
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: read
+      statuses: read
+    defaults:
+      run:
+        working-directory: deploy/terraform/bootstrap
+    env:
+      TF_VAR_state_bucket: ${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}
+      APPLY_ROLE_ARN: ${{ secrets.BOOTSTRAP_APPLY_ROLE_ARN || vars.BOOTSTRAP_APPLY_ROLE_ARN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ env.APPLY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.11.4"
+          terraform_wrapper: false
+
+      - name: Terraform apply (the plan its pull request showed)
+        id: apply
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash ../../../.github/scripts/bootstrap-plan.sh -lock-timeout=120s
+          if [ "$(cat plan.changes)" = false ]; then
+            echo "Bootstrap has no changes."
+            exit 0
+          fi
+          digest=$(cat plan.digest)
+          reviewed=$(bash ../../../.github/scripts/reviewed-bootstrap-digest.sh)
+          if [ "$digest" != "$reviewed" ]; then
+            echo "::error::This plan (${digest}) is not the one the pull request showed (${reviewed:-none}). Re-run the pull request's bootstrap-plan job, read its plan, then re-run this job."
+            exit 1
+          fi
+          terraform apply -no-color -lock-timeout=120s bootstrap.tfplan
+          echo "applied=true" >> "$GITHUB_OUTPUT"
+
+      # The apply may have changed the trust this job assumed its role with; the next merge
+      # assumes it the same way, so check now, with a new token (IAM is eventually consistent).
+      - name: The apply role still trusts this job
+        if: steps.apply.outputs.applied == 'true'
+        run: |
+          for attempt in $(seq 1 12); do
+            token=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
+            if aws sts assume-role-with-web-identity --role-arn "$APPLY_ROLE_ARN" \
+                --role-session-name trust-check --web-identity-token "$token" \
+                --query 'Credentials.Expiration' --output text > /dev/null; then
+              echo "The apply role trusts this job."
+              exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          echo "::error::The apply role no longer trusts this workflow's job on main: the next bootstrap change can't apply. Fix its trust (main.tf's github_trust) from a session that still holds it, or re-seed."
+          exit 1
+
+  deploy:
+    needs: bootstrap
+    if: >-
+      !cancelled()
+      && (github.event_name == 'push' && needs.bootstrap.result == 'success'
+          || github.event_name == 'workflow_dispatch'
+          || (github.event_name == 'pull_request'
+              && github.event.pull_request.head.repo.full_name == github.repository
               && github.actor != 'dependabot[bot]'))
     outputs:
       stage: ${{ steps.stage.outputs.stage }}
       # The core image this run built, which the test job checks is what dev runs.
       worker_digest: ${{ steps.worker.outputs.digest }}
+    permissions:
+      contents: read
+      id-token: write
     # arm64 runner matches the worker Lambda's Graviton architecture, so that
     # image builds natively; the smaller edge image cross-builds for amd64 via
     # QEMU (cheaper to emulate than the heavy worker image).
@@ -104,11 +221,6 @@ jobs:
     env:
       TF_DIR: deploy/terraform
       DEPLOY_ENV: ${{ inputs.environment || (github.event_name == 'pull_request' && 'dev' || 'production') }}
-      # AWS_REGION is a repository variable (bootstrap.yml reads it too). The state bucket
-      # carries the account ID, so it is a secret, which the public log masks; a variable of
-      # the same name stands in while no secret is set, unmasked.
-      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
-      STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}
       # build-push-action otherwise uploads each build's record as a run artifact and writes
       # a build summary, both naming the ECR image, whose host carries the account ID; the
       # log is masked, but an artifact is not, and the repository is public.
@@ -136,13 +248,6 @@ jobs:
             echo "TF_CLI_ARGS_console=-var-file=stages/$stage.tfvars"
           } >> "$GITHUB_ENV"
           echo "stage=$stage" >> "$GITHUB_OUTPUT"
-
-      # Which claims this job's OIDC token carries, as true/false only: what the deploy
-      # roles' trust policies can match.
-      - name: OIDC token claims
-        if: env.DEPLOY_ENV == 'dev'
-        continue-on-error: true
-        run: bash .github/scripts/oidc-claims.sh deploy.yml
 
       - name: Deploy role
         env:
@@ -272,11 +377,20 @@ jobs:
             -var "edge_image_tag=$IMAGE_TAG" 2>&1 \
             | sed -u -E 's/(AKIA|ASIA)[A-Z0-9]{16}/\1****************/g'
 
-      - name: Show outputs
+      - name: The core runs this run's image
         working-directory: ${{ env.TF_DIR }}
+        env:
+          EXPECTED: ${{ steps.worker.outputs.digest }}
         run: |
-          terraform output -raw core_function_arn; echo
-          if [ "$EDGE" = true ]; then terraform output -raw edge_container_service_name; echo; fi
+          function=$(terraform output -raw core_function_name)
+          running=$(aws lambda get-function --function-name "$function" \
+            --query 'Code.ResolvedImageUri' --output text)
+          running="${running##*@}"
+          if [ -z "$EXPECTED" ] || [ "$running" != "$EXPECTED" ]; then
+            echo "::error::$function runs $running, not this run's image ($EXPECTED)."
+            exit 1
+          fi
+          echo "$function runs this run's image ($running)."
 
       - name: Keyless probe (edge)
         if: env.EDGE == 'true'
@@ -305,11 +419,15 @@ jobs:
   # another deploy.
   test:
     needs: deploy
-    if: needs.deploy.result == 'success' && needs.deploy.outputs.stage == 'dev'
+    # !cancelled(): without a status check, the bootstrap job a pull request skips would
+    # skip this one too.
+    if: ${{ !cancelled() && needs.deploy.result == 'success' && needs.deploy.outputs.stage == 'dev' }}
     runs-on: ubuntu-latest
     environment: dev
+    permissions:
+      contents: read
+      id-token: write
     env:
-      STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET || vars.TF_STATE_BUCKET }}
       PETBOT_REGRESSION_FUNCTION: petbot-dev-core
       PETBOT_REGRESSION_SUMMARY: regression-summary.md
     steps:

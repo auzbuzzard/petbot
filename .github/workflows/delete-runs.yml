@@ -10,7 +10,7 @@ on:
       workflows:
         description: Workflow files whose finished runs to delete, space-separated
         required: true
-        default: deploy.yml bootstrap.yml
+        default: deploy.yml supersede.yml
 
 permissions:
   actions: write

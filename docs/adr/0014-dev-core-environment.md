@@ -127,7 +127,9 @@ A push that also changes the root of trust deploys only after bootstrap has appl
 `deploy.yml`'s `gate` job sees the bootstrap paths in the push and skips the deploy, and
 `bootstrap.yml` starts production's deploy once its apply succeeds (or its plan has
 nothing to apply). A deploy can't run against a role that doesn't exist yet or lacks a
-permission the same change adds, and nobody re-runs a failed one by hand.
+permission the same change adds, and nobody re-runs a failed one by hand. (Replaced by one
+pipeline that applies bootstrap and then production in the same run: ADR 0012, follow-on
+"one pipeline, the plan on the pull request".)
 
 ### Talking to it: the harness's `--lambda`
 

@@ -1,0 +1,30 @@
+name: Supersede
+
+# A merge replaces every earlier run of deploy.yml on main that is still waiting for an
+# environment's approval: such a run holds production's concurrency group, so the merge's
+# own run couldn't start, and approving it would deploy an older commit. Runs already in
+# progress are left to finish.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  actions: write
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel older runs waiting for an approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          created=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq '.created_at')
+          ids=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs?branch=main&status=waiting&per_page=100" \
+            | jq -r --arg created "$created" --arg sha "$GITHUB_SHA" '.workflow_runs[]
+              | select(.path == ".github/workflows/deploy.yml" or .path == ".github/workflows/bootstrap.yml")
+              | select(.head_sha != $sha and .created_at <= $created) | .id')
+          for id in $ids; do
+            gh run cancel "$id" --repo "$GITHUB_REPOSITORY"
+            echo "Cancelled run $id: this merge supersedes it."
+          done

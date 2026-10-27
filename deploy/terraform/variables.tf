@@ -28,7 +28,7 @@ variable "image_tag" {
 
 variable "lambda_environment" {
   type        = string
-  description = "Value of ENV in the core function and the edge container. Nothing in src/petbot reads ENV."
+  description = "The kind of stage: prod or dev. report_trajectory may be set only where it isn't prod."
   default     = "prod"
 }
 

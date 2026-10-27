@@ -1,10 +1,10 @@
-# --- Bootstrap's own pipeline: plan, then apply after review -----------------------
-# After the one-time seed, CI applies this stack too, through .github/workflows/bootstrap.yml
-# and two roles kept apart from the deploy role:
+# --- Bootstrap's own pipeline: plan on the pull request, apply on merge ----------------
+# After the one-time seed, CI applies this stack too, through .github/workflows/deploy.yml
+# and two roles kept apart from the deploy roles:
 #
-#   petbot-github-bootstrap-plan   read-only; trusted from the `bootstrap-plan` environment
-#   petbot-github-bootstrap-apply  writes; trusted from the `bootstrap` environment, whose
-#                                  required reviewer approves each run after reading the plan
+#   petbot-github-bootstrap-plan   read-only; plans each pull request from `bootstrap-plan`
+#   petbot-github-bootstrap-apply  writes; applies a merge from `bootstrap` (main only), and
+#                                  only the plan its pull request showed
 #
 # Their trust policies are main.tf's github_trust.
 
@@ -14,15 +14,9 @@ variable "bootstrap_plan_environment" {
   default     = "bootstrap-plan"
 }
 
-variable "retiring_users" {
-  type        = list(string)
-  description = "IAM users this stack deletes; its pipeline roles keep permission to manage them until the apply that deletes them has run."
-  default     = ["petbot-bedrock-key"]
-}
-
 variable "bootstrap_apply_environment" {
   type        = string
-  description = "GitHub environment, with a required reviewer, whose jobs may assume the bootstrap apply role."
+  description = "GitHub environment (main only) whose jobs may assume the bootstrap apply role."
   default     = "bootstrap"
 }
 
@@ -42,7 +36,6 @@ locals {
       for env in values(var.environments) : "arn:aws:iam::${local.account_id}:policy/${env.name_prefix}-workload-boundary"
       if !startswith("${env.name_prefix}-", "${var.name_prefix}-")
     ],
-    [for name in var.retiring_users : "arn:aws:iam::${local.account_id}:user/${name}"],
   )
 
   bootstrap_role_policies = {
@@ -59,7 +52,8 @@ resource "aws_iam_role" "github_bootstrap" {
   max_session_duration = 3600
 }
 
-# Reading everything the stack manages, and taking the state lock (plan locks too).
+# Reading everything the stack manages. A pull request's plan takes no lock: it writes
+# nothing, and the apply plans again under the lock.
 data "aws_iam_policy_document" "bootstrap_read" {
   statement {
     sid = "ReadStateBucket"
@@ -81,12 +75,6 @@ data "aws_iam_policy_document" "bootstrap_read" {
   }
 
   statement {
-    sid       = "LockState"
-    actions   = ["s3:PutObject", "s3:DeleteObject"]
-    resources = ["${aws_s3_bucket.state.arn}/bootstrap/terraform.tfstate.tflock"]
-  }
-
-  statement {
     sid       = "ReadIam"
     actions   = ["iam:Get*", "iam:List*"]
     resources = local.bootstrap_iam_arns
@@ -97,7 +85,7 @@ data "aws_iam_policy_document" "bootstrap_read" {
 # can't be deleted (prevent_destroy, and no s3:DeleteBucket here). Terraform never creates
 # the operator user's credentials (its keys stay out of band), so an applied plan can't
 # either. That is not a bound on what this role can grant: it edits every access policy,
-# its own included, and the reviewer's approval is what guards that.
+# its own included, and what guards that is the pull request whose plan it applies.
 data "aws_iam_policy_document" "bootstrap_apply" {
   source_policy_documents = [data.aws_iam_policy_document.bootstrap_read.json]
 
@@ -121,16 +109,6 @@ data "aws_iam_policy_document" "bootstrap_apply" {
     sid       = "ManageTrust"
     actions   = ["iam:*"]
     resources = local.bootstrap_iam_arns
-  }
-
-  # Deleting a force_destroy user lists the account's virtual MFA devices first.
-  dynamic "statement" {
-    for_each = length(var.retiring_users) > 0 ? [1] : []
-    content {
-      sid       = "ListMfaForRetiringUsers"
-      actions   = ["iam:ListVirtualMFADevices"]
-      resources = ["arn:aws:iam::${local.account_id}:mfa/*"]
-    }
   }
 
   statement {

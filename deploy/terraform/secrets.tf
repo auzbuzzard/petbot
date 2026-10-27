@@ -26,7 +26,6 @@ locals {
 
   base_env = merge(
     {
-      ENV                = var.lambda_environment
       LOG_LEVEL          = var.log_level
       CHAT_LLM__KIND     = var.chat_llm_kind
       CHAT_LLM__MODEL    = var.chat_llm_model

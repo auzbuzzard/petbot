@@ -57,22 +57,24 @@ bucket, the **GitHub Actions OIDC provider**, the CI roles, the workload permiss
 boundary and the operator's access. Its state lives in the same bucket, under
 `bootstrap/terraform.tfstate`.
 
-**Who may assume what.** Every OIDC role trusts exactly one GitHub environment (the
-token's `sub` is `repo:auzbuzzard/petbot:environment:<name>` whenever a job references
-an environment). Every environment but `dev` admits only `main`:
+**Who may assume what.** Every OIDC role trusts one GitHub environment (the token's
+`sub` is `repo:auzbuzzard/petbot:environment:<name>` whenever a job references an
+environment), only jobs of `.github/workflows/deploy.yml` (`job_workflow_ref`), and only
+this repository by its ID (`repository_id`). The two that change production or bootstrap
+also require the run's `ref` to be `refs/heads/main`:
 
-| Role | Assumed by | Environment | Gate |
+| Role | Assumed by (`deploy.yml`) | Environment | Ref |
 | --- | --- | --- | --- |
-| `petbot-github-deploy-prod` | `deploy.yml` (prod stack) | `production` | `main` only + required reviewer |
-| `petbot-github-deploy-dev` | `deploy.yml` run for `dev` (dev stack) | `dev` | any branch |
-| `petbot-github-bootstrap-plan` | `bootstrap.yml`, plan job (read-only) | `bootstrap-plan` | `main` only |
-| `petbot-github-bootstrap-apply` | `bootstrap.yml`, apply job | `bootstrap` | `main` only + required reviewer |
-| `petbot-operator` | the `claude` IAM user (`sts:AssumeRole`) | — | read-only |
+| `petbot-github-deploy-prod` | `deploy` job, prod stack | `production` | `main` |
+| `petbot-github-deploy-dev` | `deploy` and `test` jobs, dev stack | `dev` | any |
+| `petbot-github-bootstrap-plan` | `bootstrap-plan` job (read-only) | `bootstrap-plan` | any |
+| `petbot-github-bootstrap-apply` | `bootstrap` job | `bootstrap` | `main` |
+| `petbot-operator` | the `claude` IAM user (`sts:AssumeRole`) | — | — |
 
-No pull request, workflow run outside an environment, or other workflow (the AI review
-bots hold `id-token: write`) can assume any of them, and no branch but `main` can assume
-any but the dev role. The deploy roles are explicitly denied the access roles
-(`petbot-github-*`, `petbot-operator`), so none can widen its own or anyone's permissions.
+No other workflow (the AI review bots hold `id-token: write`) and no job outside these
+environments can assume any of them. The deploy roles are explicitly denied the access
+roles (`petbot-github-*`, `petbot-operator`), so none can widen its own or anyone's
+permissions.
 
 **Environments.** `var.environments` in `bootstrap/` lists each stage with its
 `name_prefix`; `deploy.yml` maps the GitHub environment to the same prefix and to the
@@ -90,7 +92,11 @@ DynamoDB tables, plus Lightsail where the stack runs the edge), its own state, i
 SSM parameters (`/<name_prefix>/*`) and its own budget (`<name_prefix>-monthly`, where
 it sets one). It may create, and grant permissions to, only the IAM principals the
 stack defines, by exact name: the core's role (`<name_prefix>-core-role`) and, where the
-stack runs the edge, the edge's user (`<name_prefix>-edge`). Each must carry its
+stack runs the edge, the edge's user (`<name_prefix>-edge`). It may delete no role, nor
+change one's trust, so a role keeps the trust it was created with. Where the stack runs
+the edge, it changes only the Lightsail container service tagged `Stack = <name_prefix>`.
+Only that stage's deploy role may read or write its state (the bucket policy). Each
+principal must carry its
 **`<name_prefix>-workload-boundary`** permissions boundary, so no policy CI writes
 can grant a workload more than that ceiling (no IAM; data-plane access to the
 stack's own resources). It may attach no resource-based policy except the edge
@@ -101,32 +107,44 @@ Neither stage reaches the other: `petbot-prod-*` and `petbot-dev-*` match nothin
 each other's, nor do their states and parameters. The dev role, reachable from any
 branch, also has no Lightsail, IAM-user or Budgets rights.
 
-**Changing bootstrap** is a PR like any other. After it merges, `bootstrap.yml`
-plans with the read-only role and posts the plan, with its digest, to the run's
-summary; the run then waits on the `bootstrap` environment until a required reviewer
-approves, plans again, and applies only if that plan has the reviewed digest (otherwise
-re-run the workflow and review the new plan). No plan file or state leaves the runner;
-the plan text in the public log shows what this directory's code already shows, plus
-the account ID. A PR that needs the new permission in its own deploy (a new AWS
-service) lands its bootstrap change first.
+**Changing bootstrap** is a PR like any other. Every pull request from this repository
+plans bootstrap with the read-only role (`deploy.yml`'s `bootstrap-plan` job, a required
+check): the full plan in the job's log, its resource changes in the run's summary, and the
+digest of those changes as the head commit's `bootstrap-plan/digest` status. Reading that
+plan is reviewing the change; merging is the approval. On merge, the `bootstrap` job plans
+again under the state lock and applies only a plan with that digest, then checks its role
+still trusts it; production deploys after it, in the same run. If anything changed in
+between (the state, the account), the job stops: re-run the pull request's `bootstrap-plan`
+job, read its plan, and re-run the `bootstrap` job. No plan file or state leaves the
+runner; the plan text in the public log shows what this directory's code already shows,
+plus the account ID. Production gets a permission in the same merge that adds it; a pull
+request's dev deploy runs before its merge, so a change whose dev deploy needs a new
+permission lands that bootstrap change first.
 
-**GitHub settings.** The existing environments were configured once by a repo admin
-(Settings → Environments), with *Selected branches and tags → Branch `main`*, not
-*Protected branches only*: that option admits every branch when the repo has no classic
-branch protection rules (a ruleset may not count), and it would admit any branch
-protected later. These are part of the trust model: without the branch rule, any branch
-could reference the environment and assume its role.
+**GitHub settings.** The environments were configured by a repo admin (Settings →
+Environments), with *Selected branches and tags → Branch `main`* where the table says
+`main`, not *Protected branches only*: that option admits every branch when the repo has
+no classic branch protection rules (a ruleset may not count), and it would admit any
+branch protected later. The branch rules are part of the trust model, alongside each
+role's own `ref` condition.
 
-| Environment | Deployment branches | Required reviewers |
-| --- | --- | --- |
-| `production` | Selected: `main` | the repo owner |
-| `dev` | All branches (created by its first deploy, with no rules) | none |
-| `bootstrap-plan` | Selected: `main` | none |
-| `bootstrap` | Selected: `main` | the repo owner |
+| Environment | Deployment branches |
+| --- | --- |
+| `production` | Selected: `main` |
+| `dev` | All branches (created by its first deploy, with no rules) |
+| `bootstrap-plan` | All branches |
+| `bootstrap` | Selected: `main` |
 
-`dev` admits every branch on purpose: deploying an unmerged branch is what it is for.
-Its role's reach is what keeps that safe (above). GitHub creates an environment the first
-time a workflow references it, without rules or secrets, so `dev` needs no setting.
+`production` keeps a required reviewer (the repo owner) until production is planned on the
+pull request too; `bootstrap` has none. `dev` and `bootstrap-plan` admit every branch on
+purpose: a pull request deploys its
+branch to dev and plans bootstrap. Their roles' reach is what keeps that safe: the plan
+role only reads, and bootstrap's state holds no credentials. GitHub creates an environment
+the first time a workflow references it, without rules or secrets.
+
+`main`'s ruleset requires the checks `quality`, `actionlint`, `validate`, `bootstrap-plan`,
+`deploy` and `test`, with the branch up to date before merging, so the plan a pull request
+shows is the plan its merge applies.
 
 **Seeding (once per account, by an admin).** The pipeline can't create the roles it
 assumes, so the first apply is by hand, with admin credentials (e.g. CloudShell with
@@ -153,8 +171,8 @@ whose environment has no `DEPLOY_ROLE_ARN` (dev) takes the account ID from it.
 | --- | --- | --- | --- |
 | `TF_STATE_BUCKET` | repo | the state bucket name | the backend; the account ID where no `DEPLOY_ROLE_ARN` is set |
 | `DEPLOY_ROLE_ARN` | `production` | a deploy role's ARN in this account | the account ID only: each stage's role name is code (`.github/scripts/deploy-role.sh`) |
-| `BOOTSTRAP_PLAN_ROLE_ARN` | `bootstrap-plan` | the bootstrap plan role ARN | `bootstrap.yml` |
-| `BOOTSTRAP_APPLY_ROLE_ARN` | `bootstrap` | the bootstrap apply role ARN | `bootstrap.yml` |
+| `BOOTSTRAP_PLAN_ROLE_ARN` | `bootstrap-plan` | the bootstrap plan role ARN | `deploy.yml`'s `bootstrap-plan` job |
+| `BOOTSTRAP_APPLY_ROLE_ARN` | `bootstrap` | the bootstrap apply role ARN | `deploy.yml`'s `bootstrap` job |
 
 The credentials step also masks the account ID wherever it appears after it (ARNs,
 registry URLs, Terraform output).
@@ -220,10 +238,14 @@ Changes to access go through the bootstrap pipeline, never through this role.
 
 ## CI deploy (the steady-state path)
 
-`.github/workflows/deploy.yml` does the whole rollout via OIDC: build + push both
-images to ECR (arm64 worker, amd64 edge), then `terraform apply` (the Lightsail
-edge pulls its image from ECR). A push to `main` (or a manual *Actions → Deploy
-→ Run workflow*) ships it. **No deploy is run from a developer machine.**
+`.github/workflows/deploy.yml` does the whole rollout via OIDC: bootstrap's reviewed plan
+(above), then build + push both images to ECR (arm64 worker, amd64 edge), then
+`terraform apply` (the Lightsail edge pulls its image from ECR), then a check that the
+core runs the image just built. A merge to `main` ships it; a manual *Actions → Deploy →
+Run workflow* re-deploys a stage without touching bootstrap. A merge also cancels any
+earlier run still waiting for an environment's approval (`supersede.yml`): it would hold
+the stage's concurrency group, and it carries an older commit. **No deploy is run from a
+developer machine.**
 
 ## Dev core (an unmerged branch, before it merges)
 
@@ -304,5 +326,5 @@ empty the versioned bucket (console → *Empty*), then
 `.github/workflows/terraform.yml` runs `fmt -check` + `validate` on PRs, and
 `terraform test` on both stacks (the root stack's `tests/` plans prod and dev against mock
 providers; bootstrap's renders each stage's IAM and checks no prefix contains another's),
-with no AWS credentials. `.github/workflows/deploy.yml` runs the OIDC build/apply
-pipeline above.
+with no AWS credentials. `ci.yml`'s `actionlint` job checks the workflows.
+`.github/workflows/deploy.yml` runs the OIDC plan/build/apply pipeline above.

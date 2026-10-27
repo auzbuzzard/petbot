@@ -9,6 +9,7 @@ on:
       - "deploy/Dockerfile.edge"
       - "src/**"
       - "pyproject.toml"
+      - "uv.lock"
       - "README.md"
       - ".github/workflows/images.yml"
   pull_request:
@@ -16,6 +17,7 @@ on:
       - "deploy/Dockerfile.edge"
       - "src/**"
       - "pyproject.toml"
+      - "uv.lock"
       - "README.md"
       - ".github/workflows/images.yml"
 

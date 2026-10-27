@@ -129,6 +129,11 @@ run "a_dev_core_runs_alone_with_no_key" {
   }
 
   assert {
+    condition     = jsondecode(aws_iam_role_policy.bedrock_mantle[0].policy).Statement[0].Condition == { StringLike = { "bedrock-mantle:Model" = "*google.gemma-4-31b*" } }
+    error_message = "The core's role may call the configured model only."
+  }
+
+  assert {
     condition     = !contains(keys(aws_lambda_function.this.environment[0].variables), "SSM_SECRETS")
     error_message = "A dev core with no optional keys reads no secrets."
   }
