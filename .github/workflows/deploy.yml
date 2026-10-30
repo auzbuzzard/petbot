@@ -364,6 +364,7 @@ jobs:
           ROTATE_EDGE_KEY: ${{ inputs.rotate_edge_key }}
         run: |
           set -o pipefail
+          echo "EDGE_LOG_SINCE=$(date -u +%s)" >> "$GITHUB_ENV"
           replace=()
           if [ "$ROTATE_EDGE_KEY" = "true" ]; then
             if [ "$EDGE" != true ]; then
@@ -398,16 +399,34 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: |
           service=$(terraform output -raw edge_container_service_name)
+          # Every page of the log since the apply, searched here: GetContainerLog's docs don't
+          # say how filterPattern treats a hyphen, and botocore has no paginator for it.
+          # https://docs.aws.amazon.com/lightsail/2016-11-28/api-reference/API_GetContainerLog.html
+          edge_log() {
+            local page token
+            local args=()
+            for _ in $(seq 1 100); do
+              page=$(aws lightsail get-container-log --service-name "$service" --container-name edge \
+                --start-time "$EDGE_LOG_SINCE" "${args[@]}" --output json)
+              jq -r '.logEvents[].message' <<< "$page"
+              token=$(jq -r '.nextPageToken // empty' <<< "$page")
+              [ -n "$token" ] || return 0
+              args=(--page-token "$token")
+            done
+          }
+          seen=""
           for _ in $(seq 1 20); do
-            lines=$(aws lightsail get-container-log --service-name "$service" --container-name edge \
-              --filter-pattern keyless-probe --query 'logEvents[].message' --output text)
-            if [ -n "$lines" ] && [ "$lines" != None ]; then
-              tr '\t' '\n' <<< "$lines" | grep -o 'keyless-probe: .*'
+            log=$(edge_log)
+            lines=$(grep -o 'keyless-probe: .*' <<< "$log" || true)
+            if [ -n "$lines" ] && [ "$lines" = "$seen" ]; then
+              echo "$lines"
               exit 0
             fi
+            seen=$lines
             sleep 15
           done
-          echo "::warning::No keyless-probe lines in the edge's log yet."
+          [ -z "$seen" ] || echo "$seen"
+          echo "::warning::The keyless-probe lines didn't settle: $(grep -c . <<< "$log" || true) log lines since the apply, $(grep -c 'Starting PetBot Discord frontend' <<< "$log" || true) of them the frontend starting."
 
   # Every deploy to dev (each pull request from this repository, or a manual dev run) is
   # tested live: the regression suite (tests/regression) runs against petbot-dev-core,
